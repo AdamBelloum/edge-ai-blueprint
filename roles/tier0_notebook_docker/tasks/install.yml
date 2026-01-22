@@ -47,3 +47,8 @@
     rule: allow
     port: "{{ tier0_notebook_port }}"
     proto: tcp
+
+- name: Show Tier-0 access
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ tier0_notebook_port }}"

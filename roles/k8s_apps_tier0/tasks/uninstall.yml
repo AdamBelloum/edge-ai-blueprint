@@ -1,0 +1,13 @@
+- name: Remove Tier-0 namespace and all apps
+  ansible.builtin.shell: |
+    set -e
+    kubectl delete namespace {{ digitafrica_namespace | default('digitafrica') }} --ignore-not-found
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Remove rendered manifests (Tier-0)
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-tier0
+    state: absent
+  when: remove_data | default(false) | bool

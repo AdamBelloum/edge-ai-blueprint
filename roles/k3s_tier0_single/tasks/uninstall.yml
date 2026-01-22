@@ -1,0 +1,15 @@
+- name: Uninstall k3s server if present (Tier-0 single node)
+  ansible.builtin.shell: |
+    if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+      /usr/local/bin/k3s-uninstall.sh
+    fi
+  ignore_errors: true
+
+- name: Optionally remove k3s data directories (Tier-0)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/rancher
+    - /var/lib/rancher
+  when: remove_data | default(false) | bool

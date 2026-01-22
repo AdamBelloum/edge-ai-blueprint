@@ -9,22 +9,30 @@
     - role: k3s_server
       when: tier1_enable_k3s | bool
 
-- name: Tier-0 optional k3s agent
+- name: Tier-0 single-node k3s
+  hosts: tier0
+  roles:
+    - role: k3s_tier0_single
+      when: tier0_k3s_mode == "single"
+    - role: k8s_apps_tier0
+      when: tier0_k3s_mode == "single"
+
+- name: Tier-0 join Tier-1 as agent
   hosts: tier0
   roles:
     - role: k3s_agent
-      when: tier0_enable_k3s | bool
+      when: tier0_k3s_mode == "agent"
+
+- name: Tier-0 fallback (no k3s) notebook via Docker
+  hosts: tier0
+  roles:
+    - role: tier0_notebook_docker
+      when: tier0_k3s_mode == "none"
+    - role: monitoring
+      when: tier0_k3s_mode == "none"  
 
 - name: Deploy DIGITAfrica apps via k3s (only where enabled)
   hosts: tier1
   roles:
     - role: k8s_apps
       when: tier1_enable_k3s | bool
-
-- name: Tier-0 fallback (no k3s) notebook via Docker
-  hosts: tier0
-  roles:
-    - role: tier0_notebook_docker
-      when: not (tier0_enable_k3s | bool)
-    - role: monitoring
-      when: not (tier0_enable_k3s | bool)  
