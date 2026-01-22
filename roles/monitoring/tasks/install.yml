@@ -1,0 +1,42 @@
+- name: Create monitoring dir
+  ansible.builtin.file:
+    path: /opt/digitafrica/monitoring
+    state: directory
+    mode: "0755"
+
+- name: Run node-exporter container
+  community.docker.docker_container:
+    name: node-exporter
+    image: prom/node-exporter:latest
+    restart_policy: always
+    network_mode: host
+    pid_mode: host
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - "/:/host:ro,rslave"
+
+- name: Run cAdvisor container
+  community.docker.docker_container:
+    name: cadvisor
+    image: gcr.io/cadvisor/cadvisor:latest
+    restart_policy: always
+    ports:
+      - "{{ cadvisor_port }}:8080"
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:rw"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+
+- name: Allow node exporter port on UFW (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ node_exporter_port }}"
+    proto: tcp
+
+- name: Allow cadvisor port on UFW (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ cadvisor_port }}"
+    proto: tcp

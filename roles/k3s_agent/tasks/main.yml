@@ -1,9 +1,2 @@
-- name: Fetch token from k3s server hostvars
-  ansible.builtin.set_fact:
-    k3s_join_token: "{{ hostvars[k3s_server_host].k3s_node_token_decoded }}"
-
-- name: Install k3s agent (join Tier-1 server)
-  ansible.builtin.shell: |
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL="https://{{ hostvars[k3s_server_host].ansible_host }}:6443" K3S_TOKEN="{{ k3s_join_token }}" sh -s - agent
-  args:
-    creates: /usr/local/bin/k3s
+- name: Decide install vs uninstall
+  ansible.builtin.include_tasks: "{{ 'uninstall.yml' if (digitafrica_uninstall | default(false) | bool) else 'install.yml' }}"

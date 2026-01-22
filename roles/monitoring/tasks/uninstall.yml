@@ -1,0 +1,52 @@
+- name: Remove node-exporter container
+  community.docker.docker_container:
+    name: node-exporter
+    state: absent
+  ignore_errors: true
+
+- name: Remove cadvisor container
+  community.docker.docker_container:
+    name: cadvisor
+    state: absent
+  ignore_errors: true
+
+# Optional: remove images too (not required, saves disk)
+- name: Remove node-exporter image (optional)
+  community.docker.docker_image:
+    name: prom/node-exporter
+    tag: latest
+    state: absent
+  when: remove_images | default(false) | bool
+  ignore_errors: true
+
+- name: Remove cadvisor image (optional)
+  community.docker.docker_image:
+    name: gcr.io/cadvisor/cadvisor
+    tag: latest
+    state: absent
+  when: remove_images | default(false) | bool
+  ignore_errors: true
+
+# UFW: remove the allow rules you added
+- name: Delete UFW allow rule for node-exporter port (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ node_exporter_port }}"
+    proto: tcp
+    delete: true
+  ignore_errors: true
+
+- name: Delete UFW allow rule for cadvisor port (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ cadvisor_port }}"
+    proto: tcp
+    delete: true
+  ignore_errors: true
+
+# Optional: remove monitoring directory
+- name: Remove monitoring directory (optional)
+  ansible.builtin.file:
+    path: /opt/digitafrica/monitoring
+    state: absent
+  when: remove_data | default(false) | bool

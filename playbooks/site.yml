@@ -26,3 +26,5 @@
   roles:
     - role: tier0_notebook_docker
       when: not (tier0_enable_k3s | bool)
+    - role: monitoring
+      when: not (tier0_enable_k3s | bool)  
