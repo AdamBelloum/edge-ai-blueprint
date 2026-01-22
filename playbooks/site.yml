@@ -2,16 +2,27 @@
   hosts: all
   roles:
     - common
-    - docker
-    - monitoring
 
-- name: Tier-0 provisioning
-  hosts: tier0
-  roles:
-    - tier0_notebook
-
-- name: Tier-1 provisioning
+- name: Tier-1 k3s server
   hosts: tier1
   roles:
-    - tier1_mlflow
-    - tier1_jupyterhub
+    - role: k3s_server
+      when: tier1_enable_k3s | bool
+
+- name: Tier-0 optional k3s agent
+  hosts: tier0
+  roles:
+    - role: k3s_agent
+      when: tier0_enable_k3s | bool
+
+- name: Deploy DIGITAfrica apps via k3s (only where enabled)
+  hosts: tier1
+  roles:
+    - role: k8s_apps
+      when: tier1_enable_k3s | bool
+
+- name: Tier-0 fallback (no k3s) notebook via Docker
+  hosts: tier0
+  roles:
+    - role: tier0_notebook_docker
+      when: not (tier0_enable_k3s | bool)

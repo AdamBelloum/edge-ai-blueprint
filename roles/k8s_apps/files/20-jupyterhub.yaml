@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jupyterhub
+  namespace: digitafrica
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jupyterhub-role
+  namespace: digitafrica
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "persistentvolumeclaims", "events"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jupyterhub-rb
+  namespace: digitafrica
+subjects:
+  - kind: ServiceAccount
+    name: jupyterhub
+roleRef:
+  kind: Role
+  name: jupyterhub-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jupyterhub-config
+  namespace: digitafrica
+data:
+  jupyterhub_config.py: |
+    from kubespawner import KubeSpawner
+    c.JupyterHub.spawner_class = KubeSpawner
+
+    # Minimal auth (dev). Put behind OIDC proxy later.
+    from jupyterhub.auth import DummyAuthenticator
+    c.JupyterHub.authenticator_class = DummyAuthenticator
+    c.DummyAuthenticator.password = "CHANGE_ME"
+
+    c.JupyterHub.bind_url = "http://0.0.0.0:8000"
+    c.JupyterHub.hub_connect_ip = "jupyterhub"
+
+    # Spawn notebook pods inside same namespace
+    c.KubeSpawner.namespace = "digitafrica"
+    c.KubeSpawner.image = "jupyter/minimal-notebook:python-3.11"
+    c.KubeSpawner.default_url = "/lab"
+    c.KubeSpawner.cpu_limit = 2
+    c.KubeSpawner.mem_limit = "2G"
+
+    # Prevent notebooks from landing on Tier-0 unless explicitly allowed
+    c.KubeSpawner.node_selector = {"digitafrica.tier": "1"}
+
+    # Set MLflow endpoint for users
+    c.Spawner.environment = {
+      "MLFLOW_TRACKING_URI": "https://mlflow.YOUR_DOMAIN",
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyterhub-data-pvc
+  namespace: digitafrica
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyterhub
+  namespace: digitafrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyterhub
+  template:
+    metadata:
+      labels:
+        app: jupyterhub
+    spec:
+      serviceAccountName: jupyterhub
+      nodeSelector:
+        digitafrica.tier: "1"
+      containers:
+        - name: hub
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8000
+          command: ["/bin/sh","-lc"]
+          args:
+            - |
+              pip install --no-cache-dir jupyterhub==4.* kubespawner==6.* && \
+              jupyterhub -f /etc/jupyterhub/jupyterhub_config.py
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/jupyterhub
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: cfg
+          configMap:
+            name: jupyterhub-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: jupyterhub-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyterhub
+  namespace: digitafrica
+spec:
+  selector:
+    app: jupyterhub
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jupyterhub
+  namespace: digitafrica
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  tls:
+    - hosts:
+        - jupyter.YOUR_DOMAIN
+      secretName: digitafrica-tls
+  rules:
+    - host: jupyter.YOUR_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jupyterhub
+                port:
+                  number: 8000

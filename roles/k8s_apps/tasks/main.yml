@@ -1,0 +1,33 @@
+- name: Ensure manifest dir exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s
+    state: directory
+    mode: "0755"
+
+- name: Copy manifests
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/opt/digitafrica/k8s/{{ item | basename }}"
+    mode: "0644"
+  loop:
+    - files/00-namespaces.yaml
+    - files/10-mlflow.yaml
+    - files/20-jupyterhub.yaml
+    - files/30-node-exporter.yaml
+    - files/31-cadvisor.yaml
+    - files/32-prometheus.yaml
+    - files/33-grafana.yaml
+
+- name: Apply manifests
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl apply -f /opt/digitafrica/k8s/00-namespaces.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/10-mlflow.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/20-jupyterhub.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/30-node-exporter.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/31-cadvisor.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/32-prometheus.yaml
+    k3s kubectl apply -f /opt/digitafrica/k8s/33-grafana.yaml
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
