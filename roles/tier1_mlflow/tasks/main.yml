@@ -1,0 +1,33 @@
+- name: Create MLflow directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/digitafrica/mlflow
+    - "{{ mlflow_backend_store }}"
+    - "{{ mlflow_artifact_root }}"
+
+- name: Copy MLflow docker compose
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: /opt/digitafrica/mlflow/docker-compose.yml
+    mode: "0644"
+
+- name: Write env file
+  ansible.builtin.copy:
+    dest: /opt/digitafrica/mlflow/.env
+    mode: "0644"
+    content: |
+      MLFLOW_PORT={{ mlflow_port }}
+
+- name: Start MLflow
+  community.docker.docker_compose_v2:
+    project_src: /opt/digitafrica/mlflow
+    state: present
+
+- name: Allow MLflow port
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ mlflow_port }}"
+    proto: tcp

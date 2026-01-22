@@ -1,0 +1,26 @@
+c = get_config()
+
+# Simple authenticator: local users (good for labs; replace with OIDC later)
+c.JupyterHub.authenticator_class = "nativeauthenticator.NativeAuthenticator"
+
+# Admins
+c.Authenticator.admin_users = set({{ tier1_jupyterhub_admin_users | to_json }})
+
+# Persist hub DB
+c.JupyterHub.db_url = "sqlite:////data/jupyterhub.sqlite"
+
+# Spawner: run single-user servers as containers
+c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
+c.DockerSpawner.image = "jupyter/minimal-notebook:python-3.11"
+c.DockerSpawner.network_name = "bridge"
+c.DockerSpawner.remove = True
+c.DockerSpawner.notebook_dir = "/home/jovyan/work"
+c.DockerSpawner.volumes = {"jupyterhub-user-{username}": "/home/jovyan/work"}
+
+# Useful env: point users at Tier-1 MLflow by default
+c.Spawner.environment = {
+    "MLFLOW_TRACKING_URI": "http://{{ inventory_hostname }}:{{ mlflow_port }}",
+}
+
+# Hub service listen
+c.JupyterHub.bind_url = "http://0.0.0.0:8000"

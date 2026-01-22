@@ -1,0 +1,44 @@
+- name: Create JupyterHub directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/digitafrica/jupyterhub
+    - /opt/digitafrica/jupyterhub/data
+
+- name: Copy JupyterHub docker compose
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: /opt/digitafrica/jupyterhub/docker-compose.yml
+    mode: "0644"
+
+- name: Render JupyterHub config
+  ansible.builtin.template:
+    src: jupyterhub_config.py.j2
+    dest: /opt/digitafrica/jupyterhub/jupyterhub_config.py
+    mode: "0644"
+
+- name: Write env file
+  ansible.builtin.copy:
+    dest: /opt/digitafrica/jupyterhub/.env
+    mode: "0644"
+    content: |
+      JH_PORT={{ tier1_jupyterhub_http_port }}
+
+- name: Install NativeAuthenticator inside hub container at startup (simple approach)
+  ansible.builtin.lineinfile:
+    path: /opt/digitafrica/jupyterhub/docker-compose.yml
+    insertafter: 'image: jupyterhub/jupyterhub:4.1'
+    line: '    command: bash -lc "pip install nativeauthenticator dockerspawner && jupyterhub -f /srv/jupyterhub/jupyterhub_config.py"'
+
+- name: Start JupyterHub
+  community.docker.docker_compose_v2:
+    project_src: /opt/digitafrica/jupyterhub
+    state: present
+
+- name: Allow JupyterHub port
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ tier1_jupyterhub_http_port }}"
+    proto: tcp

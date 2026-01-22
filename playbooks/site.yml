@@ -1,0 +1,17 @@
+- name: Base setup on all nodes
+  hosts: all
+  roles:
+    - common
+    - docker
+    - monitoring
+
+- name: Tier-0 provisioning
+  hosts: tier0
+  roles:
+    - tier0_notebook
+
+- name: Tier-1 provisioning
+  hosts: tier1
+  roles:
+    - tier1_mlflow
+    - tier1_jupyterhub

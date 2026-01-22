@@ -1,0 +1,23 @@
+# Common
+timezone: "Europe/Athens"
+
+# Notebook
+tier0_notebook_port: 8888
+tier0_notebook_user: "digitafrica"
+tier0_notebook_dir: "/opt/digitafrica/notebooks"
+tier0_notebook_password: "digitafrica"   # you can swap to token-only
+tier0_notebook_password_hash: "argon2:$argon2id$v=19$m=10240,t=10,p=8$9f4c5S6aMZ5sKSI2sBpHWg$tBmHxYwRPIxqjssK5LrgO/TiGTHLATRxossGnK5hEks"
+
+tier1_jupyterhub_http_port: 8000
+tier1_jupyterhub_admin_users: ["admin"]
+
+# MLflow (Tier 1)
+mlflow_port: 5000
+mlflow_backend_store: "/opt/digitafrica/mlflow/backend"   # sqlite by default
+mlflow_artifact_root: "/opt/digitafrica/mlflow/artifacts" # local FS
+mlflow_auth: false  # keep false unless you put it behind nginx/oidc proxy
+
+# Monitoring
+node_exporter_port: 9100
+cadvisor_port: 8080
+

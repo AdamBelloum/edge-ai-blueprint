@@ -1,0 +1,49 @@
+- name: Create tier0 user
+  ansible.builtin.user:
+    name: "{{ tier0_notebook_user }}"
+    create_home: true
+    shell: /bin/bash
+
+- name: Create notebook directory
+  ansible.builtin.file:
+    path: "{{ tier0_notebook_dir }}"
+    state: directory
+    owner: "{{ tier0_notebook_user }}"
+    group: "{{ tier0_notebook_user }}"
+    mode: "0755"
+
+- name: Create venv for notebook
+  ansible.builtin.command: python3 -m venv /opt/digitafrica/tier0-venv
+  args:
+    creates: /opt/digitafrica/tier0-venv/bin/python
+
+- name: Install Jupyter + MLflow client in venv
+  ansible.builtin.pip:
+    name:
+      - "jupyterlab==4.*"
+      - "mlflow==2.*"
+      - "onnxruntime==1.*"
+      - "psutil"
+    virtualenv: /opt/digitafrica/tier0-venv
+
+- name: Render systemd unit for JupyterLab
+  ansible.builtin.template:
+    src: jupyter.service.j2
+    dest: /etc/systemd/system/digitafrica-jupyter.service
+    mode: "0644"
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable and start JupyterLab service
+  ansible.builtin.systemd:
+    name: digitafrica-jupyter
+    enabled: true
+    state: started
+
+- name: Allow Tier0 notebook port
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ tier0_notebook_port }}"
+    proto: tcp
