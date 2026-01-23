@@ -115,18 +115,14 @@
     POD=$(k3s kubectl -n {{ digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
 
     # Copy seed notebooks directory into the pod
-    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks "$POD":/home/jovyan/seed-notebooks
+    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks "$POD":/home/jovyan/
 
     # Move notebooks into final location, install deps, then clean up
     k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- bash -lc '
       set -e
       mkdir -p /home/jovyan/digitafrica
 
-      mv /home/jovyan/seed-notebooks/notebooks/* /home/jovyan/digitafrica/
-
-      if [ -f /home/jovyan/seed-notebooks/requirements.txt ]; then
-        cp /home/jovyan/seed-notebooks/requirements.txt /home/jovyan/digitafrica/requirements.txt
-      fi
+      mv /home/jovyan/seed-notebooks/* /home/jovyan/digitafrica/
 
       pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt
 

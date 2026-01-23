@@ -3,19 +3,18 @@ timezone: "Europe/Athens"
 
 tier0_k3s_mode: "none"   # none|agent|single
 
-# Default: Tier-0 off, Tier-1 on (can override per host)
-tier1_enable_k3s: true
-
 # Notebook
 tier0_notebook_port: 8888
 tier0_notebook_user: "digitafrica"
 tier0_notebook_dir: "/opt/digitafrica/notebooks"
 tier0_notebook_password: "digitafrica"   # you can swap to token-only
 tier0_notebook_password_hash: "argon2:$argon2id$v=19$m=10240,t=10,p=8$9f4c5S6aMZ5sKSI2sBpHWg$tBmHxYwRPIxqjssK5LrgO/TiGTHLATRxossGnK5hEks"
-
-
 tier0_jupyter_host: "tier0.digitafrica-edge-node1.eu"     #
 tier0_modelcache_host: "models.tier0.digitafrica-edge-node1.eu"  
+
+# Default: Tier-0 off, Tier-1 on (can override per host)
+tier1_enable_k3s: true
+
 tls_secret_name: "digitafrica-tls"
 
 # Tier-0 exposure mode
