@@ -28,8 +28,8 @@ singleuser:
   # Important for first spawn on k3s local-path (image pulls + PVC provisioning)
   startTimeout: 900
 
- # nodeSelector:
- #   kubernetes.io/hostname: "digitafrica-edge-node1"
+  nodeSelector:
+     kubernetes.io/hostname: "digitafrica-edge-node1"
 
   storage:
     type: dynamic
