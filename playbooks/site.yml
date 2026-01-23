@@ -3,12 +3,6 @@
   roles:
     - common
 
-- name: Tier-1 k3s server
-  hosts: tier1
-  roles:
-    - role: k3s_server
-      when: tier1_enable_k3s | bool
-
 - name: Tier-0 single-node k3s
   hosts: tier0
   roles:
@@ -31,8 +25,77 @@
     - role: monitoring
       when: tier0_k3s_mode == "none"  
 
-- name: Deploy DIGITAfrica apps via k3s (only where enabled)
-  hosts: tier1
+# - name: Deploy DIGITAfrica apps via k3s (only where enabled)
+#   hosts: tier1
+#   roles:
+#     - role: k8s_apps
+#       when: tier1_enable_k3s | bool
+
+# - name: Deploy DIGITAfrica apps via k3s (uninstall)
+#   hosts: tier1
+#   roles:
+#     - role: k8s_apps
+#       when: 
+#       - tier1_enable_k3s | bool
+#       - (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-0 single-node k3s (uninstall)
+  hosts: tier0
+  roles:
+    - role: k8s_apps_tier0
+      when: 
+      - tier0_k3s_mode == "single"
+      - (digitafrica_uninstall | default(false) | bool)
+    - role: k3s_tier0_single
+      when: 
+      - tier0_k3s_mode == "single"
+      - (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-1 k3s server (install)
+  hosts: tier1_server
+  roles:
+    - role: k3s_server
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-1 k3s agents (install)
+  hosts: tier1_agents
+  roles:
+    - role: k3s_agent
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Deploy DIGITAfrica apps on Tier-1 (install)
+  hosts: tier1_server
   roles:
     - role: k8s_apps
-      when: tier1_enable_k3s | bool
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Deploy DIGITAfrica apps on Tier-1 (uninstall)
+  hosts: tier1_server
+  roles:
+    - role: k8s_apps
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-1 k3s agents (uninstall)
+  hosts: tier1_agents
+  roles:
+    - role: k3s_agent
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-1 k3s server (uninstall)
+  hosts: tier1_server
+  roles:
+    - role: k3s_server
+      when:
+        - tier1_enable_k3s | default(false) | bool
+        - (digitafrica_uninstall | default(false) | bool)
+  

@@ -11,11 +11,8 @@ metadata:
   namespace: digitafrica
 rules:
   - apiGroups: [""]
-    resources: ["pods", "services", "persistentvolumeclaims", "events"]
-    verbs: ["get", "list", "watch", "create", "delete"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
+    resources: ["pods", "pods/log", "services", "persistentvolumeclaims", "events", "secrets"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -25,10 +22,33 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: jupyterhub
+    namespace: digitafrica
 roleRef:
   kind: Role
   name: jupyterhub-role
   apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jupyterhub-proxy-secret
+  namespace: digitafrica
+type: Opaque
+stringData:
+  CONFIGPROXY_AUTH_TOKEN: "CHANGE_ME_TO_LONG_RANDOM"
+---
+# Seed notebooks PVC (local-path is RWO)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: digitafrica-notebooks-pvc
+  namespace: digitafrica
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -38,82 +58,181 @@ metadata:
 data:
   jupyterhub_config.py: |
     from kubespawner import KubeSpawner
+    from jupyterhub.auth import DummyAuthenticator
+
     c.JupyterHub.spawner_class = KubeSpawner
 
-    # Minimal auth (dev). Put behind OIDC proxy later.
-    from jupyterhub.auth import DummyAuthenticator
+    # DEV auth (replace later)
     c.JupyterHub.authenticator_class = DummyAuthenticator
-    c.DummyAuthenticator.password = "CHANGE_ME"
+    c.DummyAuthenticator.password = "digitafrica"
 
-    c.JupyterHub.bind_url = "http://0.0.0.0:8000"
-    c.JupyterHub.hub_connect_ip = "jupyterhub"
+    # Hub API bind (internal)
+    c.JupyterHub.hub_bind_url = "http://0.0.0.0:8081"
+    c.JupyterHub.hub_connect_url = "http://jupyterhub-hub.digitafrica.svc.cluster.local:8081"
 
-    # Spawn notebook pods inside same namespace
+    # Proxy runs separately
+    c.ConfigurableHTTPProxy.should_start = False
+    c.ConfigurableHTTPProxy.api_url = "http://jupyterhub-proxy-api.digitafrica.svc.cluster.local:8001"
+
+    # Spawning settings
     c.KubeSpawner.namespace = "digitafrica"
     c.KubeSpawner.image = "jupyter/minimal-notebook:python-3.11"
     c.KubeSpawner.default_url = "/lab"
     c.KubeSpawner.cpu_limit = 2
     c.KubeSpawner.mem_limit = "2G"
 
-    # Prevent notebooks from landing on Tier-0 unless explicitly allowed
-    c.KubeSpawner.node_selector = {"digitafrica.tier": "1"}
+    # Per-user PVC storage
+    c.KubeSpawner.storage_pvc_ensure = True
+    c.KubeSpawner.pvc_name_template = "claim-{username}"
+    c.KubeSpawner.storage_capacity = "10Gi"
+    c.KubeSpawner.storage_access_modes = ["ReadWriteOnce"]
+    c.KubeSpawner.volume_mounts = [{"name": "volume-{username}", "mountPath": "/home/jovyan"}]
+    c.KubeSpawner.volumes = [{"name": "volume-{username}", "persistentVolumeClaim": {"claimName": "claim-{username}"}}]
 
-    # Set MLflow endpoint for users
-    c.Spawner.environment = {
-      "MLFLOW_TRACKING_URI": "https://mlflow.YOUR_DOMAIN",
+    # Mount seed notebooks PVC into each user pod as /seed (read-only)
+    c.KubeSpawner.extra_volumes = [
+      {"name": "seed-notebooks", "persistentVolumeClaim": {"claimName": "digitafrica-notebooks-pvc"}},
+    ]
+    c.KubeSpawner.extra_volume_mounts = [
+      {"name": "seed-notebooks", "mountPath": "/seed", "readOnly": True},
+    ]
+
+    # Env vars for users
+    c.Spawner.environment = {"MLFLOW_TRACKING_URI": "https://mlflow.digitafrica.eu"}
+
+    # Copy notebooks on EVERY spawn (overwrites same names)
+    c.KubeSpawner.lifecycle_hooks = {
+      "postStart": {
+        "exec": {
+          "command": [
+            "bash", "-lc",
+            r"""
+            set -euo pipefail
+            SRC=/seed
+            DST=/home/jovyan/digitafrica
+
+            if [ ! -d "$SRC" ] || [ -z "$(ls -A "$SRC" 2>/dev/null || true)" ]; then
+              echo "[digitafrica] Seed notebooks missing/empty at $SRC"
+              exit 0
+            fi
+
+            mkdir -p "$DST"
+            cp -a "$SRC/." "$DST/" || true
+            chown -R jovyan:users "$DST" || true
+            """
+          ]
+        }
+      }
     }
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: jupyterhub-data-pvc
-  namespace: digitafrica
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 10Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: jupyterhub
+  name: jupyterhub-hub
   namespace: digitafrica
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: jupyterhub
+      component: hub
   template:
     metadata:
       labels:
         app: jupyterhub
+        component: hub
     spec:
       serviceAccountName: jupyterhub
-      nodeSelector:
-        digitafrica.tier: "1"
       containers:
         - name: hub
-          image: python:3.11-slim
+          image: jupyterhub/k8s-hub:4.1.0
           ports:
-            - containerPort: 8000
-          command: ["/bin/sh","-lc"]
-          args:
-            - |
-              pip install --no-cache-dir jupyterhub==4.* kubespawner==6.* && \
-              jupyterhub -f /etc/jupyterhub/jupyterhub_config.py
+            - name: hub
+              containerPort: 8081
+          command: ["jupyterhub"]
+          args: ["-f", "/etc/jupyterhub/jupyterhub_config.py"]
+          env:
+            - name: CONFIGPROXY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: jupyterhub-proxy-secret
+                  key: CONFIGPROXY_AUTH_TOKEN
           volumeMounts:
             - name: cfg
               mountPath: /etc/jupyterhub
-            - name: data
-              mountPath: /data
       volumes:
         - name: cfg
           configMap:
             name: jupyterhub-config
-        - name: data
-          persistentVolumeClaim:
-            claimName: jupyterhub-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyterhub-hub
+  namespace: digitafrica
+spec:
+  selector:
+    app: jupyterhub
+    component: hub
+  ports:
+    - name: hub
+      port: 8081
+      targetPort: 8081
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyterhub-proxy
+  namespace: digitafrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyterhub
+      component: proxy
+  template:
+    metadata:
+      labels:
+        app: jupyterhub
+        component: proxy
+    spec:
+      containers:
+        - name: chp
+          image: jupyterhub/configurable-http-proxy:4.6.1
+          ports:
+            - name: public
+              containerPort: 8000
+            - name: api
+              containerPort: 8001
+          env:
+            - name: CONFIGPROXY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: jupyterhub-proxy-secret
+                  key: CONFIGPROXY_AUTH_TOKEN
+          args:
+            - "--ip=0.0.0.0"
+            - "--port=8000"
+            - "--api-ip=0.0.0.0"
+            - "--api-port=8001"
+            - "--default-target=http://jupyterhub-hub.digitafrica.svc.cluster.local:8081"
+            - "--error-target=http://jupyterhub-hub.digitafrica.svc.cluster.local:8081/hub/error"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyterhub-proxy-api
+  namespace: digitafrica
+spec:
+  selector:
+    app: jupyterhub
+    component: proxy
+  ports:
+    - name: api
+      port: 8001
+      targetPort: 8001
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
@@ -123,31 +242,29 @@ metadata:
 spec:
   selector:
     app: jupyterhub
+    component: proxy
+  type: NodePort
   ports:
     - name: http
-      port: 8000
+      port: 80
       targetPort: 8000
+      nodePort: 30888
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: v1
+kind: Pod
 metadata:
-  name: jupyterhub
+  name: notebook-seeder
   namespace: digitafrica
-  annotations:
-    kubernetes.io/ingress.class: traefik
 spec:
-  tls:
-    - hosts:
-        - jupyter.YOUR_DOMAIN
-      secretName: digitafrica-tls
-  rules:
-    - host: jupyter.YOUR_DOMAIN
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: jupyterhub
-                port:
-                  number: 8000
+  restartPolicy: Never
+  containers:
+    - name: seeder
+      image: alpine:3.20
+      command: ["sh", "-lc", "sleep 36000"]
+      volumeMounts:
+        - name: seed
+          mountPath: /seed
+  volumes:
+    - name: seed
+      persistentVolumeClaim:
+        claimName: digitafrica-notebooks-pvc

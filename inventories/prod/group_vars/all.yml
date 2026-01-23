@@ -26,6 +26,7 @@ tier0_enable_modelcache: true
 tier0_jupyter_nodeport: 30888
 tier0_modelcache_nodeport: 30080
 
+tier1_jupyter_nodeport: 30888
 k3s_version: "v1.30.4+k3s1"
 
 # Cluster settings (Tier-1 as server)
@@ -41,9 +42,9 @@ digitafrica_namespace: "digitafrica"
 tls_mode: "selfsigned"   # or "letsencrypt" or "provided"
 
 tls_domains:
-  - "mlflow.digitafrica"
-  - "jupyter.digitafrica"
-  - "grafana.digitafrica"
+  - "mlflow.digitafrica.eu"
+  - "jupyter.digitafrica.eu"
+  - "grafana.digitafrica.eu"
   - "tier0.digitafrica-edge-node1.eu"
   - "models.tier0.digitafrica-edge-node1.eu"
 

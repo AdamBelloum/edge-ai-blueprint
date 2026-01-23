@@ -70,10 +70,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - mlflow.YOUR_DOMAIN
+        - mlflow.digitafrica.eu
       secretName: digitafrica-tls
   rules:
-    - host: mlflow.YOUR_DOMAIN
+    - host: mlflow.digitafrica.eu
       http:
         paths:
           - path: /
