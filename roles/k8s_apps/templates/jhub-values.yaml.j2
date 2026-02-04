@@ -1,0 +1,75 @@
+proxy:
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30888
+
+hub:
+  config:
+    JupyterHub:
+      authenticator_class: dummy
+    DummyAuthenticator:
+      password: "digitafrica"
+
+singleuser:
+  image:
+    name: jupyter/minimal-notebook
+    tag: "python-3.11"
+  defaultUrl: "/lab"
+
+  cpu:
+    limit: 2
+  memory:
+    limit: 2G
+
+  extraEnv:
+    MLFLOW_TRACKING_URI: "https://mlflow.digitafrica.eu"
+
+  # Important for first spawn on k3s local-path (image pulls + PVC provisioning)
+  startTimeout: 900
+
+  nodeSelector:
+     kubernetes.io/hostname: "digitafrica-edge-node1"
+
+  storage:
+    type: dynamic
+    capacity: 10Gi
+    dynamic:
+      storageClass: local-path
+      # Make the volume name predictable so initContainer can mount it
+      volumeNameTemplate: home
+
+    # ✅ Correct place to inject extra volumes/mounts into the user pod
+    extraVolumes:
+      - name: digitafrica-seed
+        hostPath:
+          path: /opt/digitafrica/k8s-notebooks
+          type: Directory
+
+    extraVolumeMounts:
+      - name: digitafrica-seed
+        mountPath: /seed
+        readOnly: true
+
+  # ✅ Reliable: initContainers are supported by the chart
+  initContainers:
+    - name: seed-notebooks
+      image: alpine:3.20
+      command: ["sh", "-lc"]
+      args:
+        - |
+          set -e
+          echo "[seed] /seed content:"
+          ls -la /seed || true
+          mkdir -p /home/jovyan/digitafrica
+          # copy every time (overwrites same names)
+          cp -a /seed/. /home/jovyan/digitafrica/ 2>/dev/null || true
+          echo "[seed] /home/jovyan/digitafrica after copy:"
+          ls -la /home/jovyan/digitafrica | head -n 50 || true
+      volumeMounts:
+        - name: digitafrica-seed
+          mountPath: /seed
+          readOnly: true
+        # This is the user PVC mount, made predictable via volumeNameTemplate: home
+        - name: home
+          mountPath: /home/jovyan

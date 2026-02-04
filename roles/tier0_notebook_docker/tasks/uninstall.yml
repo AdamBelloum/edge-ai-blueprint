@@ -1,0 +1,11 @@
+- name: Remove Tier-0 Jupyter container
+  community.docker.docker_container:
+    name: digitafrica-tier0-jupyter
+    state: absent
+  ignore_errors: true
+
+- name: Optionally remove Tier-0 notebook data
+  ansible.builtin.file:
+    path: "{{ tier0_notebook_dir }}"
+    state: absent
+  when: remove_data | default(false) | bool

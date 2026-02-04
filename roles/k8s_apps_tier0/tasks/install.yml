@@ -1,0 +1,140 @@
+- name: Ensure Tier-0 manifest directory exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-tier0
+    state: directory
+    mode: "0755"
+
+- name: Render Tier-0 namespace manifest
+  ansible.builtin.template:
+    src: 00-namespace.yaml.j2
+    dest: /opt/digitafrica/k8s-tier0/00-namespace.yaml
+    mode: "0644"
+
+- name: Render Tier-0 Jupyter manifest
+  ansible.builtin.template:
+    src: 10-jupyter-single.yaml.j2
+    dest: /opt/digitafrica/k8s-tier0/10-jupyter-single.yaml
+    mode: "0644"
+
+- name: Render Tier-0 model-cache manifest
+  ansible.builtin.template:
+    src: 20-model-cache.yaml.j2
+    dest: /opt/digitafrica/k8s-tier0/20-model-cache.yaml
+    mode: "0644"
+
+- name: Apply Tier-0 namespace
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl apply -f /opt/digitafrica/k8s-tier0/00-namespace.yaml
+  args:
+    executable: /bin/bash
+
+- name: Apply Tier-0 Jupyter
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl apply -f /opt/digitafrica/k8s-tier0/10-jupyter-single.yaml
+  args:
+    executable: /bin/bash
+
+- name: Apply Tier-0 model-cache (optional)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl apply -f /opt/digitafrica/k8s-tier0/20-model-cache.yaml
+  args:
+    executable: /bin/bash
+  when: tier0_enable_modelcache | default(true) | bool
+
+- name: Validate Tier-0 manifests (server-side)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/00-namespace.yaml
+    k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/10-jupyter-single.yaml
+    if {{ (tier0_enable_modelcache | default(true)) | bool | ternary('true','false') }}; then
+      k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/20-model-cache.yaml
+    fi
+  args:
+    executable: /bin/bash
+
+
+- name: Wait for Tier-0 Jupyter deployment rollout
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/tier0-jupyter --timeout=300s
+  args:
+    executable: /bin/bash
+
+- name: Wait for Tier-0 model-cache deployment rollout (optional)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/model-cache --timeout=300s
+  args:
+    executable: /bin/bash
+  when: tier0_enable_modelcache | default(true) | bool
+
+- name: Get Jupyter NodePort
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} get svc tier0-jupyter \
+      -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
+  args:
+    executable: /bin/bash
+  register: jupyter_nodeport
+  changed_when: false
+
+- name: Get model-cache NodePort (optional)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} get svc model-cache \
+      -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
+  args:
+    executable: /bin/bash
+  register: modelcache_nodeport
+  changed_when: false
+  when: tier0_enable_modelcache | default(true) | bool
+
+
+- name: Stage seed notebooks on Tier-0 node
+  ansible.builtin.copy:
+    src: files/notebooks/
+    dest: /opt/digitafrica/seed-notebooks/
+    mode: "0644"
+ 
+#- name: Copy notebooks from host into Tier-0 Jupyter PVC
+#  ansible.builtin.shell: |
+#    set -e
+#    POD=$(k3s kubectl -n {{ digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
+#    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks/ "$POD":/home/jovyan/
+#    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- mv /home/jovyan/seed-notebooks/notebooks /home/jovyan/digitafrica
+#    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt 
+#  args:
+#    executable: /bin/bash
+
+- name: Copy notebooks from host into Tier-0 Jupyter PVC
+  ansible.builtin.shell: |
+    set -euo pipefail
+    POD=$(k3s kubectl -n {{ digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
+
+    # Copy seed notebooks directory into the pod
+    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks "$POD":/home/jovyan/
+
+    # Move notebooks into final location, install deps, then clean up
+    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- bash -lc '
+      set -e
+      mkdir -p /home/jovyan/digitafrica
+
+      mv /home/jovyan/seed-notebooks/* /home/jovyan/digitafrica/
+
+      pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt
+
+      # cleanup temporary folder
+      rm -rf /home/jovyan/seed-notebooks
+    '
+  args:
+    executable: /bin/bash
+
+
+- name: Show Tier-0 access URLs (NodePort)
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ jupyter_nodeport.stdout }}"
+      - "Model-cache URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ modelcache_nodeport.stdout | default('') }}"

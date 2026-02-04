@@ -1,0 +1,8 @@
+- name: Install k3s server (Tier-0 single node)
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" sh -s - server \
+      --write-kubeconfig-mode 644 \
+      {% if k3s_disable_servicelb | bool %} --disable servicelb {% endif %} \
+      {% if k3s_disable_traefik | bool %} --disable traefik {% endif %}
+  args:
+    creates: /usr/local/bin/k3s

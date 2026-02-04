@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: {{ digitafrica_namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ tier0_modelcache_storage | default("8Gi") }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-cache
+  namespace: {{ digitafrica_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-cache
+  template:
+    metadata:
+      labels:
+        app: model-cache
+    spec:
+      containers:
+        - name: nginx
+          image: {{ tier0_modelcache_image | default("nginx:stable") }}
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: models
+              mountPath: /usr/share/nginx/html/models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-cache
+  namespace: {{ digitafrica_namespace }}
+spec:
+  selector:
+    app: model-cache
+  type: NodePort
+  externalTrafficPolicy: Local
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: {{ tier0_modelcache_nodeport | default(30080) }}

@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-pvc
+  namespace: digitafrica
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: digitafrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      # Keep MLflow off Tier-0
+      nodeSelector:
+        digitafrica.tier: "1"
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v2.14.3
+          ports:
+            - containerPort: 5000
+          args:
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=sqlite:////mlflow/backend/mlflow.db
+            - --default-artifact-root=/mlflow/artifacts
+            - --serve-artifacts
+          volumeMounts:
+            - name: mlflow-vol
+              mountPath: /mlflow
+      volumes:
+        - name: mlflow-vol
+          persistentVolumeClaim:
+            claimName: mlflow-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: digitafrica
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mlflow
+  namespace: digitafrica
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  tls:
+    - hosts:
+        - mlflow.digitafrica.eu
+      secretName: digitafrica-tls
+  rules:
+    - host: mlflow.digitafrica.eu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mlflow
+                port:
+                  number: 5000

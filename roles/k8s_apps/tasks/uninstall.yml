@@ -1,0 +1,6 @@
+- name: Remove digitafrica and monitoring namespaces
+  ansible.builtin.shell: |
+    k3s kubectl delete namespace digitafrica monitoring --ignore-not-found
+  args:
+    executable: /bin/bash
+  ignore_errors: true

@@ -1,0 +1,15 @@
+- name: Uninstall k3s agent if present
+  ansible.builtin.shell: |
+    if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then
+      /usr/local/bin/k3s-agent-uninstall.sh
+    fi
+  ignore_errors: true
+
+- name: Optionally remove k3s agent data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/rancher
+    - /var/lib/rancher
+  when: remove_data | default(false) | bool

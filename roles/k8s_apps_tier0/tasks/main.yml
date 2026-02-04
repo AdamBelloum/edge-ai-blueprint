@@ -1,0 +1,2 @@
+- name: Decide install vs uninstall (k8s_apps_tier0)
+  ansible.builtin.include_tasks: "{{ 'uninstall.yml' if (digitafrica_uninstall | default(false) | bool) else 'install.yml' }}"

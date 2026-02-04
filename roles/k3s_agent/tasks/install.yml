@@ -1,0 +1,31 @@
+- name: Read k3s node token from server
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  delegate_to: "{{ k3s_server_host }}"
+  register: k3s_token
+
+- name: Set join token
+  ansible.builtin.set_fact:
+    k3s_join_token: "{{ k3s_token.content | b64decode | trim }}"
+
+#- name: Fetch token from k3s server hostvars
+#  ansible.builtin.set_fact:
+#    k3s_join_token: "{{ hostvars[k3s_server_host].k3s_node_token_decoded }}"
+
+- name: Install k3s agent (join Tier-1 server)
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL="https://{{ hostvars[k3s_server_host].ansible_host }}:6443" K3S_TOKEN="{{ k3s_join_token }}" sh -s - agent
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for node to appear in the cluster
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl get node {{ inventory_hostname }} >/dev/null
+  delegate_to: "{{ k3s_server_host }}"
+  args:
+    executable: /bin/bash
+  retries: 30
+  delay: 2
+  register: node_seen
+  until: node_seen.rc == 0

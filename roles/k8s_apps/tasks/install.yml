@@ -1,0 +1,240 @@
+# - name: Ensure manifest dir exists
+#   ansible.builtin.file:
+#     path: /opt/digitafrica/k8s
+#     state: directory
+#     mode: "0755"
+
+# - name: Copy manifests
+#   ansible.builtin.copy:
+#     src: "{{ item }}"
+#     dest: "/opt/digitafrica/k8s/{{ item | basename }}"
+#     mode: "0644"
+#   loop:
+#     - files/00-namespaces.yaml
+#     # - files/10-mlflow.yaml
+#     - files/20-jupyterhub.yaml
+#     # - files/30-node-exporter.yaml
+#     # - files/31-cadvisor.yaml
+#     # - files/32-prometheus.yaml
+#     # - files/33-grafana.yaml
+
+# - name: Stage seed notebooks on Tier-1 node
+#   ansible.builtin.copy:
+#     src: files/notebooks/
+#     dest: /opt/digitafrica/k8s-notebooks/
+#     mode: "0644"
+
+# # - name: Apply manifests
+# #   ansible.builtin.shell: |
+# #     set -e
+# #     k3s kubectl apply -f /opt/digitafrica/k8s/00-namespaces.yaml
+# #     # k3s kubectl apply -f /opt/digitafrica/k8s/10-mlflow.yaml
+# #     k3s kubectl apply -f /opt/digitafrica/k8s/20-jupyterhub.yaml
+# #     # k3s kubectl apply -f /opt/digitafrica/k8s/30-node-exporter.yaml
+# #     # k3s kubectl apply -f /opt/digitafrica/k8s/31-cadvisor.yaml
+# #     # k3s kubectl apply -f /opt/digitafrica/k8s/32-prometheus.yaml
+# #     # k3s kubectl apply -f /opt/digitafrica/k8s/33-grafana.yaml
+# #   args:
+# #     executable: /bin/bash
+# #   when: tier1_enable_k3s | bool
+
+
+  
+# # - name: Wait for Tier-1 Jupyterhub deployment rollout
+# #   ansible.builtin.shell: |
+# #     set -e
+# #     k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/jupyterhub-hub --timeout=300s
+# #   args:
+# #     executable: /bin/bash
+
+# # - name: Get Jupyterhub NodePort
+# #   ansible.builtin.shell: |
+# #     set -e
+# #     k3s kubectl -n {{ digitafrica_namespace }} get svc jupyterhub \
+# #       -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
+# #   args:
+# #     executable: /bin/bash
+# #   register: jupyterhub_nodeport
+# #   changed_when: false
+
+# # - name: Show Tier-1 access URLs (NodePort)
+# #   ansible.builtin.debug:
+# #     msg:
+# #       - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ jupyterhub_nodeport.stdout }}"
+
+# - name: Apply JupyterHub stack (hub + proxy + pvc + services)
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl apply -f /opt/digitafrica/k8s/00-namespaces.yaml
+#     k3s kubectl apply -f /opt/digitafrica/k8s/20-jupyterhub.yaml
+#   args:
+#     executable: /bin/bash
+
+# - name: Wait for hub rollout
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/jupyterhub-hub --timeout=300s
+#   args:
+#     executable: /bin/bash
+
+# - name: Wait for proxy rollout
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/jupyterhub-proxy --timeout=300s
+#   args:
+#     executable: /bin/bash
+
+
+# - name: Wait for seeder pod to be Ready
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} wait --for=condition=Ready pod/notebook-seeder --timeout=300s
+#   args:
+#     executable: /bin/bash
+
+# - name: Clear seed PVC contents (optional but recommended for "copy each time" consistency)
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} exec notebook-seeder -- sh -lc 'rm -rf /seed/* /seed/.[!.]* /seed/..?* 2>/dev/null || true'
+#   args:
+#     executable: /bin/bash
+
+# - name: Copy notebooks from node into seed PVC via seeder pod
+#   ansible.builtin.shell: |
+#     set -e
+#     test -d /opt/digitafrica/k8s-notebooks
+#     k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/k8s-notebooks/. notebook-seeder:/seed/
+#   args:
+#     executable: /bin/bash
+
+# - name: Delete seeder pod
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} delete pod notebook-seeder --ignore-not-found
+#   args:
+#     executable: /bin/bash
+
+# - name: Get JupyterHub NodePort
+#   ansible.builtin.shell: |
+#     set -e
+#     k3s kubectl -n {{ digitafrica_namespace }} get svc jupyterhub \
+#       -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
+#   args:
+#     executable: /bin/bash
+#   register: jupyterhub_nodeport
+#   changed_when: false
+
+# - name: Show access URL (NodePort)
+#   ansible.builtin.debug:
+#     msg:
+#       - "Jupyter URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ jupyterhub_nodeport.stdout }}"
+
+
+- name: Ensure manifest dir exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s
+    state: directory
+    mode: "0755"
+  when: tier1_enable_k3s | bool
+
+- name: Stage seed notebooks on Tier-1 node
+  ansible.builtin.copy:
+    src: files/notebooks/
+    dest: /opt/digitafrica/k8s-notebooks/
+    mode: "0644"
+  when: tier1_enable_k3s | bool
+
+- name: Render JupyterHub Helm values
+  ansible.builtin.template:
+    src: templates/jhub-values.yaml.j2
+    dest: /opt/digitafrica/k8s/jhub-values.yaml
+    mode: "0644"
+  when: tier1_enable_k3s | bool
+
+- name: Install helm if missing
+  ansible.builtin.shell: |
+    set -e
+    if ! command -v helm >/dev/null 2>&1; then
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    fi
+    helm version
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
+
+- name: Ensure namespace exists
+  ansible.builtin.shell: |
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    k3s kubectl get ns {{ digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_namespace }}
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
+
+- name: Add JupyterHub helm repo and update
+  ansible.builtin.shell: |
+    set -e
+    helm repo add jupyterhub https://hub.jupyter.org/helm-chart/ || true
+    helm repo update
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
+
+# Optional: remove your previous non-helm resources (safe if they don't exist)
+- name: Cleanup previous manual JupyterHub resources (best-effort)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} delete all,cm,secret,role,rolebinding,sa \
+      -l app=jupyterhub --ignore-not-found || true
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
+
+- name: Install/upgrade JupyterHub via Helm (NodePort)
+  ansible.builtin.shell: |
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    helm upgrade --install jhub jupyterhub/jupyterhub \
+      --namespace {{ digitafrica_namespace }} \
+      -f /opt/digitafrica/k8s/jhub-values.yaml
+  args:
+    executable: /bin/bash
+  when: tier1_enable_k3s | bool
+
+- name: List resources created by Helm release (debug)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_namespace }} get deploy,sts,po,svc -o wide
+    echo "----"
+    helm -n {{ digitafrica_namespace }} status jhub || true
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false
+
+- name: Wait for all JupyterHub deployments from release to finish rolling out
+  ansible.builtin.shell: |
+    set -e
+    # Find deployments created by this helm release
+    deps=$(k3s kubectl -n {{ digitafrica_namespace }} get deploy \
+      -l app.kubernetes.io/instance=jhub \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}')
+    if [ -z "$deps" ]; then
+      echo "No deployments found for release jhub in namespace {{ digitafrica_namespace }}"
+      k3s kubectl -n {{ digitafrica_namespace }} get all
+      exit 1
+    fi
+
+    for d in $deps; do
+      echo "Waiting for deployment/$d"
+      k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/$d --timeout=600s
+    done
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: Show access URL (NodePort)
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ tier1_jupyter_nodeport }}"
+  when: tier1_enable_k3s | bool

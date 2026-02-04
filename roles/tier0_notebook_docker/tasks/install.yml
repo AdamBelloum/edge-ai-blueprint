@@ -1,0 +1,54 @@
+- name: Stop old systemd Jupyter service if it exists
+  ansible.builtin.systemd:
+    name: digitafrica-jupyter
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+  
+- name: Create notebook directory
+  ansible.builtin.file:
+    path: "{{ tier0_notebook_dir }}/digitafrica"
+    state: directory
+    mode: "0775"
+
+- name: Copy example notebooks to workspace
+  ansible.builtin.copy:
+    src: notebooks/
+    dest: "{{ tier0_notebook_dir }}/digitafrica/"
+    owner: "1000"
+    group: "100"
+    mode: "0644"
+
+- name: Run Tier-0 JupyterLab container (password-based)
+  community.docker.docker_container:
+    name: digitafrica-tier0-jupyter
+    image: "jupyter/minimal-notebook:python-3.11"
+    restart_policy: always
+    ports:
+      - "{{ tier0_notebook_port }}:8888"
+    volumes:
+      - "{{ tier0_notebook_dir }}/digitafrica:/home/jovyan/digitafrica"
+    # Important: disable token, set password hash
+    command: >
+      bash -lc "
+      pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt &&
+      start-notebook.py
+      --ServerApp.ip=0.0.0.0
+      --ServerApp.port=8888
+      --ServerApp.token=''
+      --ServerApp.password='{{ tier0_notebook_password_hash }}'
+      --ServerApp.allow_remote_access=True
+      "
+    user: "1000:100"
+
+- name: Allow Tier-0 notebook port (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ tier0_notebook_port }}"
+    proto: tcp
+
+- name: Show Tier-0 access
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ tier0_notebook_port }}"

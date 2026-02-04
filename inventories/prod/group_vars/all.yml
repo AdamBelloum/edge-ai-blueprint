@@ -1,12 +1,55 @@
 # Common
 timezone: "Europe/Athens"
 
+tier0_k3s_mode: "none"   # none|agent|single
+
 # Notebook
 tier0_notebook_port: 8888
 tier0_notebook_user: "digitafrica"
 tier0_notebook_dir: "/opt/digitafrica/notebooks"
 tier0_notebook_password: "digitafrica"   # you can swap to token-only
 tier0_notebook_password_hash: "argon2:$argon2id$v=19$m=10240,t=10,p=8$9f4c5S6aMZ5sKSI2sBpHWg$tBmHxYwRPIxqjssK5LrgO/TiGTHLATRxossGnK5hEks"
+tier0_jupyter_host: "tier0.digitafrica-edge-node1.eu"     #
+tier0_modelcache_host: "models.tier0.digitafrica-edge-node1.eu"  
+
+# Default: Tier-0 off, Tier-1 on (can override per host)
+tier1_enable_k3s: true
+
+tls_secret_name: "digitafrica-tls"
+
+# Tier-0 exposure mode
+tier0_expose_mode: "nodeport"     # nodeport|ingress
+tier0_enable_modelcache: true
+
+# Fixed NodePorts (pick any free ports in 30000-32767)
+tier0_jupyter_nodeport: 30888
+tier0_modelcache_nodeport: 30080
+
+tier1_jupyter_nodeport: 30888
+k3s_version: "v1.30.4+k3s1"
+
+# Cluster settings (Tier-1 as server)
+k3s_server_host: "digitafrica-edge-node1"
+k3s_cluster_cidr: "10.42.0.0/16"
+k3s_service_cidr: "10.43.0.0/16"
+k3s_disable_traefik: true
+k3s_disable_servicelb: true
+
+# Namespace
+digitafrica_namespace: "digitafrica"
+
+tls_mode: "selfsigned"   # or "letsencrypt" or "provided"
+
+tls_domains:
+  - "mlflow.digitafrica.eu"
+  - "jupyter.digitafrica.eu"
+  - "grafana.digitafrica.eu"
+  - "tier0.digitafrica-edge-node1.eu"
+  - "models.tier0.digitafrica-edge-node1.eu"
+
+# where to create temp certs on Tier-1
+tls_workdir: "/opt/digitafrica/tls"
+tls_selfsigned_days: 3650
 
 tier1_jupyterhub_http_port: 8000
 tier1_jupyterhub_admin_users: ["admin"]
