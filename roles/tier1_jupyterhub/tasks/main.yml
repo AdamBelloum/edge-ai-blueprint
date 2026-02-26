@@ -26,11 +26,11 @@
     content: |
       JH_PORT={{ tier1_jupyterhub_http_port }}
 
-- name: Install NativeAuthenticator inside hub container at startup (simple approach)
+- name: Install auth & spawner deps inside hub container at startup
   ansible.builtin.lineinfile:
     path: /opt/digitafrica/jupyterhub/docker-compose.yml
     insertafter: 'image: jupyterhub/jupyterhub:4.1'
-    line: '    command: bash -lc "pip install nativeauthenticator dockerspawner && jupyterhub -f /srv/jupyterhub/jupyterhub_config.py"'
+    line: '    command: bash -lc "pip install nativeauthenticator oauthenticator dockerspawner && jupyterhub -f /srv/jupyterhub/jupyterhub_config.py"'
 
 - name: Start JupyterHub
   community.docker.docker_compose_v2:

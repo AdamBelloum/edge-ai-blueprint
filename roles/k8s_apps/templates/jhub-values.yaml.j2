@@ -7,9 +7,22 @@ proxy:
 hub:
   config:
     JupyterHub:
-      authenticator_class: dummy
-    DummyAuthenticator:
-      password: "digitafrica"
+      authenticator_class: generic-oauth
+
+    GenericOAuthenticator:
+      client_id: "{{ oidc_client_id }}"
+      client_secret: "{{ oidc_client_secret }}"
+      authorize_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/auth"
+      token_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/token"
+      userdata_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
+      scope: {{ oidc_scope | to_json }}
+      username_claim: "{{ oidc_username_claim }}"
+      tls_verify: false
+      validate_server_cert: false
+      oauth_callback_url: "{{ jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
+
+    Authenticator:
+      allow_all: true
 
 singleuser:
   image:

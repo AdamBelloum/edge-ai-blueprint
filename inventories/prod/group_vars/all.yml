@@ -64,3 +64,16 @@ mlflow_auth: false  # keep false unless you put it behind nginx/oidc proxy
 node_exporter_port: 9100
 cadvisor_port: 8080
 
+# OIDC / Keycloak
+oidc_enabled: true
+oidc_issuer_url: "https://auth.theblueprintfactory.org:8080/realms/slices-test"
+oidc_client_id: "jupyterhub-client"
+oidc_client_secret: "ERm5yMzbtGUDTJ5IuA09MxUUH8NgZBI2"
+oidc_scope:
+  - "openid"
+  - "profile"
+  - "email"
+oidc_username_claim: "preferred_username"
+
+jupyterhub_public_url: "http://localhost:30888"
+oidc_tls_verify: false 
