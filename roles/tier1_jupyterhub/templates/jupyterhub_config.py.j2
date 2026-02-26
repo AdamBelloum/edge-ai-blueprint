@@ -1,7 +1,30 @@
 c = get_config()
 
-# Simple authenticator: local users (good for labs; replace with OIDC later)
+{% if oidc_enabled %}
+from oauthenticator.generic import GenericOAuthenticator
+
+issuer = "{{ oidc_issuer_url }}".rstrip("/")
+
+c.JupyterHub.authenticator_class = GenericOAuthenticator
+c.GenericOAuthenticator.authorize_url = issuer + "/protocol/openid-connect/auth"
+c.GenericOAuthenticator.token_url = issuer + "/protocol/openid-connect/token"
+c.GenericOAuthenticator.userdata_url = issuer + "/protocol/openid-connect/userinfo"
+
+c.GenericOAuthenticator.client_id = "{{ oidc_client_id }}"
+c.GenericOAuthenticator.client_secret = "{{ oidc_client_secret }}"
+c.GenericOAuthenticator.scope = {{ oidc_scope | to_json }}
+c.GenericOAuthenticator.username_claim = "{{ oidc_username_claim }}"
+c.GenericOAuthenticator.tls_verify = {{ oidc_tls_verify | default(true) | to_json }}
+
+public_url = "{{ jupyterhub_public_url }}".rstrip("/")
+c.GenericOAuthenticator.oauth_callback_url = public_url + "/hub/oauth_callback"
+
+# option: autoriser tout user authentifié
+c.Authenticator.allow_all = True
+
+{% else %}
 c.JupyterHub.authenticator_class = "nativeauthenticator.NativeAuthenticator"
+{% endif %}
 
 # Admins
 c.Authenticator.admin_users = set({{ tier1_jupyterhub_admin_users | to_json }})
@@ -9,7 +32,7 @@ c.Authenticator.admin_users = set({{ tier1_jupyterhub_admin_users | to_json }})
 # Persist hub DB
 c.JupyterHub.db_url = "sqlite:////data/jupyterhub.sqlite"
 
-# Spawner: run single-user servers as containers
+# Spawner
 c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
 c.DockerSpawner.image = "jupyter/minimal-notebook:python-3.11"
 c.DockerSpawner.network_name = "bridge"
@@ -17,10 +40,8 @@ c.DockerSpawner.remove = True
 c.DockerSpawner.notebook_dir = "/home/jovyan/work"
 c.DockerSpawner.volumes = {"jupyterhub-user-{username}": "/home/jovyan/work"}
 
-# Useful env: point users at Tier-1 MLflow by default
 c.Spawner.environment = {
     "MLFLOW_TRACKING_URI": "http://{{ inventory_hostname }}:{{ mlflow_port }}",
 }
 
-# Hub service listen
 c.JupyterHub.bind_url = "http://0.0.0.0:8000"
