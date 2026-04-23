@@ -1,10 +1,22 @@
 proxy:
   service:
-    type: NodePort
-    nodePorts:
-      http: 30888
+    type: ClusterIP
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
+{% set jhub_host = jupyterhub_public_url | urlsplit('hostname') %}
+{% if jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}
+  # Host is a raw IP — omit hosts field so Traefik matches all incoming requests
+{% else %}
+  hosts:
+    - {{ jhub_host }}
+{% endif %}
 
 hub:
+  baseUrl: /jupyter
   config:
     JupyterHub:
       authenticator_class: generic-oauth

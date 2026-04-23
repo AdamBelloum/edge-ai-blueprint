@@ -48,6 +48,49 @@ ansible_become=true
 
 Depending on the type of the deployment (Tier-0/1) only the respective configs need to be present.
 
+### Key variables in `inventories/prod/group_vars/all.yml`
+
+| Variable | Default | Description |
+|---|---|---|
+| `k3s_disable_traefik` | `false` | `false` enables Traefik Ingress. `true` disables it (services fall back to NodePort). |
+| `k3s_disable_servicelb` | auto-derived | Automatically set to `true` when Traefik is enabled. Do not set manually. |
+| `tier0_expose_mode` | `ingress` | `ingress` routes Tier-0 services through Traefik. `nodeport` exposes them on raw ports (backward compatible). |
+| `jupyterhub_public_url` | `http://<host>/jupyter` | **Must match the server IP or DNS name.** Used to generate OIDC callback URLs and the final access URL. |
+
+> **Important:** Change `jupyterhub_public_url` to match your actual server address before deploying. For example:
+> ```yaml
+> jupyterhub_public_url: "http://10.64.45.176/jupyter"
+> ```
+> If you use a DNS name instead of an IP, also add the hostname to `tls_domains`.
+
+---
+
+## Networking — Traefik Ingress
+
+All services are exposed through the **Traefik Ingress controller** that ships with k3s. There are no NodePort assignments to manage.
+
+| Service | Path | Notes |
+|---|---|---|
+| JupyterHub (Tier-0 k3s) | `http://<host>/jupyter/` | Single-node k3s |
+| JupyterHub (Tier-1) | `http://<host>/jupyter/` | Multi-node k3s |
+| Model cache (Tier-0) | `http://<host>/models/` | Static file server |
+
+Visiting the path without a trailing slash (e.g. `/jupyter`) redirects automatically to `/jupyter/`.
+
+
+### Falling back to NodePort
+
+If you want to skip Traefik and use plain NodePort (e.g. for debugging or constrained environments), set these in `group_vars/all.yml`:
+
+```yaml
+k3s_disable_traefik: true
+tier0_expose_mode: "nodeport"
+```
+
+Services will then be reachable at `http://<host>:30888` (JupyterHub) and `http://<host>:30080` (model cache).
+
+---
+
 ## Deploying the BP
 
 To install on the nodes declared at the hosts.ini file, ensure that the deploying machine has ```ansible``` and ```ssh-pass``` installed, and ssh access to all the machines.

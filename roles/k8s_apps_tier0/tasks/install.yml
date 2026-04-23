@@ -4,6 +4,31 @@
     state: directory
     mode: "0755"
 
+# When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
+# Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.
+- name: Wait for Traefik service to exist before patching externalIPs
+  ansible.builtin.shell: |
+    set -e
+    for i in $(seq 1 60); do
+      k3s kubectl -n kube-system get svc traefik >/dev/null 2>&1 && exit 0
+      sleep 5
+    done
+    echo "Timed out waiting for Traefik service" && exit 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: k3s_disable_servicelb | default(false) | bool
+
+- name: Assign node IP as externalIP on Traefik service (servicelb disabled)
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n kube-system patch svc traefik --type=merge \
+      -p "{\"spec\":{\"externalIPs\":[\"{{ ansible_host | default(inventory_hostname) }}\"]}}"
+  args:
+    executable: /bin/bash
+  when: k3s_disable_servicelb | default(false) | bool
+  changed_when: false
+
 - name: Render Tier-0 namespace manifest
   ansible.builtin.template:
     src: 00-namespace.yaml.j2
@@ -80,6 +105,7 @@
     executable: /bin/bash
   register: jupyter_nodeport
   changed_when: false
+  when: tier0_expose_mode | default('nodeport') == 'nodeport'
 
 - name: Get model-cache NodePort (optional)
   ansible.builtin.shell: |
@@ -90,7 +116,9 @@
     executable: /bin/bash
   register: modelcache_nodeport
   changed_when: false
-  when: tier0_enable_modelcache | default(true) | bool
+  when:
+    - tier0_enable_modelcache | default(true) | bool
+    - tier0_expose_mode | default('nodeport') == 'nodeport'
 
 
 - name: Stage seed notebooks on Tier-0 node
@@ -138,3 +166,11 @@
     msg:
       - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ jupyter_nodeport.stdout }}"
       - "Model-cache URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ modelcache_nodeport.stdout | default('') }}"
+  when: tier0_expose_mode | default('nodeport') == 'nodeport'
+
+- name: Show Tier-0 access URLs (Ingress)
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}/jupyter/"
+      - "Model-cache URL: http://{{ ansible_host | default(inventory_hostname) }}/models/"
+  when: tier0_expose_mode | default('nodeport') == 'ingress'

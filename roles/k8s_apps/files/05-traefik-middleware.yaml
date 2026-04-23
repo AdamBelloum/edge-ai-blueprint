@@ -1,0 +1,10 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: jupyterhub-redirect-slash
+  namespace: digitafrica
+spec:
+  redirectRegex:
+    regex: ^(https?://[^/]+)/jupyter$
+    replacement: ${1}/jupyter/
+    permanent: false
