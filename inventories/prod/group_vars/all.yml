@@ -18,7 +18,7 @@ tier1_enable_k3s: true
 tls_secret_name: "digitafrica-tls"
 
 # Tier-0 exposure mode
-tier0_expose_mode: "ingress"      # nodeport|ingress  (set to nodeport to fall back to NodePort)
+tier0_expose_mode: "nodeport"     # nodeport|ingress
 tier0_enable_modelcache: true
 
 # Fixed NodePorts (pick any free ports in 30000-32767)
@@ -32,8 +32,8 @@ k3s_version: "v1.30.4+k3s1"
 k3s_server_host: "digitafrica-edge-node1"
 k3s_cluster_cidr: "10.42.0.0/16"
 k3s_service_cidr: "10.43.0.0/16"
-k3s_disable_traefik: false      # false = Traefik Ingress enabled | true = disabled (falls back to NodePort)
-k3s_disable_servicelb: "{{ not k3s_disable_traefik | bool }}"  # auto-derived: servicelb off when Traefik is on
+k3s_disable_traefik: true
+k3s_disable_servicelb: true
 
 # Namespace
 digitafrica_namespace: "digitafrica"
@@ -75,5 +75,5 @@ oidc_scope:
   - "email"
 oidc_username_claim: "preferred_username"
 
-jupyterhub_public_url: "http://10.64.45.176/jupyter"
+jupyterhub_public_url: "http://localhost:30888"
 oidc_tls_verify: false 

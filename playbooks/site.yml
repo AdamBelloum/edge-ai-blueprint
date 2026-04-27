@@ -20,8 +20,6 @@
 - name: Tier-0 fallback (no k3s) notebook via Docker
   hosts: tier0
   roles:
-    - role: docker
-      when: tier0_k3s_mode == "none"
     - role: tier0_notebook_docker
       when: tier0_k3s_mode == "none"
     - role: monitoring

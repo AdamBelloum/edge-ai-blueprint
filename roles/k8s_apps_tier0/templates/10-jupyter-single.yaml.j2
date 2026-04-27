@@ -42,10 +42,7 @@ spec:
                 --ServerApp.port=8888 \
                 --ServerApp.token='' \
                 --ServerApp.password='{{ tier0_notebook_password_hash }}' \
-                --ServerApp.allow_remote_access=True \
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
-                --ServerApp.base_url=/jupyter/
-{% endif %}
+                --ServerApp.allow_remote_access=True
           volumeMounts:
             - name: digitafrica
               mountPath: /home/jovyan/digitafrica
@@ -63,13 +60,6 @@ metadata:
 spec:
   selector:
     app: tier0-jupyter
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
-  type: ClusterIP
-  ports:
-    - name: http
-      port: 8888
-      targetPort: 8888
-{% else %}
   type: NodePort
   externalTrafficPolicy: Local
   ports:
@@ -77,26 +67,3 @@ spec:
       port: 8888
       targetPort: 8888
       nodePort: {{ tier0_jupyter_nodeport | default(30888) }}
-{% endif %}
-
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: tier0-jupyter
-  namespace: {{ digitafrica_namespace }}
-  annotations:
-    kubernetes.io/ingress.class: traefik
-spec:
-  rules:
-    - http:
-        paths:
-          - path: /jupyter
-            pathType: Prefix
-            backend:
-              service:
-                name: tier0-jupyter
-                port:
-                  number: 8888
-{% endif %}
