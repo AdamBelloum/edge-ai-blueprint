@@ -47,13 +47,6 @@ metadata:
 spec:
   selector:
     app: model-cache
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
-  type: ClusterIP
-  ports:
-    - name: http
-      port: 80
-      targetPort: 80
-{% else %}
   type: NodePort
   externalTrafficPolicy: Local
   ports:
@@ -61,26 +54,3 @@ spec:
       port: 80
       targetPort: 80
       nodePort: {{ tier0_modelcache_nodeport | default(30080) }}
-{% endif %}
-
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: tier0-model-cache
-  namespace: {{ digitafrica_namespace }}
-  annotations:
-    kubernetes.io/ingress.class: traefik
-spec:
-  rules:
-    - http:
-        paths:
-          - path: /models
-            pathType: Prefix
-            backend:
-              service:
-                name: model-cache
-                port:
-                  number: 80
-{% endif %}

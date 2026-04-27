@@ -137,13 +137,6 @@
     mode: "0755"
   when: tier1_enable_k3s | bool
 
-- name: Stage Traefik middleware manifest
-  ansible.builtin.copy:
-    src: files/05-traefik-middleware.yaml
-    dest: /opt/digitafrica/k8s/05-traefik-middleware.yaml
-    mode: "0644"
-  when: tier1_enable_k3s | bool
-
 - name: Stage seed notebooks on Tier-1 node
   ansible.builtin.copy:
     src: files/notebooks/
@@ -178,35 +171,6 @@
     executable: /bin/bash
   when: tier1_enable_k3s | bool
 
-# When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
-# Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.
-- name: Wait for Traefik service to exist before patching externalIPs
-  ansible.builtin.shell: |
-    set -e
-    for i in $(seq 1 60); do
-      k3s kubectl -n kube-system get svc traefik >/dev/null 2>&1 && exit 0
-      sleep 5
-    done
-    echo "Timed out waiting for Traefik service" && exit 1
-  args:
-    executable: /bin/bash
-  changed_when: false
-  when:
-    - tier1_enable_k3s | bool
-    - k3s_disable_servicelb | default(false) | bool
-
-- name: Assign node IP as externalIP on Traefik service (servicelb disabled)
-  ansible.builtin.shell: |
-    set -e
-    k3s kubectl -n kube-system patch svc traefik --type=merge \
-      -p "{\"spec\":{\"externalIPs\":[\"{{ ansible_host | default(inventory_hostname) }}\"]}}"
-  args:
-    executable: /bin/bash
-  when:
-    - tier1_enable_k3s | bool
-    - k3s_disable_servicelb | default(false) | bool
-  changed_when: false
-
 - name: Add JupyterHub helm repo and update
   ansible.builtin.shell: |
     set -e
@@ -226,21 +190,12 @@
     executable: /bin/bash
   when: tier1_enable_k3s | bool
 
-- name: Apply Traefik redirect-slash middleware for JupyterHub
-  ansible.builtin.shell: |
-    set -e
-    k3s kubectl apply -f /opt/digitafrica/k8s/05-traefik-middleware.yaml
-  args:
-    executable: /bin/bash
-  when: tier1_enable_k3s | bool
-
 - name: Install/upgrade JupyterHub via Helm (NodePort)
   ansible.builtin.shell: |
     set -e
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
     helm upgrade --install jhub jupyterhub/jupyterhub \
       --namespace {{ digitafrica_namespace }} \
-      --timeout 15m0s \
       -f /opt/digitafrica/k8s/jhub-values.yaml
   args:
     executable: /bin/bash
@@ -281,17 +236,5 @@
 - name: Show access URL (NodePort)
   ansible.builtin.debug:
     msg:
-      - "JupyterHub URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ tier1_jupyter_nodeport }}"
-  when:
-    - tier1_enable_k3s | bool
-    - k3s_disable_traefik | default(false) | bool
-
-- name: Show access URL (Ingress)
-  ansible.builtin.debug:
-    msg:
-      - "JupyterHub URL: {{ jupyterhub_public_url }}/"
-      - "MLflow URL:     https://mlflow.{{ digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
-      - "Grafana URL:    https://grafana.{{ digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
-  when:
-    - tier1_enable_k3s | bool
-    - not (k3s_disable_traefik | default(false) | bool)
+      - "Jupyter URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ tier1_jupyter_nodeport }}"
+  when: tier1_enable_k3s | bool
