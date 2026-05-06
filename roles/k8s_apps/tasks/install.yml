@@ -137,8 +137,8 @@
     mode: "0755"
 
 - name: Stage Traefik middleware manifest
-  ansible.builtin.copy:
-    src: files/05-traefik-middleware.yaml
+  ansible.builtin.template:
+    src: templates/05-traefik-middleware.yaml.j2
     dest: /opt/digitafrica/k8s/05-traefik-middleware.yaml
     mode: "0644"
 
