@@ -1,22 +1,22 @@
 c = get_config()
 
-{% if oidc_enabled %}
+{% if oidc.oidc_enabled %}
 from oauthenticator.generic import GenericOAuthenticator
 
-issuer = "{{ oidc_issuer_url }}".rstrip("/")
+issuer = "{{ oidc.oidc_issuer_url }}".rstrip("/")
 
 c.JupyterHub.authenticator_class = GenericOAuthenticator
 c.GenericOAuthenticator.authorize_url = issuer + "/protocol/openid-connect/auth"
 c.GenericOAuthenticator.token_url = issuer + "/protocol/openid-connect/token"
 c.GenericOAuthenticator.userdata_url = issuer + "/protocol/openid-connect/userinfo"
 
-c.GenericOAuthenticator.client_id = "{{ oidc_client_id }}"
-c.GenericOAuthenticator.client_secret = "{{ oidc_client_secret }}"
-c.GenericOAuthenticator.scope = {{ oidc_scope | to_json }}
-c.GenericOAuthenticator.username_claim = "{{ oidc_username_claim }}"
-c.GenericOAuthenticator.tls_verify = {{ oidc_tls_verify | default(true) | to_json }}
+c.GenericOAuthenticator.client_id = "{{ oidc.oidc_client_id }}"
+c.GenericOAuthenticator.client_secret = "{{ oidc.oidc_client_secret }}"
+c.GenericOAuthenticator.scope = {{ oidc.oidc_scope | to_json }}
+c.GenericOAuthenticator.username_claim = "{{ oidc.oidc_username_claim }}"
+c.GenericOAuthenticator.tls_verify = {{ oidc.oidc_tls_verify | default(true) | to_json }}
 
-public_url = "{{ jupyterhub_public_url }}".rstrip("/")
+public_url = "{{ tier1.jupyterhub.jupyterhub_public_url }}".rstrip("/")
 c.GenericOAuthenticator.oauth_callback_url = public_url + "/hub/oauth_callback"
 
 # option: autoriser tout user authentifié
@@ -27,7 +27,7 @@ c.JupyterHub.authenticator_class = "nativeauthenticator.NativeAuthenticator"
 {% endif %}
 
 # Admins
-c.Authenticator.admin_users = set({{ tier1_jupyterhub_admin_users | to_json }})
+c.Authenticator.admin_users = set({{ tier1.jupyterhub.jupyterhub_admin_users | to_json }})
 
 # Persist hub DB
 c.JupyterHub.db_url = "sqlite:////data/jupyterhub.sqlite"
@@ -41,7 +41,7 @@ c.DockerSpawner.notebook_dir = "/home/jovyan/work"
 c.DockerSpawner.volumes = {"jupyterhub-user-{username}": "/home/jovyan/work"}
 
 c.Spawner.environment = {
-    "MLFLOW_TRACKING_URI": "http://{{ inventory_hostname }}:{{ mlflow_port }}",
+    "MLFLOW_TRACKING_URI": "http://{{ inventory_hostname }}:{{ tier1.mlflow.mlflow_port }}",
 }
 
 c.JupyterHub.bind_url = "http://0.0.0.0:8000"

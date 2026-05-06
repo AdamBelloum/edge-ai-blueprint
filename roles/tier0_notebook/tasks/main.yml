@@ -1,15 +1,15 @@
 - name: Create tier0 user
   ansible.builtin.user:
-    name: "{{ tier0_notebook_user }}"
+    name: "{{ tier0.notebook_user }}"
     create_home: true
     shell: /bin/bash
 
 - name: Create notebook directory
   ansible.builtin.file:
-    path: "{{ tier0_notebook_dir }}"
+    path: "{{ tier0.notebook_dir }}"
     state: directory
-    owner: "{{ tier0_notebook_user }}"
-    group: "{{ tier0_notebook_user }}"
+    owner: "{{ tier0.notebook_user }}"
+    group: "{{ tier0.notebook_user }}"
     mode: "0755"
 
 - name: Create venv for notebook
@@ -45,5 +45,5 @@
 - name: Allow Tier0 notebook port
   ansible.builtin.ufw:
     rule: allow
-    port: "{{ tier0_notebook_port }}"
+    port: "{{ tier0.notebook_port }}"
     proto: tcp

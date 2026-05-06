@@ -24,7 +24,7 @@
     dest: /opt/digitafrica/jupyterhub/.env
     mode: "0644"
     content: |
-      JH_PORT={{ tier1_jupyterhub_http_port }}
+      JH_PORT={{ tier1.jupyterhub.jupyterhub_http_port }}
 
 - name: Install auth & spawner deps inside hub container at startup
   ansible.builtin.lineinfile:
@@ -40,5 +40,5 @@
 - name: Allow JupyterHub port
   ansible.builtin.ufw:
     rule: allow
-    port: "{{ tier1_jupyterhub_http_port }}"
+    port: "{{ tier1.jupyterhub.jupyterhub_http_port }}"
     proto: tcp

@@ -1,0 +1,58 @@
+---
+# Tier-0 playbook — only touches tier0 hosts, only reads tier0.* and oidc.*
+# Run standalone: ansible-playbook playbooks/tier0.yml
+# Exception: k3s_mode=agent reads tier1.k3s_server_host/k3s_version (intentional —
+#   tier0 is joining a tier1 cluster, so those are genuinely tier1 values).
+
+- name: Base setup on Tier-0 nodes
+  hosts: tier0
+  roles:
+    - common
+
+- name: Tier-0 single-node k3s (install)
+  hosts: tier0
+  roles:
+    - role: k3s_tier0_single
+      when:
+        - tier0.k3s_mode == "single"
+        - not (digitafrica_uninstall | default(false) | bool)
+    - role: k8s_apps_tier0
+      when:
+        - tier0.k3s_mode == "single"
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-0 join Tier-1 as agent (install)
+  hosts: tier0
+  roles:
+    - role: k3s_agent
+      when:
+        - tier0.k3s_mode == "agent"
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-0 Docker notebook + monitoring (install)
+  hosts: tier0
+  roles:
+    - role: docker
+      when:
+        - tier0.k3s_mode == "none"
+        - not (digitafrica_uninstall | default(false) | bool)
+    - role: tier0_notebook_docker
+      when:
+        - tier0.k3s_mode == "none"
+        - not (digitafrica_uninstall | default(false) | bool)
+    - role: monitoring
+      when:
+        - tier0.k3s_mode == "none"
+        - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-0 single-node k3s (uninstall)
+  hosts: tier0
+  roles:
+    - role: k8s_apps_tier0
+      when:
+        - tier0.k3s_mode == "single"
+        - digitafrica_uninstall | default(false) | bool
+    - role: k3s_tier0_single
+      when:
+        - tier0.k3s_mode == "single"
+        - digitafrica_uninstall | default(false) | bool

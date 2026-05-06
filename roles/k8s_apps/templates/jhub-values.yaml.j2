@@ -1,38 +1,69 @@
 proxy:
   service:
+{% if tier1.expose_mode == 'ingress' %}
     type: ClusterIP
+{% else %}
+    type: NodePort
+    nodePorts:
+      http: {{ tier1.jupyterhub.jupyter_nodeport }}
+{% endif %}
 
 ingress:
+{% if tier1.expose_mode == 'ingress' %}
   enabled: true
   annotations:
     kubernetes.io/ingress.class: traefik
-    traefik.ingress.kubernetes.io/router.middlewares: "{{ digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
-{% set jhub_host = jupyterhub_public_url | urlsplit('hostname') %}
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ tier1.digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
+{% if tier1.tls_mode | default('none') != 'none' %}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+{% if tier1.tls_mode | default('none') == 'letsencrypt' %}
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+{% endif %}
+{% endif %}
+{% set jhub_host = tier1.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
 {% if jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}
   # Host is a raw IP — omit hosts field so Traefik matches all incoming requests
 {% else %}
   hosts:
     - {{ jhub_host }}
 {% endif %}
+{% if tier1.tls_mode | default('none') != 'none' %}
+  tls:
+    - secretName: jhub-tls
+{% if tier1.tls_mode | default('none') == 'letsencrypt' and not (jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')) %}
+      hosts:
+        - {{ jhub_host }}
+{% endif %}
+{% endif %}
+{% else %}
+  enabled: false
+{% endif %}
 
 hub:
   baseUrl: /jupyter
   config:
     JupyterHub:
+{% if oidc.oidc_enabled %}
       authenticator_class: generic-oauth
+{% else %}
+      authenticator_class: dummy
+{% endif %}
 
+{% if oidc.oidc_enabled %}
     GenericOAuthenticator:
-      client_id: "{{ oidc_client_id }}"
-      client_secret: "{{ oidc_client_secret }}"
-      authorize_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/auth"
-      token_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/token"
-      userdata_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
-      scope: {{ oidc_scope | to_json }}
-      username_claim: "{{ oidc_username_claim }}"
+      client_id: "{{ oidc.oidc_client_id }}"
+      client_secret: "{{ oidc.oidc_client_secret }}"
+      authorize_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/auth"
+      token_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/token"
+      userdata_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
+      scope: {{ oidc.oidc_scope | to_json }}
+      username_claim: "{{ oidc.oidc_username_claim }}"
       tls_verify: false
       validate_server_cert: false
-      oauth_callback_url: "{{ jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
+      oauth_callback_url: "{{ tier1.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
 
+{% endif %}
     Authenticator:
       allow_all: true
 
@@ -53,30 +84,24 @@ singleuser:
   # Important for first spawn on k3s local-path (image pulls + PVC provisioning)
   startTimeout: 900
 
-  nodeSelector:
-     kubernetes.io/hostname: "digitafrica-edge-node1"
-
   storage:
     type: dynamic
     capacity: 10Gi
     dynamic:
-      storageClass: local-path
-      # Make the volume name predictable so initContainer can mount it
-      volumeNameTemplate: home
+      storageClass: {{ tier1.jupyterhub.storage_class }}
+      volumeNameTemplate: home   # keeps the home PVC volume named "home" so the chart can inject it into initContainers
 
-    # ✅ Correct place to inject extra volumes/mounts into the user pod
+    # Seed notebooks come from a ConfigMap — works on any node, no hostPath needed
     extraVolumes:
       - name: digitafrica-seed
-        hostPath:
-          path: /opt/digitafrica/k8s-notebooks
-          type: Directory
+        configMap:
+          name: digitafrica-notebooks
 
     extraVolumeMounts:
       - name: digitafrica-seed
         mountPath: /seed
         readOnly: true
 
-  # ✅ Reliable: initContainers are supported by the chart
   initContainers:
     - name: seed-notebooks
       image: alpine:3.20

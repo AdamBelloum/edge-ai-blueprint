@@ -22,7 +22,7 @@
     image: gcr.io/cadvisor/cadvisor:latest
     restart_policy: always
     ports:
-      - "{{ cadvisor_port }}:8080"
+      - "{{ tier0.monitoring.cadvisor_port }}:8080"
     volumes:
       - "/:/rootfs:ro"
       - "/var/run:/var/run:rw"
@@ -32,11 +32,11 @@
 - name: Allow node exporter port on UFW (optional)
   ansible.builtin.ufw:
     rule: allow
-    port: "{{ node_exporter_port }}"
+    port: "{{ tier0.monitoring.node_exporter_port }}"
     proto: tcp
 
 - name: Allow cadvisor port on UFW (optional)
   ansible.builtin.ufw:
     rule: allow
-    port: "{{ cadvisor_port }}"
+    port: "{{ tier0.monitoring.cadvisor_port }}"
     proto: tcp

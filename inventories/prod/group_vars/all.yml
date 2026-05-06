@@ -1,79 +1,61 @@
 # Common
 timezone: "Europe/Athens"
 
-tier0_k3s_mode: "none"   # none|agent|single
 
-# Notebook
-tier0_notebook_port: 8888
-tier0_notebook_user: "digitafrica"
-tier0_notebook_dir: "/opt/digitafrica/notebooks"
-tier0_notebook_password: "digitafrica"   # you can swap to token-only
-tier0_notebook_password_hash: "argon2:$argon2id$v=19$m=10240,t=10,p=8$9f4c5S6aMZ5sKSI2sBpHWg$tBmHxYwRPIxqjssK5LrgO/TiGTHLATRxossGnK5hEks"
-tier0_jupyter_host: "tier0.digitafrica-edge-node1.eu"     #
-tier0_modelcache_host: "models.tier0.digitafrica-edge-node1.eu"  
+tier0:
+  k3s_mode: "none"   # none|agent|single
+  expose_mode: "ingress"      # nodeport|ingress  (set to nodeport to fall back to NodePort)
+  notebook_port: 8888 # port for local jupyter books to expose 
+  jupyter_nodeport: 30888 # port to expose if not using ingress
+  modelcache_nodeport: 30080 #port to expose if not using ingress
+  notebook_user: "digitafrica"
+  notebook_dir: "/opt/digitafrica/notebooks"
+  notebook_password: "digitafrica"   # you can swap to token-only
+  notebook_password_hash: "argon2:$argon2id$v=19$m=10240,t=10,p=8$9f4c5S6aMZ5sKSI2sBpHWg$tBmHxYwRPIxqjssK5LrgO/TiGTHLATRxossGnK5hEks"
+  enable_modelcache: true
+  digitafrica_namespace: "digitafrica"
+  # k3s config for tier0's single node cluster (mode=single)
+  k3s_version: "v1.30.4+k3s1"
+  # Used only when k3s_mode=agent — tier0 joins this tier1 server
+  k3s_agent_server_host: "digitafrica-edge-node1"
+  k3s_agent_version: "v1.30.4+k3s1"
+  monitoring:
+    node_exporter_port: 9100
+    cadvisor_port: 8080
 
-# Default: Tier-0 off, Tier-1 on (can override per host)
-tier1_enable_k3s: true
-
-tls_secret_name: "digitafrica-tls"
-
-# Tier-0 exposure mode
-tier0_expose_mode: "ingress"      # nodeport|ingress  (set to nodeport to fall back to NodePort)
-tier0_enable_modelcache: true
-
-# Fixed NodePorts (pick any free ports in 30000-32767)
-tier0_jupyter_nodeport: 30888
-tier0_modelcache_nodeport: 30080
-
-tier1_jupyter_nodeport: 30888
-k3s_version: "v1.30.4+k3s1"
-
-# Cluster settings (Tier-1 as server)
-k3s_server_host: "digitafrica-edge-node1"
-k3s_cluster_cidr: "10.42.0.0/16"
-k3s_service_cidr: "10.43.0.0/16"
-k3s_disable_traefik: false      # false = Traefik Ingress enabled | true = disabled (falls back to NodePort)
-k3s_disable_servicelb: "{{ not k3s_disable_traefik | bool }}"  # auto-derived: servicelb off when Traefik is on
-
-# Namespace
-digitafrica_namespace: "digitafrica"
-
-tls_mode: "selfsigned"   # or "letsencrypt" or "provided"
-
-tls_domains:
-  - "mlflow.digitafrica.eu"
-  - "jupyter.digitafrica.eu"
-  - "grafana.digitafrica.eu"
-  - "tier0.digitafrica-edge-node1.eu"
-  - "models.tier0.digitafrica-edge-node1.eu"
-
-# where to create temp certs on Tier-1
-tls_workdir: "/opt/digitafrica/tls"
-tls_selfsigned_days: 3650
-
-tier1_jupyterhub_http_port: 8000
-tier1_jupyterhub_admin_users: ["admin"]
-
-# MLflow (Tier 1)
-mlflow_port: 5000
-mlflow_backend_store: "/opt/digitafrica/mlflow/backend"   # sqlite by default
-mlflow_artifact_root: "/opt/digitafrica/mlflow/artifacts" # local FS
-mlflow_auth: false  # keep false unless you put it behind nginx/oidc proxy
-
-# Monitoring
-node_exporter_port: 9100
-cadvisor_port: 8080
+tier1:
+  expose_mode: "ingress"   # ingress = deploy Traefik Ingress | nodeport = no Traefik, services use NodePort
+  tls_mode: "selfsigned"   # selfsigned | letsencrypt | provided | none  (ignored when expose_mode=nodeport)
+  # tls_cert_dir: "/path/to/local/certs"   # only when tls_mode=provided — local dir containing tls.crt and tls.key
+  # tls_acme_email: "admin@example.com"    # only when tls_mode=letsencrypt
+  k3s_version: "v1.30.4+k3s1"
+  k3s_server_host: "digitafrica-edge-node1"
+  k3s_cluster_cidr: "10.42.0.0/16"
+  k3s_service_cidr: "10.43.0.0/16"
+  digitafrica_namespace: "digitafrica"
+  jupyterhub:
+    jupyter_nodeport: 30888
+    jupyterhub_http_port: 8000
+    jupyterhub_admin_users: ["admin"]
+    jupyterhub_public_url: "https://10.64.45.176/jupyter"
+    storage_class: "local-path"   # switch to your NFS class (e.g. nfs-client) for multi-node freedom
+  mlflow:
+    enabled: false         # not tested yet
+    mlflow_port: 5000
+    mlflow_backend_store: "/opt/digitafrica/mlflow/backend"   # sqlite by default
+    mlflow_artifact_root: "/opt/digitafrica/mlflow/artifacts" # local FS
+    mlflow_auth: false  # not tested yet
+  grafana_enabled: false   # not tested yet
 
 # OIDC / Keycloak
-oidc_enabled: true
-oidc_issuer_url: "https://auth.theblueprintfactory.org:8080/realms/slices-test"
-oidc_client_id: "jupyterhub-client"
-oidc_client_secret: "ERm5yMzbtGUDTJ5IuA09MxUUH8NgZBI2"
-oidc_scope:
-  - "openid"
-  - "profile"
-  - "email"
-oidc_username_claim: "preferred_username"
-
-jupyterhub_public_url: "http://10.64.45.176/jupyter"
-oidc_tls_verify: false 
+oidc: 
+  oidc_enabled: false
+  oidc_issuer_url: "https://auth.theblueprintfactory.org:8080/realms/slices-test"
+  oidc_client_id: "jupyterhub-client"
+  oidc_client_secret: "ERm5yMzbtGUDTJ5IuA09MxUUH8NgZBI2"
+  oidc_scope:
+    - "openid"
+    - "profile"
+    - "email"
+  oidc_username_claim: "preferred_username"
+  oidc_tls_verify: false 

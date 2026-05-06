@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: model-cache-pvc
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: model-cache
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   replicas: 1
   selector:
@@ -43,11 +43,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: model-cache
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   selector:
     app: model-cache
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
+{% if tier0.expose_mode | default('nodeport') == 'ingress' %}
   type: ClusterIP
   ports:
     - name: http
@@ -60,16 +60,16 @@ spec:
     - name: http
       port: 80
       targetPort: 80
-      nodePort: {{ tier0_modelcache_nodeport | default(30080) }}
+      nodePort: {{ tier0.modelcache_nodeport | default(30080) }}
 {% endif %}
 
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
+{% if tier0.expose_mode | default('nodeport') == 'ingress' %}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: tier0-model-cache
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
   annotations:
     kubernetes.io/ingress.class: traefik
 spec:

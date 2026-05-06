@@ -1,224 +1,262 @@
-# DigitAfrica EDGE-AI BP
+# DigitAfrica Edge-AI Blueprint
 
----
-This is the repository for deploying the Edge-AI Blueprint for DigitAfrica. Current repository is a scaffold for further developments in the project.
-
-## What this deploys (high level)
-
-Current implementation supports the following deployments:
-* Tier - 0 : Bare metal implementation, deploying Jupyter notebooks on a single node, allowing playbooks to run on top. Implementation is deploying the following:
-  *  Jupyter as a docker container
-  *  cAdvisor for container-level statistics
-  *  NodeExporter for node-level statistics
-* Tier - 0 - k3s : K3s based implementation, deploying a single-node K3s cluster, and Jupyterhub on top. 
-* Tier - 1: K3s implementation, deploying a multi-node K3s cluster, with Jupyterhub. Once it is instantiated, users can login with their accounts, and deploy their notebooks.
-
-For all the cases, we assume that the use cases will deploy their functionality through scripts/notebooks on the infrastructure.
-
-Current code has been tested using a three-node cluster, based on the Raspberry-Pi 5 platform.
+Ansible-based deployment of a two-tier Edge-AI infrastructure: a lightweight single-node tier (Tier-0) and a multi-node Kubernetes cluster (Tier-1) running JupyterHub.
 
 ---
 
-## Configuration for the BP
+## What changed in this iteration
 
-Hosts need to be declared in the ```inventories/prod/hosts.ini``` file.
+- **Playbook split** — `site.yml` now uses `import_playbook` to call `tier0.yml` and `tier1.yml` independently. 
+- **`expose_mode` replaces all k3s booleans** — both tiers now use a single `expose_mode: "ingress"|"nodeport"` string. Ingress places all services behind traefik, while nodeport uses the provided port Numbers for port forwarding
+- **TLS for Tier-1** — new `tls_mode` variable with four options: `selfsigned`, `letsencrypt`, `provided`, `none`. Self-signed certificates are generated automatically (may produce a warning when visiting the jupyterhub with self-signed certs). You can select provided and provide the folder on the node where the certificates are added, or use let;s encrypt if the machine has a public IP with ports 80 and 443 open (you need to provide an email for registering the certificate with let's encrypt)
+- **Notebook seeding via ConfigMap** — Example starting notebooks are injected into JupyterHub pods through a Kubernetes ConfigMap instead of a PVC volume. This removes the node pin existing in previous iterations. Now pods can be scheduled freely across any cluster node.
+- **Configurable storage class** — `tier1.jupyterhub.storage_class` controls which StorageClass backs user PVCs. Default is `local-path`. Tested with the NFS server implementation for DigitAfrica. 
+- **OIDC toggle** — `oidc.oidc_enabled: true|false` switches JupyterHub between Keycloak/OIDC and a local dummy authenticator with no redeploy of the cluster. Previous versions had a hard dependency on OIDC for Tier-1.
+- **MLflow / Grafana enabled flags** — `tier1.mlflow.enabled` and `tier1.grafana_enabled` control whether those services are deployed. The services are not yet available, this is a placeholder for future developments. 
 
+---
+
+## What this deploys
+
+### Tier-0 — single node, no Kubernetes
+
+Runs directly on bare metal or a VM. Three sub-modes controlled by `tier0.k3s_mode`:
+
+| `tier0.k3s_mode` | What gets deployed |
+|---|---|
+| `none` | Jupyter notebook as a Docker container + cAdvisor + Node Exporter |
+| `single` | k3s single-node cluster + JupyterHub via Helm + optional model cache |
+| `agent` | Joins this node to the Tier-1 cluster as a k3s agent |
+
+### Tier-1 — multi-node Kubernetes cluster
+
+Deploys a k3s cluster (one server node + any number of agents) and on top of it:
+
+- **JupyterHub** (via Helm) — multi-user notebook environment with persistent home directories
+- **Traefik Ingress** (built-in k3s) — routes all traffic through paths on port 80/443
+- **Example notebooks** — pre-loaded into every user's home directory 
+
+---
+
+## Quick start
+
+### 1. Prerequisites
+
+On the control machine:
+
+```bash
+pip install ansible
+ansible-galaxy collection install -r requirements.yml
 ```
+
+SSH access to all target nodes is required (`ansible_ssh_pass` or key-based).
+
+### 2. Inventory
+
+Edit `inventories/prod/hosts.ini`:
+
+```ini
 ### TIER 0 NODES ###
-[tier0]
-; digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="1234" ansible_become_pass="1234" tier0_k3s_mode="none"
-; digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="1234" ansible_become_pass="1234" tier0_k3s_mode="single"
+; [tier0]
+; digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="REDACTED" ansible_become_pass="REDACTED"
+; digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="REDACTED" ansible_become_pass="REDACTED"
 
 ### TIER 1 NODES ###
 [tier1_server]
-digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="1234" ansible_become_pass="1234"
+digitafrica-edge-node1 ansible_host=10.64.45.176 ansible_ssh_pass="REDACTED" ansible_become_pass="REDACTED"
 
 [tier1_agents]
-digitafrica-edge-node2 ansible_host=10.64.45.179 ansible_ssh_pass="1234" ansible_become_pass="1234"
-
-
-[tier1:children]
-tier1_server
-tier1_agents
+digitafrica-edge-node2 ansible_host=10.64.45.179 ansible_ssh_pass="REDACTED" ansible_become_pass="REDACTED"
 
 [all:vars]
 ansible_user=ubuntu
 ansible_become=true
+#ansible_ssh_common_args='-o ProxyJump=proxy@bastion1.theblueprintfactory.org'
+
 ```
 
-Depending on the type of the deployment (Tier-0/1) only the respective configs need to be present.
+Only populate the groups you actually use. If running Tier-0 only, leave `tier1_*` groups empty (or commented out), and vice versa.
+The hostnames e.g. digitafrica-edge-node1 need to match the hostnames of the nodes on which the deployment takes place for Tier-1, otherwise the cluster creation will fail.
 
-### Key variables in `inventories/prod/group_vars/all.yml`
+### 3. Configure variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `k3s_disable_traefik` | `false` | `false` enables Traefik Ingress. `true` disables it (services fall back to NodePort). |
-| `k3s_disable_servicelb` | auto-derived | Automatically set to `true` when Traefik is enabled. Do not set manually. |
-| `tier0_expose_mode` | `ingress` | `ingress` routes Tier-0 services through Traefik. `nodeport` exposes them on raw ports (backward compatible). |
-| `jupyterhub_public_url` | `http://<host>/jupyter` | **Must match the server IP or DNS name.** Used to generate OIDC callback URLs and the final access URL. |
+All options are included in `inventories/prod/group_vars/all.yml`. See the [Configuration reference](#configuration-reference) below.
 
-> **Important:** Change `jupyterhub_public_url` to match your actual server address before deploying. For example:
-> ```yaml
-> jupyterhub_public_url: "http://10.64.45.176/jupyter"
-> ```
-> If you use a DNS name instead of an IP, also add the hostname to `tls_domains`.
+At minimum set:
+- `tier1.jupyterhub.jupyterhub_public_url` — server's IP or DNS name
+- `tier0.k3s_mode` — `none`, `single`, or `agent`
 
----
+### 4. Deploy
 
-## Networking — Traefik Ingress
-
-All services are exposed through the **Traefik Ingress controller** that ships with k3s. There are no NodePort assignments to manage.
-
-| Service | Path | Notes |
-|---|---|---|
-| JupyterHub (Tier-0 k3s) | `http://<host>/jupyter/` | Single-node k3s |
-| JupyterHub (Tier-1) | `http://<host>/jupyter/` | Multi-node k3s |
-| Model cache (Tier-0) | `http://<host>/models/` | Static file server |
-
-Visiting the path without a trailing slash (e.g. `/jupyter`) redirects automatically to `/jupyter/`.
-
-
-### Falling back to NodePort
-
-If you want to skip Traefik and use plain NodePort (e.g. for debugging or constrained environments), set these in `group_vars/all.yml`:
-
-```yaml
-k3s_disable_traefik: true
-tier0_expose_mode: "nodeport"
-```
-
-Services will then be reachable at `http://<host>:30888` (JupyterHub) and `http://<host>:30080` (model cache).
-
----
-
-## Deploying the BP
-
-To install on the nodes declared at the hosts.ini file, ensure that the deploying machine has ```ansible``` and ```ssh-pass``` installed, and ssh access to all the machines.
-
-```bash
-ansible-galaxy collection install -r requirements.yml
-```
-
-To install the BP, use the following command:
-
+Full deployment (depending on which tier is active on the hosts.ini file):
 ```bash
 ansible-playbook -i inventories/prod/hosts.ini playbooks/site.yml
 ```
 
-You can uninstall the current version of the BP using the following command:
+Tier-0 only:
+```bash
+ansible-playbook -i inventories/prod/hosts.ini playbooks/tier0.yml
+```
 
-```bash 
+Tier-1 only:
+```bash
+ansible-playbook -i inventories/prod/hosts.ini playbooks/tier1.yml
+```
+
+### 5. Uninstall
+
+```bash
 ansible-playbook -i inventories/prod/hosts.ini playbooks/site.yml -e digitafrica_uninstall=true
 ```
 
-# OIDC Authentication Implementation
+---
 
-## Overview
+## Configuration reference
 
-In the Tier-1 deployment, authentication has been implemented using **OpenID Connect (OIDC)**.
+### Tier-0
 
-JupyterHub is configured to delegate authentication to an external Identity Provider (IdP).  
-In this setup, the IdP is **Keycloak**.
+| Variable | Default | Description |
+|---|---|---|
+| `tier0.k3s_mode` | `none` | `none` = Docker-only \| `single` = k3s cluster \| `agent` = join Tier-1 |
+| `tier0.expose_mode` | `ingress` | `ingress` = Traefik (only valid when `k3s_mode=single`) \| `nodeport` = raw ports |
+| `tier0.notebook_port` | `8888` | Port the Jupyter container listens on |
+| `tier0.jupyter_nodeport` | `30888` | NodePort used when `expose_mode=nodeport` |
+| `tier0.modelcache_nodeport` | `30080` | NodePort for model cache when `expose_mode=nodeport` |
+| `tier0.enable_modelcache` | `false` | Deploy the static model-cache service |
+| `tier0.notebook_user` | `digitafrica` | Local Linux user that owns notebook files |
+| `tier0.notebook_dir` | `/opt/digitafrica/notebooks` | Directory mounted into the Jupyter container |
+| `tier0.notebook_password` | `digitafrica` | Plain-text password (also set the hash below) |
+| `tier0.k3s_version` | `v1.30.4+k3s1` | k3s version to install (only when `k3s_mode=single`) |
+| `tier0.k3s_agent_server_host` | — | Tier-1 server hostname to join (only when `k3s_mode=agent`) |
+| `tier0.monitoring.node_exporter_port` | `9100` | Node Exporter port |
+| `tier0.monitoring.cadvisor_port` | `8080` | cAdvisor port |
 
-This replaces the previous DummyAuthenticator and allows real user-based authentication.
+### Tier-1
+
+| Variable | Default | Description |
+|---|---|---|
+| `tier1.expose_mode` | `ingress` | `ingress` = Traefik on port 80/443 \| `nodeport` = no Traefik, plain ports |
+| `tier1.tls_mode` | `selfsigned` | `selfsigned` \| `letsencrypt` \| `provided` \| `none` — see [TLS](#tls) |
+| `tier1.tls_cert_dir` | — | Local path to `tls.crt` + `tls.key` (only when `tls_mode=provided`) |
+| `tier1.tls_acme_email` | — | Email for Let's Encrypt registration (only when `tls_mode=letsencrypt`) |
+| `tier1.k3s_version` | `v1.30.4+k3s1` | k3s version |
+| `tier1.k3s_server_host` | — | Hostname of the k3s server node |
+| `tier1.k3s_cluster_cidr` | `10.42.0.0/16` | Pod CIDR |
+| `tier1.k3s_service_cidr` | `10.43.0.0/16` | Service CIDR |
+| `tier1.digitafrica_namespace` | `digitafrica` | Kubernetes namespace for all app resources |
+| `tier1.jupyterhub.jupyterhub_public_url` | `https://<host>/jupyter` | **Must match node's IP or DNS name.** Used for the final access URL. |
+| `tier1.jupyterhub.jupyter_nodeport` | `30888` | NodePort for JupyterHub when `expose_mode=nodeport` |
+| `tier1.jupyterhub.storage_class` | `local-path` | StorageClass for user PVCs. Tested with the `nfs-client` and the NFS-Server implementation |
+| `tier1.jupyterhub.jupyterhub_admin_users` | `["admin"]` | List of JupyterHub admin usernames |
+| `tier1.mlflow.enabled` | `false` | Deploy MLflow experiment tracking |
+| `tier1.mlflow.mlflow_port` | `5000` | MLflow listening port |
+| `tier1.grafana_enabled` | `false` | Deploy Grafana dashboards |
+
+### OIDC / Keycloak
+
+| Variable | Default | Description |
+|---|---|---|
+| `oidc.oidc_enabled` | `false` | `true` = Keycloak/OIDC login \| `false` = local dummy authenticator |
+| `oidc.oidc_issuer_url` | — | Keycloak realm URL, e.g. `https://auth.example.org/realms/myrealm` |
+| `oidc.oidc_client_id` | — | Client ID registered in Keycloak |
+| `oidc.oidc_client_secret` | — | Client secret from Keycloak |
+| `oidc.oidc_scope` | `[openid, profile, email]` | OAuth scopes to request |
+| `oidc.oidc_username_claim` | `preferred_username` | JWT claim used as the JupyterHub username |
+| `oidc.oidc_tls_verify` | `false` | Set to `true` if your Keycloak cert is trusted |
+
+
 
 ---
 
-## What is OIDC?
+## TLS
 
-OpenID Connect (OIDC) is an authentication protocol built on top of OAuth 2.0.
+TLS is configured via `tier1.tls_mode` and only applies when `expose_mode: ingress`. 
 
-It allows applications (such as JupyterHub) to authenticate users through an external Identity Provider (such as Keycloak).
-
-The flow is:
-
-1. User accesses JupyterHub.
-2. JupyterHub redirects the user to Keycloak.
-3. User logs in on Keycloak.
-4. Keycloak returns an authentication token to JupyterHub.
-5. JupyterHub validates the token and creates a user session.
-
----
-
-## Key Components Explained
-
-### Client ID
-
-The `client_id` identifies JupyterHub inside Keycloak.
-
-It tells Keycloak:
-“This authentication request is coming from the JupyterHub application.”
-
-It must match the Client ID configured in Keycloak.
-
----
-
-### Client Secret
-
-The `client_secret` is a private credential shared between JupyterHub and Keycloak.
-
-It is used to:
-- Prove that JupyterHub is a trusted application
-- Secure the token exchange process
-
-This value must be kept confidential.
-
----
-
-### Issuer URL
-
-The `issuer_url` points to the Keycloak realm endpoint
-
-JupyterHub uses this to construct:
-
-- Authorization endpoint
-- Token endpoint
-- Userinfo endpoint
-
----
-
-### OAuth Callback URL
-
-The callback URL is where Keycloak redirects the user after successful login
-
-This must be configured in Keycloak under:
-
-- Valid Redirect URIs
-- Web Origins
-
----
-
-## Implementation Details
-
-The OIDC authenticator was implemented in the Helm values file:
+### `selfsigned` (default)
+Generates a certificate on the server. Stored as a Kubernetes TLS secret (`jhub-tls`). Browsers will show a warning — expected for self-signed certs.
 
 ```yaml
-hub:
-  config:
-    JupyterHub:
-      authenticator_class: generic-oauth
-
-    GenericOAuthenticator:
-      client_id: "{{ oidc_client_id }}"
-      client_secret: "{{ oidc_client_secret }}"
-      authorize_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/auth"
-      token_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/token"
-      userdata_url: "{{ oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
-      scope: {{ oidc_scope | to_json }}
-      username_claim: "{{ oidc_username_claim }}"
-      tls_verify: false
-      validate_server_cert: false
-      oauth_callback_url: "{{ jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
-
-    Authenticator:
-      allow_all: true
+tier1:
+  tls_mode: "selfsigned"
 ```
 
-These variables are defined in the Ansible inventory or group variables and rendered into the Helm chart during deployment.
+### `provided`
+You supply `tls.crt` and `tls.key` in a local directory. Ansible copies them to the server and creates the secret.
 
-# Reference
+```yaml
+tier1:
+  tls_mode: "provided"
+  tls_cert_dir: "/path/to/your/certs"   # local path on the control machine
+```
 
-For related architecture and identity integration design, refer to:
+### `letsencrypt`
+Installs `cert-manager` for Let's Encrypt ACME HTTP-01 challenge. Requires a real DNS name (not a raw IP) in `jupyterhub_public_url` and ports 80/443 publicly reachable.
 
-DigitAfrica User Portal:
-https://gitlab.inria.fr/digitafrica/blueprints/services/user-portal
+```yaml
+tier1:
+  tls_mode: "letsencrypt"
+  tls_acme_email: "admin@yourdomain.com"
+  jupyterhub:
+    jupyterhub_public_url: "https://yourdomain.com/jupyter"
+```
+
+### `none`
+HTTP only. JupyterHub will show an HTTPS warning.
+
+```yaml
+tier1:
+  tls_mode: "none"
+  jupyterhub:
+    jupyterhub_public_url: "http://10.64.45.176/jupyter"
+```
+
+---
+
+## Networking
+
+### Ingress mode (default)
+Traefik (built into k3s) handles all traffic on ports 80 and 443. No NodePort assignments to manage. A redirect middleware ensures `/jupyter` (without trailing slash) redirects to `/jupyter/`.
+
+| Service | Path |
+|---|---|
+| JupyterHub | `https://<host>/jupyter/` |
+| Model cache (Tier-0) | `http://<host>/models/` |
+
+### NodePort mode
+Set `expose_mode: nodeport` in the relevant tier. Traefik is disabled; services are reachable on raw ports.
+
+| Service | Port variable | Default |
+|---|---|---|
+| JupyterHub (Tier-0/1) | `jupyter_nodeport` | `30888` |
+| Model cache (Tier-0) | `modelcache_nodeport` | `30080` |
+
+
+
+## OIDC Authentication
+
+JupyterHub delegates login to an external Identity Provider via OpenID Connect (OIDC). The flow:
+
+1. User visits JupyterHub
+2. JupyterHub redirects to Keycloak
+3. User authenticates on Keycloak
+4. Keycloak returns a token; JupyterHub validates it and creates a session
+
+When `oidc.oidc_enabled: false`, JupyterHub falls back to a `dummy` authenticator — any username/password is accepted. Useful for local testing.
+
+After enabling OIDC, register the callback URL in Keycloak under **Valid Redirect URIs**:
+```
+https://<your-host>/jupyter/hub/oauth_callback
+```
+
+---
+
+## Related blueprints
+
+| Blueprint | Purpose |
+|---|---|
+| [k3s-cluster](https://gitlab.inria.fr/digitafrica/blueprints/services/k3s-cluster.git) | Standalone k3s cluster without app layer |
+| [nfs-server](https://gitlab.inria.fr/digitafrica/blueprints/services/nfs-server.git) | NFS server + provisioner for multi-node persistent storage |
+| [jupyterhub-on-k3s](https://gitlab.inria.fr/digitafrica/blueprints/services/jupyterhub-on-k3s.git) | JupyterHub-only deployment on an existing cluster |
+| [user-portal](https://gitlab.inria.fr/digitafrica/blueprints/services/user-portal.git) | Keycloak-based user portal for OIDC identity management |
+
+

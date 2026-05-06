@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: tier0-notebooks-pvc
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tier0-jupyter
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   replicas: 1
   selector:
@@ -41,9 +41,9 @@ spec:
                 --ServerApp.ip=0.0.0.0 \
                 --ServerApp.port=8888 \
                 --ServerApp.token='' \
-                --ServerApp.password='{{ tier0_notebook_password_hash }}' \
+                --ServerApp.password='{{ tier0.notebook_password_hash }}' \
                 --ServerApp.allow_remote_access=True \
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
+{% if tier0.expose_mode | default('nodeport') == 'ingress' %}
                 --ServerApp.base_url=/jupyter/
 {% endif %}
           volumeMounts:
@@ -59,11 +59,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: tier0-jupyter
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
 spec:
   selector:
     app: tier0-jupyter
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
+{% if tier0.expose_mode | default('nodeport') == 'ingress' %}
   type: ClusterIP
   ports:
     - name: http
@@ -76,16 +76,16 @@ spec:
     - name: http
       port: 8888
       targetPort: 8888
-      nodePort: {{ tier0_jupyter_nodeport | default(30888) }}
+      nodePort: {{ tier0.jupyter_nodeport | default(30888) }}
 {% endif %}
 
-{% if tier0_expose_mode | default('nodeport') == 'ingress' %}
+{% if tier0.expose_mode | default('nodeport') == 'ingress' %}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: tier0-jupyter
-  namespace: {{ digitafrica_namespace }}
+  namespace: {{ tier0.digitafrica_namespace }}
   annotations:
     kubernetes.io/ingress.class: traefik
 spec:

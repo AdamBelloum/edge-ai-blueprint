@@ -17,7 +17,7 @@
   args:
     executable: /bin/bash
   changed_when: false
-  when: k3s_disable_servicelb | default(false) | bool
+  when: tier0.expose_mode == 'ingress'
 
 - name: Assign node IP as externalIP on Traefik service (servicelb disabled)
   ansible.builtin.shell: |
@@ -26,7 +26,7 @@
       -p "{\"spec\":{\"externalIPs\":[\"{{ ansible_host | default(inventory_hostname) }}\"]}}"
   args:
     executable: /bin/bash
-  when: k3s_disable_servicelb | default(false) | bool
+  when: tier0.expose_mode == 'ingress'
   changed_when: false
 
 - name: Render Tier-0 namespace manifest
@@ -67,14 +67,14 @@
     k3s kubectl apply -f /opt/digitafrica/k8s-tier0/20-model-cache.yaml
   args:
     executable: /bin/bash
-  when: tier0_enable_modelcache | default(true) | bool
+  when: tier0.enable_modelcache | default(true) | bool
 
 - name: Validate Tier-0 manifests (server-side)
   ansible.builtin.shell: |
     set -e
     k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/00-namespace.yaml
     k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/10-jupyter-single.yaml
-    if {{ (tier0_enable_modelcache | default(true)) | bool | ternary('true','false') }}; then
+    if {{ (tier0.enable_modelcache | default(true)) | bool | ternary('true','false') }}; then
       k3s kubectl apply --dry-run=server -f /opt/digitafrica/k8s-tier0/20-model-cache.yaml
     fi
   args:
@@ -84,41 +84,41 @@
 - name: Wait for Tier-0 Jupyter deployment rollout
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/tier0-jupyter --timeout=300s
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} rollout status deploy/tier0-jupyter --timeout=300s
   args:
     executable: /bin/bash
 
 - name: Wait for Tier-0 model-cache deployment rollout (optional)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ digitafrica_namespace }} rollout status deploy/model-cache --timeout=300s
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} rollout status deploy/model-cache --timeout=300s
   args:
     executable: /bin/bash
-  when: tier0_enable_modelcache | default(true) | bool
+  when: tier0.enable_modelcache | default(true) | bool
 
 - name: Get Jupyter NodePort
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ digitafrica_namespace }} get svc tier0-jupyter \
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} get svc tier0-jupyter \
       -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
   args:
     executable: /bin/bash
   register: jupyter_nodeport
   changed_when: false
-  when: tier0_expose_mode | default('nodeport') == 'nodeport'
+  when: tier0.expose_mode | default('nodeport') == 'nodeport'
 
 - name: Get model-cache NodePort (optional)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ digitafrica_namespace }} get svc model-cache \
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} get svc model-cache \
       -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
   args:
     executable: /bin/bash
   register: modelcache_nodeport
   changed_when: false
   when:
-    - tier0_enable_modelcache | default(true) | bool
-    - tier0_expose_mode | default('nodeport') == 'nodeport'
+    - tier0.enable_modelcache | default(true) | bool
+    - tier0.expose_mode | default('nodeport') == 'nodeport'
 
 
 - name: Stage seed notebooks on Tier-0 node
@@ -130,23 +130,23 @@
 #- name: Copy notebooks from host into Tier-0 Jupyter PVC
 #  ansible.builtin.shell: |
 #    set -e
-#    POD=$(k3s kubectl -n {{ digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
-#    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks/ "$POD":/home/jovyan/
-#    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- mv /home/jovyan/seed-notebooks/notebooks /home/jovyan/digitafrica
-#    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt 
+#    POD=$(k3s kubectl -n {{ tier0.digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
+#    k3s kubectl -n {{ tier0.digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks/ "$POD":/home/jovyan/
+#    k3s kubectl -n {{ tier0.digitafrica_namespace }} exec "$POD" -- mv /home/jovyan/seed-notebooks/notebooks /home/jovyan/digitafrica
+#    k3s kubectl -n {{ tier0.digitafrica_namespace }} exec "$POD" -- pip install --no-cache-dir -r /home/jovyan/digitafrica/requirements.txt 
 #  args:
 #    executable: /bin/bash
 
 - name: Copy notebooks from host into Tier-0 Jupyter PVC
   ansible.builtin.shell: |
     set -euo pipefail
-    POD=$(k3s kubectl -n {{ digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
+    POD=$(k3s kubectl -n {{ tier0.digitafrica_namespace }} get pod -l app=tier0-jupyter -o jsonpath='{.items[0].metadata.name}')
 
     # Copy seed notebooks directory into the pod
-    k3s kubectl -n {{ digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks "$POD":/home/jovyan/
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} cp /opt/digitafrica/seed-notebooks "$POD":/home/jovyan/
 
     # Move notebooks into final location, install deps, then clean up
-    k3s kubectl -n {{ digitafrica_namespace }} exec "$POD" -- bash -lc '
+    k3s kubectl -n {{ tier0.digitafrica_namespace }} exec "$POD" -- bash -lc '
       set -e
       mkdir -p /home/jovyan/digitafrica
 
@@ -166,11 +166,11 @@
     msg:
       - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}:{{ jupyter_nodeport.stdout }}"
       - "Model-cache URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ modelcache_nodeport.stdout | default('') }}"
-  when: tier0_expose_mode | default('nodeport') == 'nodeport'
+  when: tier0.expose_mode | default('nodeport') == 'nodeport'
 
 - name: Show Tier-0 access URLs (Ingress)
   ansible.builtin.debug:
     msg:
       - "Jupyter URL:     http://{{ ansible_host | default(inventory_hostname) }}/jupyter/"
       - "Model-cache URL: http://{{ ansible_host | default(inventory_hostname) }}/models/"
-  when: tier0_expose_mode | default('nodeport') == 'ingress'
+  when: tier0.expose_mode | default('nodeport') == 'ingress'
