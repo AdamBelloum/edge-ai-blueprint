@@ -138,7 +138,7 @@
 
 - name: Stage Traefik middleware manifest
   ansible.builtin.template:
-    src: templates/05-traefik-middleware.yaml.j2
+    src: 05-traefik-middleware.yaml.j2
     dest: /opt/digitafrica/k8s/05-traefik-middleware.yaml
     mode: "0644"
 

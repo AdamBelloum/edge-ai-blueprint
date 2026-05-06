@@ -8,6 +8,9 @@
   ansible.builtin.set_fact:
     k3s_join_token: "{{ k3s_token.content | b64decode | trim }}"
 
+#- name: Fetch token from k3s server hostvars
+#  ansible.builtin.set_fact:
+#    k3s_join_token: "{{ hostvars[tier1.k3s_server_host].k3s_node_token_decoded }}"
 
 - name: Install k3s agent (join Tier-1 server)
   ansible.builtin.shell: |

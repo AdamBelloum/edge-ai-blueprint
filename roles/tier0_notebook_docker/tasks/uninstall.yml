@@ -9,3 +9,32 @@
     path: "{{ tier0_notebook_dir }}"
     state: absent
   when: remove_data | default(false) | bool
+
+- name: Stop and disable Docker service
+  ansible.builtin.systemd:
+    name: docker
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: Remove Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Remove Docker APT repo
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
+- name: Remove Docker GPG key
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.gpg
+    state: absent
