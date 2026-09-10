@@ -1,11 +1,11 @@
----
 # Tier-1 playbook — only touches tier1_server/tier1_agents hosts, only reads tier1.* and oidc.*
 # Run standalone: ansible-playbook playbooks/tier1.yml
 
 - name: Base setup on Tier-1 nodes
   hosts: tier1_server:tier1_agents
   roles:
-    - common
+    - role: common
+      when: not (digitafrica_uninstall | default(false) | bool)
 
 - name: Tier-1 k3s server (install)
   hosts: tier1_server
@@ -42,3 +42,100 @@
   roles:
     - role: k3s_server
       when: digitafrica_uninstall | default(false) | bool
+
+# ====================================================================
+# AUTOMATED HOST DEPLOYMENT: FLOWER SERVER ON MASTER NODE (ab-01)
+# ====================================================================
+- name: Prepare Federated Learning Server Code on Control Plane
+  hosts: tier1_server
+  become: false
+  pre_tasks:
+    - name: Skip Flower server source preparation during uninstall
+      ansible.builtin.meta: end_play
+      when: digitafrica_uninstall | default(false) | bool
+  vars:
+    repo_url: "https://github.com/AdamBelloum/Tutorials.git"
+    dest_dir: "/home/adam/tutorials"
+  tasks:
+    - name: Ensure the target directory structure exists
+      file:
+        path: "{{ dest_dir }}"
+        state: directory
+        owner: adam
+        group: adam
+        mode: '0755'
+
+    - name: Initialize git and configure sparse checkout for the server
+      shell: |
+        git init
+        git remote add origin {{ repo_url }} || git remote set-url origin {{ repo_url }}
+        git config core.sparseCheckout true
+        echo "Distributed-Systems/federated-learning/server/*" > .git/info/sparse-checkout
+      args:
+        chdir: "{{ dest_dir }}"
+        creates: "{{ dest_dir }}/.git"
+
+    - name: Pull fresh server files from the main branch
+      shell: git pull --depth 1 origin main
+      args:
+        chdir: "{{ dest_dir }}"
+
+    - name: Create a convenient symlink to server.py in the home root
+      file:
+        src: "{{ dest_dir }}/Distributed-Systems/federated-learning/server/server.py"
+        dest: /home/adam/server.py
+        state: link
+
+# ====================================================================
+# AUTOMATED HOST DEPLOYMENT: FLOWER SERVER ON MASTER NODE (ab-01)
+# ====================================================================
+
+- name: Deploy Federated Learning Client Workspaces
+  hosts: tier1_server
+  become: false  # Use adam's existing kubectl configuration
+
+  roles:
+    - role: jupyterhub_deployment
+      when: not (digitafrica_uninstall | default(false) | bool)
+
+# ====================================================================
+# FLOWER SERVER RUNTIME: virtual environment on tier1_server
+# ====================================================================
+- name: Prepare Flower server virtual environment on Control Plane
+  hosts: tier1_server
+  become: false
+  pre_tasks:
+    - name: Skip Flower venv setup during uninstall
+      ansible.builtin.meta: end_play
+      when: digitafrica_uninstall | default(false) | bool
+  vars:
+    fl_venv: "/home/adam/.venvs/fl-workshop"
+  tasks:
+    - name: Create Flower virtual environment
+      tags: [fl_venv]
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ fl_venv }}
+        creates: "{{ fl_venv }}/bin/python"
+
+    - name: Install Flower and ML dependencies into venv
+      tags: [fl_venv]
+      ansible.builtin.pip:
+        name:
+          - "flwr>=1.0.0"
+          - pandas
+          - numpy
+          - scikit-learn
+        virtualenv: "{{ fl_venv }}"
+        state: present
+
+    - name: Verify Flower is importable
+      tags: [fl_venv]
+      ansible.builtin.command:
+        cmd: "{{ fl_venv }}/bin/python -c 'import flwr; print(flwr.__version__)'"
+      register: flwr_version
+      changed_when: false
+
+    - name: Report installed Flower version
+      tags: [fl_venv]
+      ansible.builtin.debug:
+        msg: "Flower {{ flwr_version.stdout }} installed at {{ fl_venv }}"

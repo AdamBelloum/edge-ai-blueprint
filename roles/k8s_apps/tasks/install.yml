@@ -39,7 +39,7 @@
 # #   when: tier1_enable_k3s | bool
 
 
-  
+
 # # - name: Wait for Tier-1 Jupyterhub deployment rollout
 # #   ansible.builtin.shell: |
 # #     set -e
@@ -144,13 +144,13 @@
 
 - name: Stage seed notebooks on Tier-1 node
   ansible.builtin.copy:
-    src: files/notebooks/
+    src: notebooks/
     dest: /opt/digitafrica/k8s-notebooks/
     mode: "0644"
 
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
-    src: templates/jhub-values.yaml.j2
+    src: jhub-values.yaml.j2
     dest: /opt/digitafrica/k8s/jhub-values.yaml
     mode: "0644"
 

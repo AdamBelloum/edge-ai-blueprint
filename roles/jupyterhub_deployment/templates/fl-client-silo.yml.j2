@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fl-client-silo-{{ silo_id }}
+  namespace: digitafrica
+  labels:
+    app: fl-client-silo
+    digitafrica.org/silo-id: "{{ silo_id }}"
+    digitafrica.org/group-id: "Group_{{ silo_id }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fl-client-silo
+      digitafrica.org/silo-id: "{{ silo_id }}"
+  template:
+    metadata:
+      labels:
+        app: fl-client-silo
+        digitafrica.org/silo-id: "{{ silo_id }}"
+        digitafrica.org/group-id: "Group_{{ silo_id }}"
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: "{{ client_vm }}"
+      containers:
+      - name: client
+        image: python:3.11-slim
+        env:
+        - name: GROUP_ID
+          value: "Group_{{ silo_id }}"
+        - name: DATA_PATH
+          value: "/home/jovyan/digitafrica/Distributed-Systems/federated-learning/data/partitions/Group_{{ silo_id }}/train.csv"
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends git
+            rm -rf /var/lib/apt/lists/*
+            pip install --no-cache-dir flwr pandas scikit-learn numpy cryptography
+            mkdir -p /home/jovyan/digitafrica
+            cd /home/jovyan/digitafrica
+            if [ -d .git ]; then
+              git pull --ff-only
+            else
+              git clone --depth 1 https://github.com/AdamBelloum/Tutorials.git .
+            fi
+            echo "Silo {{ silo_id }} for Group_{{ silo_id }} is ready on {{ client_vm }}."
+            exec sleep infinity
+        volumeMounts:
+        - mountPath: /home/jovyan/digitafrica
+          name: workspace-volume
+      volumes:
+      - name: workspace-volume
+        emptyDir: {}

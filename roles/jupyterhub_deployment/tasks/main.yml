@@ -1,0 +1,58 @@
+---
+- name: Validate that at least one federated-learning client VM is configured
+  ansible.builtin.assert:
+    that:
+      - groups['tier1_agents'] is defined
+      - groups['tier1_agents'] | length > 0
+    fail_msg: >-
+      No client VMs are configured in [tier1_agents].
+      Add one or more client VMs before deploying federated-learning Silos.
+
+- name: Verify every configured client VM is a Ready Kubernetes node
+  ansible.builtin.command:
+    cmd: kubectl wait --for=condition=Ready node/{{ item }} --timeout=30s
+  loop: "{{ groups['tier1_agents'] }}"
+  changed_when: false
+
+- name: Render one numbered Silo manifest for every configured client VM
+  ansible.builtin.template:
+    src: fl-client-silo.yml.j2
+    dest: "/home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml"
+    mode: '0644'
+  loop: "{{ groups['tier1_agents'] }}"
+  loop_control:
+    index_var: silo_index
+  vars:
+    silo_id: "{{ '%02d' | format(silo_index + 1) }}"
+    client_vm: "{{ item }}"
+
+- name: Apply one numbered Silo deployment for every configured client VM
+  ansible.builtin.command:
+    cmd: kubectl apply -f /home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml
+  loop: "{{ groups['tier1_agents'] }}"
+  loop_control:
+    index_var: silo_index
+  register: silo_apply_output
+  changed_when: >-
+    'created' in silo_apply_output.stdout or
+    'configured' in silo_apply_output.stdout
+
+- name: Wait for all numbered Silo deployments to become available
+  ansible.builtin.command:
+    cmd: >-
+      kubectl -n digitafrica rollout status
+      deployment/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}
+      --timeout=300s
+  loop: "{{ groups['tier1_agents'] }}"
+  loop_control:
+    index_var: silo_index
+  changed_when: false
+
+- name: Remove superseded legacy A and B Silo deployments
+  ansible.builtin.command:
+    cmd: >-
+      kubectl -n digitafrica delete deployment
+      fl-client-silo-a fl-client-silo-b
+      --ignore-not-found=true
+  register: legacy_silo_delete
+  changed_when: "'deleted' in legacy_silo_delete.stdout"

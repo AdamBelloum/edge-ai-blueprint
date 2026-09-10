@@ -1,0 +1,15 @@
+# Local Ansible/Python environment
+.venv
+__pycache__/
+*.py[cod]
+*.bak
+
+# Local deployment configuration; use all.yml.example after cloning.
+/inventories/prod/group_vars/all.yml
+/inventories/prod/group_vars/all.yml.original.tested
+
+# Local legacy JupyterHub manifest; use 20-jupyterhub.yaml.example when needed.
+/roles/k8s_apps/files/20-jupyterhub.yaml
+
+# Local legacy JupyterHub manifest; use 20-jupyterhub.yaml.example when needed.
+/roles/k8s_apps/files/20-jupyterhub.yaml
