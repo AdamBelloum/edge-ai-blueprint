@@ -79,6 +79,8 @@
         src: "{{ fl_runtime_root }}/app/server/server.py"
         dest: /home/adam/server.py
         state: link
+      # Check mode does not stage the source file that this link targets.
+      when: not ansible_check_mode
 
 - name: Stage isolated Flower client assets on Tier-1 worker nodes
   hosts: tier1_agents

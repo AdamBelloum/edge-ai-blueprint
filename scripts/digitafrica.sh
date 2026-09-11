@@ -25,7 +25,8 @@ source "${SCRIPT_DIR}/lib/common.sh"
 readonly SETUP_SCRIPT="${SCRIPT_DIR}/admin/setup-wizard.sh"
 readonly DEPLOY_SCRIPT="${SCRIPT_DIR}/admin/deploy-infrastructure.sh"
 readonly HEALTH_SCRIPT="${SCRIPT_DIR}/admin/health-check.sh"
-readonly WORKSHOP_SCRIPT="${SCRIPT_DIR}/workshop/fl-workshop.sh"
+readonly WORKSHOP_HELPER="${SCRIPT_DIR}/workshop/fl-workshop.sh"
+readonly ORGANIZER_WIZARD="${SCRIPT_DIR}/workshop/organizer_wizard.sh"
 
 usage() {
   cat <<'EOF'
@@ -34,7 +35,8 @@ Usage:
   ./scripts/digitafrica.sh admin setup
   ./scripts/digitafrica.sh admin deploy [full|tier0|tier1|tier1-server|preflight]
   ./scripts/digitafrica.sh admin health [all|infrastructure|jupyterhub|silos]
-  ./scripts/digitafrica.sh workshop [preflight|revisions|inspect-silo-a|inspect-silo-b|checklist|record-template]
+  ./scripts/digitafrica.sh workshop [readiness]
+  ./scripts/digitafrica.sh workshop helper [preflight|revisions|inspect-silo-a|inspect-silo-b|checklist|record-template]
 
 Inventory selection:
   If inventories/workshop/hosts.ini exists, it is used automatically.
@@ -46,7 +48,8 @@ require_helpers() {
   require_file "${SETUP_SCRIPT}"
   require_file "${DEPLOY_SCRIPT}"
   require_file "${HEALTH_SCRIPT}"
-  require_file "${WORKSHOP_SCRIPT}"
+  require_file "${WORKSHOP_HELPER}"
+  require_file "${ORGANIZER_WIZARD}"
 }
 
 admin_menu() {
@@ -88,7 +91,7 @@ EOF
     read -r -p "Selection: " choice
     case "${choice}" in
       1) admin_menu ;;
-      2) bash "${WORKSHOP_SCRIPT}" menu ;;
+      2) bash "${ORGANIZER_WIZARD}" ;;
       3) show_context ;;
       0) log "Exiting."; return 0 ;;
       *) warn "Choose a number from 0 to 3." ;;
@@ -117,7 +120,18 @@ main() {
       ;;
     workshop)
       require_helpers
-      bash "${WORKSHOP_SCRIPT}" "${action:-menu}"
+      case "${action:-readiness}" in
+        readiness|"")
+          bash "${ORGANIZER_WIZARD}"
+          ;;
+        helper)
+          bash "${WORKSHOP_HELPER}" "${argument:-menu}"
+          ;;
+        *)
+          usage >&2
+          die "Unknown workshop action: ${action}. Use readiness or helper."
+          ;;
+      esac
       ;;
     context)
       show_context

@@ -1,3 +1,10 @@
+{% set workshop_group_users = [] %}
+{% for _worker in groups['tier1_agents'] | default([]) %}
+{% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
+{% endfor %}
+{% set jupyterhub_admin_users = tier1.jupyterhub.jupyterhub_admin_users | default([]) %}
+{% set jupyterhub_allowed_users = (workshop_group_users + jupyterhub_admin_users) | unique | list %}
+
 c = get_config()
 
 {% if oidc.oidc_enabled %}
@@ -19,8 +26,10 @@ c.GenericOAuthenticator.tls_verify = {{ oidc.oidc_tls_verify | default(true) | t
 public_url = "{{ tier1.jupyterhub.jupyterhub_public_url }}".rstrip("/")
 c.GenericOAuthenticator.oauth_callback_url = public_url + "/hub/oauth_callback"
 
-# option: autoriser tout user authentifié
-c.Authenticator.allow_all = True
+# Permit only generated workshop groups and configured administrators.
+c.Authenticator.allow_all = False
+c.Authenticator.allowed_users = set({{ jupyterhub_allowed_users | to_json }})
+c.Authenticator.admin_users = set({{ jupyterhub_admin_users | to_json }})
 
 {% else %}
 c.JupyterHub.authenticator_class = "nativeauthenticator.NativeAuthenticator"

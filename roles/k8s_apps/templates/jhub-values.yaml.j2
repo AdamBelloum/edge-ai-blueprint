@@ -1,3 +1,9 @@
+{% set workshop_group_users = [] %}
+{% for _worker in groups['tier1_agents'] | default([]) %}
+{% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
+{% endfor %}
+{% set jupyterhub_admin_users = tier1.jupyterhub.jupyterhub_admin_users | default([]) %}
+{% set jupyterhub_allowed_users = (workshop_group_users + jupyterhub_admin_users) | unique | list %}
 proxy:
   service:
 {% if tier1.expose_mode == 'ingress' %}
@@ -65,7 +71,9 @@ hub:
 
 {% endif %}
     Authenticator:
-      allow_all: true
+      allow_all: false
+      allowed_users: {{ jupyterhub_allowed_users | to_json }}
+      admin_users: {{ jupyterhub_admin_users | to_json }}
 
 singleuser:
   image:

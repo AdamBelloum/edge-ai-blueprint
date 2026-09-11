@@ -16,3 +16,9 @@ __pycache__/
 
 # Local workshop runtime configuration
 scripts/workshop/workshop-release.env
+
+# Federated-learning workshop runtime artefacts.
+# Source CSVs and generated partitions are prepared locally for the active
+# Tier-1 topology and must not be committed.
+data/source/
+data/partitions/
