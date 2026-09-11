@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-WIZARD_VERSION="4.0.2"
+WIZARD_VERSION="5.0.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_RECORD="$SCRIPT_DIR/workshop-release.env"
@@ -66,12 +66,15 @@ else
 fi
 
 DATASET_CITATION_URL="${DATASET_CITATION_URL:-}"
+EDGE_AI_BLUEPRINT_REF="${EDGE_AI_BLUEPRINT_REF:-}"
+RUNTIME_REQUIREMENTS_SHA256="${RUNTIME_REQUIREMENTS_SHA256:-}"
+PARTITION_MANIFEST_SHA256="${PARTITION_MANIFEST_SHA256:-}"
+EXPERIMENT_MODE="${EXPERIMENT_MODE:-}"
 MIN_CLIENTS="${MIN_CLIENTS:-2}"
-# FLOWER_SERVER_HOST="${FLOWER_SERVER_HOST:-${SERVER_HOST:-}}"
-# FLOWER_SERVER_PORT="${FLOWER_SERVER_PORT:-${SERVER_PORT:-8080}}"
 FLOWER_SERVER_ADDRESS="${FLOWER_SERVER_ADDRESS:-}"
 FLOWER_SERVER_HOST="${FLOWER_SERVER_HOST:-${SERVER_HOST:-}}"
 FLOWER_SERVER_PORT="${FLOWER_SERVER_PORT:-${SERVER_PORT:-8080}}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
 
 if [[ -n "$FLOWER_SERVER_ADDRESS" ]]; then
   if [[ "$FLOWER_SERVER_ADDRESS" =~ ^([A-Za-z0-9.-]+):([1-9][0-9]{0,4})$ ]]; then
@@ -82,9 +85,15 @@ if [[ -n "$FLOWER_SERVER_ADDRESS" ]]; then
   fi
 fi
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/home/jovyan/digitafrica/Distributed-Systems/federated-learning}"
+is_sha256() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]]
+}
 
 [[ -n "$DATASET_CITATION_URL" ]] || fail "Release record field DATASET_CITATION_URL is not completed."
+[[ "$EDGE_AI_BLUEPRINT_REF" =~ ^[0-9a-f]{40,64}$ ]] || fail "EDGE_AI_BLUEPRINT_REF must be a committed Git SHA."
+is_sha256 "$RUNTIME_REQUIREMENTS_SHA256" || fail "RUNTIME_REQUIREMENTS_SHA256 must be a lowercase SHA-256 digest."
+is_sha256 "$PARTITION_MANIFEST_SHA256" || fail "PARTITION_MANIFEST_SHA256 must be a lowercase SHA-256 digest."
+[[ "$EXPERIMENT_MODE" == "workflow_demo" || "$EXPERIMENT_MODE" == "validated_model" ]] || fail "EXPERIMENT_MODE must be workflow_demo or validated_model."
 [[ "$MIN_CLIENTS" =~ ^[2-9][0-9]*$ ]] || fail "MIN_CLIENTS must be an integer of at least 2; found: ${MIN_CLIENTS@Q}."
 [[ "$FLOWER_SERVER_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || fail "FLOWER_SERVER_HOST (or SERVER_HOST) is missing or invalid."
 [[ "$FLOWER_SERVER_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && ((FLOWER_SERVER_PORT <= 65535)) || fail "FLOWER_SERVER_PORT (or SERVER_PORT) is invalid."
@@ -131,42 +140,83 @@ REMOTE
     for record in "${SILOS[@]}"; do
       IFS='|' read -r pod silo_id group_id phase <<<"$record"
       # Values originate in Kubernetes labels and fixed local configuration; reject unsafe values before interpolation.
-      if [[ ! "$pod" =~ ^[a-z0-9.-]+$ || ! "$group_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
-        fail "Unsafe or incomplete Silo metadata for record: $record"
+      if [[ ! "$pod" =~ ^[a-z0-9.-]+$ || ! "$silo_id" =~ ^[0-9]{2}$ || ! "$group_id" =~ ^group_[0-9]{2}$ || "$group_id" != "group_${silo_id}" ]]; then
+        fail "Unsafe, incomplete, or inconsistent Silo metadata for record: $record"
         preparation_ok=false
         continue
       fi
       check_script=$(cat <<REMOTE
 set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-k3s kubectl -n digitafrica exec "$pod" -- env GROUP_ID="$group_id" WORKSPACE_ROOT="$WORKSPACE_ROOT" python3 -c '
-import hashlib, json, os, sys
-root = os.environ["WORKSPACE_ROOT"]
+k3s kubectl -n digitafrica exec "$pod" -- env \
+  GROUP_ID="$group_id" \
+  EXPECTED_SILO_COUNT="${#SILOS[@]}" \
+  EXPECTED_REQUIREMENTS_SHA256="$RUNTIME_REQUIREMENTS_SHA256" \
+  EXPECTED_MANIFEST_SHA256="$PARTITION_MANIFEST_SHA256" \
+  WORKSPACE_ROOT="$WORKSPACE_ROOT" \
+  python3 -c '
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["WORKSPACE_ROOT"])
 group = os.environ["GROUP_ID"]
-manifest_path = os.path.join(root, "data", "partitions", "partition-manifest.json")
-source_path = os.path.join(root, "data", "source", "train.csv")
-partition_path = os.path.join(root, "data", "partitions", group, "train.csv")
+expected_silo_count = int(os.environ["EXPECTED_SILO_COUNT"])
+expected_requirements_sha = os.environ["EXPECTED_REQUIREMENTS_SHA256"]
+expected_manifest_sha = os.environ["EXPECTED_MANIFEST_SHA256"]
+
+requirements_path = root / "app" / "requirements.lock"
+manifest_path = root / "data" / "partition-manifest.json"
+partition_path = root / "data" / "train.csv"
+
 def digest(path):
     h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
-with open(manifest_path, encoding="utf-8") as f:
-    manifest = json.load(f)
+
+for required in (requirements_path, manifest_path, partition_path):
+    if not required.is_file():
+        raise SystemExit("missing mounted runtime asset: " + str(required))
+
+requirements_sha = digest(requirements_path)
+manifest_sha = digest(manifest_path)
+partition_sha = digest(partition_path)
+
+if requirements_sha != expected_requirements_sha:
+    raise SystemExit("requirements checksum differs from release record")
+if manifest_sha != expected_manifest_sha:
+    raise SystemExit("manifest checksum differs from release record")
+
+with manifest_path.open(encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
 entry = manifest.get("partitions", {}).get(group)
+if manifest.get("group_id_format") != "group_{NN}":
+    raise SystemExit("manifest group_id_format is not group_{NN}")
+if manifest.get("groups") != expected_silo_count:
+    raise SystemExit("manifest group count differs from discovered Silo count")
 if not entry:
     raise SystemExit("manifest has no partition entry for " + group)
-source_sha = digest(source_path)
-partition_sha = digest(partition_path)
-if source_sha != manifest.get("source_sha256"):
-    raise SystemExit("source checksum differs from manifest")
+if not isinstance(manifest.get("source_sha256"), str) or len(manifest["source_sha256"]) != 64:
+    raise SystemExit("manifest lacks a valid source_sha256 reference")
 if partition_sha != entry.get("sha256"):
     raise SystemExit("partition checksum differs from manifest")
+
+with partition_path.open(newline="", encoding="utf-8") as handle:
+    row_count = sum(1 for _ in csv.reader(handle)) - 1
+if row_count != entry.get("rows"):
+    raise SystemExit("partition row count differs from manifest")
+
 print("group=" + group)
 print("manifest_groups=" + str(manifest.get("groups")))
-print("source_sha256=" + source_sha)
+print("requirements_sha256=" + requirements_sha)
+print("manifest_sha256=" + manifest_sha)
 print("partition_sha256=" + partition_sha)
+print("partition_rows=" + str(row_count))
 '
 REMOTE
 )
@@ -217,7 +267,7 @@ REMOTE
   "$connectivity_ok" && ((${#SILOS[@]} > 0)) && pass "All discovered Silos can reach the Flower server."
 
   heading "Wizard v$WIZARD_VERSION — Step 6/6 — Confirm experiment scope"
-  wizard_warn "The organizer must describe this as a workflow demonstration unless the configured client code uses the prepared feature data and an evaluation protocol has been validated."
+  wizard_warn "The organizer must describe this as a workflow demonstration unless the configured client code uses approved feature data and an evaluation protocol has been validated."
 else
   heading "Wizard v$WIZARD_VERSION — Remaining checks"
   fail "Remote checks were not run because the Tier-1 helper or release-record validation failed."

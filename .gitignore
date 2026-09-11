@@ -13,3 +13,6 @@ __pycache__/
 
 # Local legacy JupyterHub manifest; use 20-jupyterhub.yaml.example when needed.
 /roles/k8s_apps/files/20-jupyterhub.yaml
+
+# Local workshop runtime configuration
+scripts/workshop/workshop-release.env

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: fl-client-silo
     digitafrica.org/silo-id: "{{ silo_id }}"
-    digitafrica.org/group-id: "Group_{{ silo_id }}"
+    digitafrica.org/group-id: "{{ group_id }}"
 spec:
   replicas: 1
   selector:
@@ -18,39 +18,63 @@ spec:
       labels:
         app: fl-client-silo
         digitafrica.org/silo-id: "{{ silo_id }}"
-        digitafrica.org/group-id: "Group_{{ silo_id }}"
+        digitafrica.org/group-id: "{{ group_id }}"
     spec:
       nodeSelector:
         kubernetes.io/hostname: "{{ client_vm }}"
       containers:
       - name: client
-        image: python:3.11-slim
+        image: python:3.13.5-slim
+        imagePullPolicy: IfNotPresent
         env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
         - name: GROUP_ID
-          value: "Group_{{ silo_id }}"
-        - name: DATA_PATH
-          value: "/home/jovyan/digitafrica/Distributed-Systems/federated-learning/data/partitions/Group_{{ silo_id }}/train.csv"
+          value: "{{ group_id }}"
+        - name: FLOWER_SERVER_ADDRESS
+          value: "{{ flower_server_address }}"
+        - name: CLIENT_DATA_PATH
+          value: "/workspace/data/train.csv"
+        - name: NUM_CLASSES
+          value: "5"
+        - name: SYNTHETIC_FEATURE_DIM
+          value: "16"
+        - name: SYNTHETIC_SEED
+          value: "42"
+        - name: LEARNING_RATE
+          value: "0.1"
+        - name: LOCAL_EPOCHS
+          value: "1"
         command: ["/bin/sh", "-c"]
         args:
           - |
             set -eu
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y --no-install-recommends git
-            rm -rf /var/lib/apt/lists/*
-            pip install --no-cache-dir flwr pandas scikit-learn numpy cryptography
-            mkdir -p /home/jovyan/digitafrica
-            cd /home/jovyan/digitafrica
-            if [ -d .git ]; then
-              git pull --ff-only
-            else
-              git clone --depth 1 https://github.com/AdamBelloum/Tutorials.git .
+            python -m pip install \
+              --disable-pip-version-check \
+              --no-cache-dir \
+              --requirement /workspace/app/requirements.lock
+
+            if [ ! -f /state/workflow-complete ]; then
+              echo "Starting {{ group_id }} workflow-demo client."
+              until python /workspace/app/client/client.py; do
+                echo "Flower server is unavailable; retrying in 10 seconds."
+                sleep 10
+              done
+              touch /state/workflow-complete
+              echo "{{ group_id }} workflow-demo client completed."
             fi
-            echo "Silo {{ silo_id }} for Group_{{ silo_id }} is ready on {{ client_vm }}."
+
             exec sleep infinity
         volumeMounts:
-        - mountPath: /home/jovyan/digitafrica
-          name: workspace-volume
+        - name: workspace-volume
+          mountPath: /workspace
+          readOnly: true
+        - name: state-volume
+          mountPath: /state
       volumes:
       - name: workspace-volume
+        hostPath:
+          path: "{{ fl_silo_runtime_root }}"
+          type: Directory
+      - name: state-volume
         emptyDir: {}

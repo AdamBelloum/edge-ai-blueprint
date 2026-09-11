@@ -1,0 +1,23 @@
+[Unit]
+Description=DIGITAfrica Flower workflow-demonstration server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=adam
+Group=adam
+WorkingDirectory={{ fl_runtime_root }}/app/server
+Environment=PYTHONUNBUFFERED=1
+Environment=FLOWER_SERVER_HOST=0.0.0.0
+Environment=FLOWER_SERVER_PORT=8080
+Environment=MIN_FIT_CLIENTS={{ fl_client_count }}
+Environment=MIN_AVAILABLE_CLIENTS={{ fl_client_count }}
+Environment=MIN_EVALUATE_CLIENTS={{ fl_client_count }}
+Environment=NUM_ROUNDS={{ fl_num_rounds }}
+ExecStart={{ fl_venv }}/bin/python {{ fl_runtime_root }}/app/server/server.py
+Restart=no
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

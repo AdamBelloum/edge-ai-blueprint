@@ -26,7 +26,12 @@
     index_var: silo_index
   vars:
     silo_id: "{{ '%02d' | format(silo_index + 1) }}"
+    group_id: "group_{{ '%02d' | format(silo_index + 1) }}"
     client_vm: "{{ hostvars[item].ansible_fqdn | default(item) }}"
+    fl_silo_runtime_root: "/opt/digitafrica/fl-workshop"
+    flower_server_address: >-
+      {{ hostvars[groups['tier1_server'][0]].ansible_host
+         | default(groups['tier1_server'][0]) }}:8080
 
 - name: Apply one numbered Silo deployment for every configured client VM
   ansible.builtin.command:

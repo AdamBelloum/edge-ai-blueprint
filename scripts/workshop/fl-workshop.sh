@@ -23,8 +23,7 @@ Usage: scripts/workshop/fl-workshop.sh [ACTION]
 Actions:
   menu              Show the interactive workshop-organiser menu. Default.
   preflight         Run platform and Silo workspace readiness checks.
-  revisions         Record the available Silo source revisions and inspect
-                    the prepared server entry point.
+  revisions         Record deployed source, dependency, and data evidence.
   inspect-silos     List application files in all detected Silo workspaces.
   checklist         Print the workshop readiness checklist.
   record-template   Print an experiment record template.
@@ -61,19 +60,23 @@ EOF
 show_revisions_and_server_entrypoint() {
   local remote_script
 
-  print_heading "Application source and server entry-point evidence"
+  print_heading "Deployed application and dependency evidence"
 
   remote_script="$(cat <<'REMOTE_SCRIPT'
 set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 printf '%s\n' '===== Prepared server entry point ====='
-test -e /home/adam/server.py
-ls -l /home/adam/server.py
+test -r /home/adam/fl-workshop/app/server/server.py
+sha256sum /home/adam/fl-workshop/app/server/server.py
+test -r /home/adam/fl-workshop/app/requirements.lock
+sha256sum /home/adam/fl-workshop/app/requirements.lock
 
-printf '%s\n' '===== Silo source revisions ====='
+printf '%s\n' '===== Silo mounted runtime evidence ====='
 mapfile -t deployments < <(
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get deployments     -l app=fl-client-silo     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
+  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get deployments \
+    -l app=fl-client-silo \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
 )
 
 if [ "${#deployments[@]}" -eq 0 ]; then
@@ -87,14 +90,15 @@ for deployment in "${deployments[@]}"; do
     -l "app=fl-client-silo,digitafrica.org/silo-id=${silo_id}" \
     -o jsonpath='{.items[0].metadata.name}')"
 
-  if [ -z "${pod}" ]; then
-    echo "ERROR: no pod found for ${deployment}" >&2
-    exit 1
-  fi
-
-  printf '%s: ' "${deployment}"
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- \
-    git -C /home/jovyan/digitafrica rev-parse HEAD
+  test -n "${pod}"
+  printf '%s\n' "===== ${deployment} ====="
+  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- sh -ec '
+    sha256sum \
+      /workspace/app/client/client.py \
+      /workspace/app/requirements.lock \
+      /workspace/data/partition-manifest.json \
+      /workspace/data/train.csv
+  '
 done
 REMOTE_SCRIPT
 )"
@@ -104,17 +108,16 @@ REMOTE_SCRIPT
 
   cat <<'EOF'
 
-Record these commit SHA values in the workshop experiment record. A source
-revision identifies code, but does not by itself identify the dataset,
-dependency versions, server/client arguments, or model configuration.
+Record the edge-ai-blueprint commit from the release record together with these
+deployed checksums. Together they identify the source, dependency lock,
+partition manifest, and per-Silo data partition used in the workshop.
 EOF
 }
-
 inspect_silo_source() {
   local deployment="$1"
   local silo_id="${deployment#fl-client-silo-}"
 
-  print_heading "Inspecting ${deployment} application workspace"
+  print_heading "Inspecting ${deployment} mounted application workspace"
 
   run_tier1_remote "$(cat <<EOF
 set -euo pipefail
@@ -126,22 +129,21 @@ pod=\$(k3s kubectl -n ${DIGITAFRICA_NAMESPACE} get pods \
 
 test -n "\${pod}"
 k3s kubectl -n ${DIGITAFRICA_NAMESPACE} exec "\${pod}" -- sh -ec '
-  cd /home/jovyan/digitafrica
+  cd /workspace
   echo "===== Working directory ====="
   pwd
-  echo "===== Source revision ====="
-  git rev-parse HEAD
-  echo "===== Files, depth two ====="
-  find . -maxdepth 2 -type f | sort | head -n 160
+  echo "===== Files, depth three ====="
+  find . -maxdepth 3 -type f | sort | head -n 160
+  echo "===== Mounted asset checksums ====="
+  sha256sum app/client/client.py app/requirements.lock data/partition-manifest.json data/train.csv
 '
 EOF
 )"
 }
-
 inspect_all_silo_sources() {
   local remote_script
 
-  print_heading "Inspecting all detected Silo application workspaces"
+  print_heading "Inspecting all detected Silo mounted application workspaces"
 
   remote_script="$(cat <<'REMOTE_SCRIPT'
 set -euo pipefail
@@ -165,10 +167,9 @@ for deployment in "${deployments[@]}"; do
 
   printf '\n===== %s =====\n' "${deployment}"
   k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- sh -ec '
-    cd /home/jovyan/digitafrica
-    printf "Source revision: "
-    git rev-parse --short HEAD
-    find Distributed-Systems/federated-learning -maxdepth 2 -type f | sort | head -n 80
+    cd /workspace
+    find . -maxdepth 3 -type f | sort | head -n 80
+    sha256sum app/client/client.py app/requirements.lock data/partition-manifest.json data/train.csv
   '
 done
 REMOTE_SCRIPT
@@ -177,7 +178,6 @@ REMOTE_SCRIPT
   remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
   run_tier1_remote "${remote_script}"
 }
-
 print_checklist() {
   cat <<'EOF'
 
@@ -186,7 +186,7 @@ DIGITAfrica federated-learning workshop checklist
 Before the workshop
   [ ] Infrastructure preflight passed.
   [ ] A real JupyterHub user login and spawn were tested.
-  [ ] Silo A and Silo B source revisions were recorded.
+  [ ] Deployed source, dependency, manifest, and partition checksums were recorded.
   [ ] Server entry point and supported experiment configuration were reviewed.
   [ ] Flower/Python dependency versions were recorded.
   [ ] Each dataset has an approved owner, location, version, and permitted use.

@@ -90,14 +90,16 @@ for label in labels:
 partition_root = data_root / "partitions"
 partition_root.mkdir(parents=True, exist_ok=True)
 
-# Remove only previously generated partition directories and manifest.
+# Remove previously generated partition directories and the manifest.
+# Both patterns are accepted during the Group_* -> group_* naming migration.
 # This prevents stale groups from a previous run being deployed accidentally.
-for stale_group in partition_root.glob("Group_*"):
-    if not stale_group.is_dir():
-        raise SystemExit(
-            f"Refusing to replace non-directory partition artifact: {stale_group}"
-        )
-    shutil.rmtree(stale_group)
+for pattern in ("Group_*", "group_*"):
+    for stale_group in partition_root.glob(pattern):
+        if not stale_group.is_dir():
+            raise SystemExit(
+                f"Refusing to replace non-directory partition artifact: {stale_group}"
+            )
+        shutil.rmtree(stale_group)
 
 stale_manifest = partition_root / "partition-manifest.json"
 if stale_manifest.exists():
@@ -109,6 +111,7 @@ manifest = {
     "strategy": "stratified_non_overlapping",
     "seed": args.seed,
     "groups": args.groups,
+    "group_id_format": "group_{NN}",
     "source_rows": len(df),
     "labels": [str(label) for label in labels],
     "partitions": {},
@@ -116,7 +119,7 @@ manifest = {
 
 total_rows = 0
 for index, chunks in enumerate(partitions, start=1):
-    group_id = f"Group_{index:02d}"
+    group_id = f"group_{index:02d}"
     group_dir = partition_root / group_id
     output = group_dir / "train.csv"
 

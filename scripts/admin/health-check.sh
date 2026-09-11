@@ -106,14 +106,16 @@ EOF
 check_silos() {
   local remote_script
 
-  print_heading "Federated-learning Silo workspace readiness"
+  print_heading "Federated-learning Silo runtime readiness"
 
   remote_script="$(cat <<'REMOTE_SCRIPT'
 set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 mapfile -t deployments < <(
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get deployments     -l app=fl-client-silo     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
+  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get deployments \
+    -l app=fl-client-silo \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
 )
 
 if [ "${#deployments[@]}" -eq 0 ]; then
@@ -123,6 +125,7 @@ fi
 
 for deployment in "${deployments[@]}"; do
   silo_id="${deployment#fl-client-silo-}"
+
   printf '===== %s: rollout =====\n' "${deployment}"
   k3s kubectl -n __DIGITAFRICA_NAMESPACE__ rollout status \
     "deployment/${deployment}" --timeout=60s
@@ -130,28 +133,77 @@ for deployment in "${deployments[@]}"; do
   pod="$(k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get pods \
     -l "app=fl-client-silo,digitafrica.org/silo-id=${silo_id}" \
     -o jsonpath='{.items[0].metadata.name}')"
+  group_id="$(k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get pods \
+    -l "app=fl-client-silo,digitafrica.org/silo-id=${silo_id}" \
+    -o jsonpath='{.items[0].metadata.labels.digitafrica\.org/group-id}')"
 
-  if [ -z "${pod}" ]; then
-    echo "ERROR: no pod found for ${deployment}" >&2
+  if [ -z "${pod}" ] || [[ ! "${group_id}" =~ ^group_[0-9]{2}$ ]]; then
+    echo "ERROR: ${deployment} has no pod or valid group_NN label." >&2
     exit 1
   fi
 
-  printf '===== %s: workspace source =====\n' "${deployment}"
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- sh -ec '
-    command -v git
-    test -d /home/jovyan/digitafrica/.git
-    git -C /home/jovyan/digitafrica rev-parse --short HEAD
-  '
+  printf '===== %s: mounted runtime assets =====\n' "${deployment}"
+  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- \
+    env EXPECTED_GROUP_ID="${group_id}" python3 -c '
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+
+root = Path("/workspace")
+group_id = os.environ["EXPECTED_GROUP_ID"]
+client = root / "app" / "client" / "client.py"
+requirements = root / "app" / "requirements.lock"
+manifest_path = root / "data" / "partition-manifest.json"
+partition_path = root / "data" / "train.csv"
+
+for required in (client, requirements, manifest_path, partition_path):
+    if not required.is_file():
+        raise SystemExit(f"missing mounted runtime asset: {required}")
+
+with manifest_path.open(encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
+entry = manifest.get("partitions", {}).get(group_id)
+if manifest.get("group_id_format") != "group_{NN}":
+    raise SystemExit("manifest group_id_format is not group_{NN}")
+if not entry:
+    raise SystemExit(f"manifest has no partition entry for {group_id}")
+if not isinstance(manifest.get("source_sha256"), str) or len(manifest["source_sha256"]) != 64:
+    raise SystemExit("manifest lacks a valid source_sha256 reference")
+
+digest = hashlib.sha256(partition_path.read_bytes()).hexdigest()
+if digest != entry.get("sha256"):
+    raise SystemExit("partition checksum differs from manifest")
+
+with partition_path.open(newline="", encoding="utf-8") as handle:
+    rows = sum(1 for _ in csv.reader(handle)) - 1
+expected_rows = entry.get("rows")
+if rows != expected_rows:
+    raise SystemExit(
+        "partition row count {} differs from manifest {}".format(rows, expected_rows)
+    )
+
+for line in requirements.read_text(encoding="utf-8").splitlines():
+    line = line.strip()
+    if line and not line.startswith("#") and "==" not in line:
+        raise SystemExit(f"unlocked requirement: {line}")
+
+print(f"group_id={group_id}")
+print(f"partition_rows={rows}")
+print(f"partition_sha256={digest}")
+print("mounted_runtime_integrity=PASSED")
+'
 done
 
-echo 'Silo workspace health check passed.'
+echo 'Silo runtime health check passed.'
 REMOTE_SCRIPT
 )"
 
   remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
   run_tier1_remote "${remote_script}"
 }
-
 run_scope() {
   local scope="$1"
 
