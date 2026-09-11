@@ -10,7 +10,9 @@
 
 - name: Verify every configured client VM is a Ready Kubernetes node
   ansible.builtin.command:
-    cmd: kubectl wait --for=condition=Ready node/{{ item }} --timeout=30s
+    cmd: >-
+      kubectl wait --for=condition=Ready
+      node/{{ hostvars[item].ansible_fqdn | default(item) }} --timeout=30s
   loop: "{{ groups['tier1_agents'] }}"
   changed_when: false
 
@@ -24,7 +26,7 @@
     index_var: silo_index
   vars:
     silo_id: "{{ '%02d' | format(silo_index + 1) }}"
-    client_vm: "{{ item }}"
+    client_vm: "{{ hostvars[item].ansible_fqdn | default(item) }}"
 
 - name: Apply one numbered Silo deployment for every configured client VM
   ansible.builtin.command:

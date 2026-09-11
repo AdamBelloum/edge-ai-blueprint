@@ -21,7 +21,7 @@
 - name: Wait for node to appear in the cluster
   ansible.builtin.shell: |
     set -e
-    k3s kubectl get node {{ inventory_hostname }} >/dev/null
+    k3s kubectl get nodes --no-headers | awk '{print $1}' | grep -Fx -e "{{ ansible_hostname }}" -e "{{ ansible_fqdn }}" >/dev/null
   delegate_to: "{{ tier1.k3s_server_host }}"
   args:
     executable: /bin/bash
