@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Federated Learning Workshop Organizer Readiness Wizard v4.0.0
+# Federated Learning Workshop Organizer Readiness Wizard v5.1.0
 #
 # Design:
 # - MIN_CLIENTS is a fixed policy minimum (normally 2).
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-WIZARD_VERSION="5.0.0"
+WIZARD_VERSION="5.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_RECORD="$SCRIPT_DIR/workshop-release.env"
@@ -75,6 +75,11 @@ FLOWER_SERVER_ADDRESS="${FLOWER_SERVER_ADDRESS:-}"
 FLOWER_SERVER_HOST="${FLOWER_SERVER_HOST:-${SERVER_HOST:-}}"
 FLOWER_SERVER_PORT="${FLOWER_SERVER_PORT:-${SERVER_PORT:-8080}}"
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+FLOWER_RUNTIME_ROOT="${FLOWER_RUNTIME_ROOT:-/home/adam/fl-workshop}"
+FLOWER_RUNTIME_PYTHON="${FLOWER_RUNTIME_PYTHON:-/home/adam/.venvs/fl-workshop/bin/python}"
+FLOWER_SERVER_ENTRYPOINT="${FLOWER_SERVER_ENTRYPOINT:-${FLOWER_RUNTIME_ROOT}/app/server/server.py}"
+READINESS_UNIT="fl-workshop-readiness-probe"
+READINESS_PROBE_STARTED=false
 
 if [[ -n "$FLOWER_SERVER_ADDRESS" ]]; then
   if [[ "$FLOWER_SERVER_ADDRESS" =~ ^([A-Za-z0-9.-]+):([1-9][0-9]{0,4})$ ]]; then
@@ -109,6 +114,28 @@ remote() {
   printf '%s\n' "$output"
   return 1
 }
+
+stop_readiness_probe() {
+  local stop_script
+
+  [[ "$READINESS_PROBE_STARTED" == true ]] || return 0
+
+  stop_script=$(cat <<REMOTE
+set -euo pipefail
+systemctl stop "${READINESS_UNIT}.service" || true
+systemctl reset-failed "${READINESS_UNIT}.service" || true
+REMOTE
+)
+
+  if remote "Stop temporary Flower readiness probe" "$stop_script" >/dev/null; then
+    READINESS_PROBE_STARTED=false
+    return 0
+  fi
+  return 1
+}
+
+# Never leave a probe process behind if the wizard is interrupted or fails.
+trap 'stop_readiness_probe >/dev/null 2>&1 || true' EXIT
 
 if declare -F run_tier1_remote >/dev/null && ((FAILURES == 0)); then
   heading "Wizard v$WIZARD_VERSION — Step 2/6 — Discover active Silo topology"
@@ -231,20 +258,79 @@ REMOTE
     if "$preparation_ok"; then pass "Dynamic preparation validation completed for all discovered Silos."; fi
   fi
 
-  heading "Wizard v$WIZARD_VERSION — Step 4/6 — Confirm Flower server listener"
-  listener_script=$(cat <<REMOTE
+  heading "Wizard v$WIZARD_VERSION — Step 4/6 — Verify managed Flower runtime and listener"
+  runtime_ready=false
+  runtime_script=$(cat <<REMOTE
 set -euo pipefail
-if command -v ss >/dev/null 2>&1; then
-  ss -ltnH | awk '{print \$4}' | grep -Eq '(^|:)$FLOWER_SERVER_PORT$'
-else
-  python3 -c 'import socket; s=socket.create_connection(("$FLOWER_SERVER_HOST", $FLOWER_SERVER_PORT), 3); s.close()'
-fi
+test -x "${FLOWER_RUNTIME_PYTHON}"
+test -r "${FLOWER_SERVER_ENTRYPOINT}"
+"${FLOWER_RUNTIME_PYTHON}" -c 'import flwr; print(flwr.__version__)'
+test -r /etc/systemd/system/fl-workshop-server.service
 REMOTE
 )
-  if remote "Check Flower listener" "$listener_script" >/dev/null; then
-    pass "A TCP listener is present for Flower on port $FLOWER_SERVER_PORT."
+  if runtime_result="$(remote "Verify managed Flower runtime" "$runtime_script")"; then
+    printf '%s\n' "$runtime_result"
+    pass "Managed Flower runtime, entry point, and organiser-controlled service are installed."
+    runtime_ready=true
   else
-    fail "No TCP listener is present for Flower on port $FLOWER_SERVER_PORT."
+    fail "Managed Flower runtime, entry point, or organiser-controlled service is unavailable."
+  fi
+
+  listener_script=$(cat <<REMOTE
+set -euo pipefail
+ss -ltnH | awk '{print \$4}' | grep -Eq '(^|:)$FLOWER_SERVER_PORT$'
+REMOTE
+)
+
+  if "$runtime_ready"; then
+    if remote "Check active Flower listener" "$listener_script" >/dev/null; then
+      pass "An active Flower listener is present on port $FLOWER_SERVER_PORT."
+    else
+      readiness_clients=$((${#SILOS[@]} + 1))
+      readiness_script=$(cat <<REMOTE
+set -euo pipefail
+if systemctl is-active --quiet fl-workshop-server.service; then
+  echo "The organiser-controlled Flower experiment service is active but is not listening on port $FLOWER_SERVER_PORT." >&2
+  exit 1
+fi
+
+systemctl stop "${READINESS_UNIT}.service" 2>/dev/null || true
+systemctl reset-failed "${READINESS_UNIT}.service" 2>/dev/null || true
+
+systemd-run --quiet --collect --unit="${READINESS_UNIT}" \
+  --property=Type=simple \
+  --property=User=adam \
+  --property=Group=adam \
+  --property=WorkingDirectory="${FLOWER_RUNTIME_ROOT}/app/server" \
+  --setenv=PYTHONUNBUFFERED=1 \
+  --setenv=FLOWER_SERVER_HOST=0.0.0.0 \
+  --setenv=FLOWER_SERVER_PORT=$FLOWER_SERVER_PORT \
+  --setenv=MIN_FIT_CLIENTS=$readiness_clients \
+  --setenv=MIN_AVAILABLE_CLIENTS=$readiness_clients \
+  --setenv=MIN_EVALUATE_CLIENTS=$readiness_clients \
+  --setenv=NUM_ROUNDS=5 \
+  "${FLOWER_RUNTIME_PYTHON}" "${FLOWER_SERVER_ENTRYPOINT}"
+
+for _ in {1..10}; do
+  if ss -ltnH | awk '{print \$4}' | grep -Eq '(^|:)$FLOWER_SERVER_PORT$'; then
+    exit 0
+  fi
+  sleep 1
+done
+
+journalctl --no-pager -u "${READINESS_UNIT}.service" -n 40 >&2 || true
+exit 1
+REMOTE
+)
+      # Mark it first: a failed listener check can still leave a transient unit behind.
+      READINESS_PROBE_STARTED=true
+      if remote "Start bounded Flower readiness probe" "$readiness_script" >/dev/null; then
+        pass "A bounded Flower readiness probe is listening on port $FLOWER_SERVER_PORT; it requires $readiness_clients clients and cannot start a round."
+      else
+        stop_readiness_probe || true
+        fail "Could not start a bounded Flower readiness probe on port $FLOWER_SERVER_PORT."
+      fi
+    fi
   fi
 
   heading "Wizard v$WIZARD_VERSION — Step 5/6 — Test every Silo-to-Flower connection"
@@ -265,6 +351,14 @@ REMOTE
     fi
   done
   "$connectivity_ok" && ((${#SILOS[@]} > 0)) && pass "All discovered Silos can reach the Flower server."
+
+  if "$READINESS_PROBE_STARTED"; then
+    if stop_readiness_probe; then
+      pass "Temporary Flower readiness probe was stopped cleanly."
+    else
+      fail "Temporary Flower readiness probe could not be stopped cleanly."
+    fi
+  fi
 
   heading "Wizard v$WIZARD_VERSION — Step 6/6 — Confirm experiment scope"
   wizard_warn "The organizer must describe this as a workflow demonstration unless the configured client code uses approved feature data and an evaluation protocol has been validated."

@@ -114,18 +114,6 @@ check_ansible_connectivity() {
 
 run_tier1_remote() {
   local remote_command="$1"
-
-  require_ansible_environment
-  ANSIBLE_STDOUT_CALLBACK=default ansible \
-    -i "${DIGITAFRICA_INVENTORY}" \
-    "${DIGITAFRICA_TIER1_GROUP}" \
-    -b \
-    -m ansible.builtin.shell \
-    -a "${remote_command}"
-}
-
-run_tier1_remote() {
-  local remote_command="$1"
   local encoded_command
 
   require_ansible_environment
