@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Federated Learning Workshop Organizer Readiness Wizard v5.1.0
+# Federated Learning Workshop Organizer Readiness Wizard v5.3.0
 #
 # Design:
 # - MIN_CLIENTS is a fixed policy minimum (normally 2).
@@ -7,10 +7,11 @@
 # - Downloaded source data and prepared partitions are runtime preparation artefacts,
 #   not Git-release artefacts.
 # - Each active Silo must expose a manifest-backed partition with an integrity check.
+# - After a GO verdict, an interactive organiser may start the real Flower server.
 
 set -euo pipefail
 
-WIZARD_VERSION="5.1.0"
+WIZARD_VERSION="5.3.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_RECORD="$SCRIPT_DIR/workshop-release.env"
@@ -32,6 +33,11 @@ usage() {
 Usage: $(basename "$0") [--non-interactive] [--version]
 
 Validates dynamic federated-learning workshop preparation and runtime readiness.
+
+In interactive mode, a GO verdict offers to start the organiser-controlled
+Flower server. --non-interactive never starts the real server.
+
+Detailed remote diagnostics are saved to a timestamped local log file.
 EOF
 }
 
@@ -46,7 +52,14 @@ while (($#)); do
   shift
 done
 
+LOG_FILE="${TMPDIR:-/tmp}/edge-ai-workshop-wizard-$(date +%Y%m%dT%H%M%S).log"
+if ! : >"$LOG_FILE"; then
+  printf 'Cannot create wizard diagnostic log: %s\n' "$LOG_FILE" >&2
+  exit 1
+fi
+
 heading "Federated Learning Workshop Organizer Readiness Wizard v$WIZARD_VERSION"
+printf 'Detailed diagnostics: %s\n' "$LOG_FILE"
 
 heading "Wizard v$WIZARD_VERSION — Step 1/6 — Validate organizer environment and release record"
 if [[ -x "$HELPER" ]]; then pass "Workshop helper found: $HELPER"; else fail "Workshop helper is missing or not executable: $HELPER"; fi
@@ -103,14 +116,29 @@ is_sha256 "$PARTITION_MANIFEST_SHA256" || fail "PARTITION_MANIFEST_SHA256 must b
 [[ "$FLOWER_SERVER_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || fail "FLOWER_SERVER_HOST (or SERVER_HOST) is missing or invalid."
 [[ "$FLOWER_SERVER_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && ((FLOWER_SERVER_PORT <= 65535)) || fail "FLOWER_SERVER_PORT (or SERVER_PORT) is invalid."
 
+append_remote_log() {
+  local outcome="$1"
+  local description="$2"
+  local output="$3"
+
+  {
+    printf '\n===== %s — %s =====\n' "$outcome" "$description"
+    printf '%s\n' "$output"
+  } >>"$LOG_FILE"
+}
+
 remote() {
   local description="$1"
   local script="$2"
   local output
+
   if output="$(run_tier1_remote "$script" 2>&1)"; then
+    append_remote_log "REMOTE SUCCESS" "$description" "$output"
     printf '%s\n' "$output"
     return 0
   fi
+
+  append_remote_log "REMOTE FAILURE" "$description" "$output"
   printf '%s\n' "$output"
   return 1
 }
@@ -137,6 +165,42 @@ REMOTE
 # Never leave a probe process behind if the wizard is interrupted or fails.
 trap 'stop_readiness_probe >/dev/null 2>&1 || true' EXIT
 
+start_workshop_server() {
+  local start_script start_result
+
+  start_script=$(cat <<REMOTE
+set -euo pipefail
+
+systemctl start fl-workshop-server.service
+
+for _ in {1..10}; do
+  if systemctl is-active --quiet fl-workshop-server.service && \
+     ss -ltnH | awk '{print \$4}' | grep -Eq '(^|:)$FLOWER_SERVER_PORT$'; then
+    echo "Flower server is active and listening on port $FLOWER_SERVER_PORT."
+    journalctl --no-pager -u fl-workshop-server.service -n 30
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "Flower server did not become active and listen on port $FLOWER_SERVER_PORT." >&2
+systemctl --no-pager --full status fl-workshop-server.service >&2 || true
+journalctl --no-pager -u fl-workshop-server.service -n 50 >&2 || true
+exit 1
+REMOTE
+)
+
+  if start_result="$(remote "Start organiser-controlled Flower server" "$start_script")"; then
+    printf 'WORKSHOP SERVER STARTED — it is now waiting for the authorised Silo clients.\n'
+    printf 'Server diagnostics: %s\n' "$LOG_FILE"
+    return 0
+  fi
+
+  printf 'ERROR: The Flower server could not be started; do not ask students to start clients.\n' >&2
+  printf 'See diagnostic log: %s\n' "$LOG_FILE" >&2
+  return 1
+}
+
 if declare -F run_tier1_remote >/dev/null && ((FAILURES == 0)); then
   heading "Wizard v$WIZARD_VERSION — Step 2/6 — Discover active Silo topology"
   discovery_script=$(cat <<'REMOTE'
@@ -146,7 +210,6 @@ k3s kubectl -n digitafrica get pods -l app=fl-client-silo -o jsonpath='{range .i
 REMOTE
 )
   if discovery="$(remote "Discover Silos" "$discovery_script")"; then
-    printf '%s\n' "$discovery"
     mapfile -t SILOS < <(printf '%s\n' "$discovery" | awk -F'|' '/^[^|]+\|[^|]+\|[^|]+\|Running$/ {print}')
     if ((${#SILOS[@]} < MIN_CLIENTS)); then
       fail "Discovered ${#SILOS[@]} running, labelled Silos; MIN_CLIENTS=$MIN_CLIENTS requires at least $MIN_CLIENTS."
@@ -269,7 +332,6 @@ test -r /etc/systemd/system/fl-workshop-server.service
 REMOTE
 )
   if runtime_result="$(remote "Verify managed Flower runtime" "$runtime_script")"; then
-    printf '%s\n' "$runtime_result"
     pass "Managed Flower runtime, entry point, and organiser-controlled service are installed."
     runtime_ready=true
   else
@@ -379,4 +441,26 @@ if ((FAILURES)); then
   exit 1
 fi
 printf '\nVERDICT: GO — organizer-controlled dynamic preparation and runtime checks passed.\n'
+
+if "$NON_INTERACTIVE"; then
+  printf 'Non-interactive mode: the organiser-controlled Flower server was not started.\n'
+elif [[ ! -t 0 ]]; then
+  printf 'No interactive terminal: the organiser-controlled Flower server was not started.\n'
+else
+  printf 'GO — start the organiser-controlled Flower server now? [y/N]: '
+  start_answer=""
+  if ! read -r start_answer; then
+    start_answer=""
+  fi
+
+  case "$start_answer" in
+    [yY]|[yY][eE][sS])
+      start_workshop_server || exit 1
+      ;;
+    *)
+      printf 'Flower server was not started. Start it later by rerunning the wizard after a GO verdict.\n'
+      ;;
+  esac
+fi
+
 exit 0
