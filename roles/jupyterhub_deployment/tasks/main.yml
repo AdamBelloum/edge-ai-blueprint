@@ -2,18 +2,18 @@
 - name: Validate that at least one federated-learning client VM is configured
   ansible.builtin.assert:
     that:
-      - groups['tier1_agents'] is defined
-      - groups['tier1_agents'] | length > 0
+      - fl_workshop_client_hosts is defined
+      - fl_workshop_client_hosts | length > 0
     fail_msg: >-
-      No client VMs are configured in [tier1_agents].
-      Add one or more client VMs before deploying federated-learning Silos.
+      No federated-learning client VMs are configured across [tier1_agents]
+      and [tier2_agents].
 
 - name: Verify every configured client VM is a Ready Kubernetes node
   ansible.builtin.command:
     cmd: >-
       kubectl wait --for=condition=Ready
       node/{{ hostvars[item].ansible_fqdn | default(item) }} --timeout=30s
-  loop: "{{ groups['tier1_agents'] }}"
+  loop: "{{ fl_workshop_client_hosts }}"
   changed_when: false
 
 - name: Render one numbered Silo manifest for every configured client VM
@@ -21,7 +21,7 @@
     src: fl-client-silo.yml.j2
     dest: "/home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml"
     mode: '0644'
-  loop: "{{ groups['tier1_agents'] }}"
+  loop: "{{ fl_workshop_client_hosts }}"
   loop_control:
     index_var: silo_index
   vars:
@@ -36,7 +36,7 @@
 - name: Apply one numbered Silo deployment for every configured client VM
   ansible.builtin.command:
     cmd: kubectl apply -f /home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml
-  loop: "{{ groups['tier1_agents'] }}"
+  loop: "{{ fl_workshop_client_hosts }}"
   loop_control:
     index_var: silo_index
   register: silo_apply_output
@@ -50,16 +50,45 @@
       kubectl -n digitafrica rollout status
       deployment/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}
       --timeout=300s
-  loop: "{{ groups['tier1_agents'] }}"
+  loop: "{{ fl_workshop_client_hosts }}"
   loop_control:
     index_var: silo_index
   changed_when: false
 
-- name: Remove superseded legacy A and B Silo deployments
+- name: Initialise the desired numbered Silo deployment list
+  ansible.builtin.set_fact:
+    fl_expected_silo_deployments: []
+
+- name: Build the desired numbered Silo deployment list
+  ansible.builtin.set_fact:
+    fl_expected_silo_deployments: >-
+      {{ fl_expected_silo_deployments
+         + ['fl-client-silo-%02d' | format(silo_index + 1)] }}
+  loop: "{{ fl_workshop_client_hosts }}"
+  loop_control:
+    index_var: silo_index
+
+- name: List currently deployed Flower Silos
   ansible.builtin.command:
     cmd: >-
-      kubectl -n digitafrica delete deployment
-      fl-client-silo-a fl-client-silo-b
+      kubectl -n digitafrica get deployment
+      -l app=fl-client-silo
+      -o custom-columns=NAME:.metadata.name
+      --no-headers
+  register: fl_existing_silos
+  changed_when: false
+
+- name: Derive stale Flower Silo deployments
+  ansible.builtin.set_fact:
+    fl_stale_silo_deployments: >-
+      {{ fl_existing_silos.stdout_lines
+         | difference(fl_expected_silo_deployments) }}
+
+- name: Remove stale Flower Silo deployments after successful reconciliation
+  ansible.builtin.command:
+    cmd: >-
+      kubectl -n digitafrica delete deployment {{ item }}
       --ignore-not-found=true
-  register: legacy_silo_delete
-  changed_when: "'deleted' in legacy_silo_delete.stdout"
+  loop: "{{ fl_stale_silo_deployments }}"
+  register: fl_stale_silo_delete
+  changed_when: "'deleted' in fl_stale_silo_delete.stdout"

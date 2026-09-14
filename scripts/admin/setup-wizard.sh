@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Configure a local Tier-1 DIGITAfrica federated-learning workshop deployment.
+# Configure a local DIGITAfrica federated-learning workshop deployment.
 #
-# This wizard creates an untracked inventory in inventories/workshop/. It does
-# not modify the repository's example or production configuration.
+# Tier-1 creates the local workshop baseline. Tier-2 preserves that baseline
+# and adds an overlay [tier2_agents] group. Neither mode modifies repository
+# example or production configuration.
 #
 # Usage:
 #   ./scripts/admin/setup-wizard.sh
@@ -25,6 +26,7 @@ SSH_USER="adam"
 ADMIN_USER="admin"
 WORKER_HOSTS=()
 PROFILE=""
+DEPLOYMENT_TIER=""
 TLS_MODE="selfsigned"
 TLS_CERT_DIR=""
 TLS_ACME_EMAIL=""
@@ -60,12 +62,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/admin/setup-wizard.sh
 
-Creates a local Tier-1 workshop inventory and configuration in:
+Creates or updates a local workshop inventory and configuration in:
   inventories/workshop/hosts.ini
   inventories/workshop/group_vars/all.yml
 
+Choose Tier-1 to create a workshop baseline. Choose Tier-2 only after that
+baseline exists; it preserves Tier-1 settings and replaces [tier2_agents].
 These files are locally excluded from Git. The wizard can optionally run the
-existing Tier-1 deployment and health-check workflows afterwards.
+corresponding deployment and health-check workflows afterwards.
 EOF
 }
 
@@ -174,9 +178,29 @@ check_prerequisites() {
   require_command ansible-playbook
   require_command git
   [ -f "${REPO_ROOT}/playbooks/tier1.yml" ] || die "Tier-1 playbook not found. Run the wizard from a complete repository checkout."
+  [ -f "${REPO_ROOT}/playbooks/tier2.yml" ] || die "Tier-2 playbook not found. Run the wizard from a complete repository checkout."
   [ -x "${DEPLOY_SCRIPT}" ] || die "Deployment helper is missing or not executable: ${DEPLOY_SCRIPT}"
   [ -x "${HEALTH_SCRIPT}" ] || die "Health-check helper is missing or not executable: ${HEALTH_SCRIPT}"
   info "ssh, Ansible and repository deployment helpers are available."
+}
+
+choose_deployment_tier() {
+  heading "Choose deployment tier"
+  cat <<'EOF'
+
+  1) Tier-1 baseline
+     Creates or replaces the local workshop inventory and configuration.
+
+  2) Tier-2 overlay
+     Requires an existing local Tier-1 workshop inventory. Preserves its
+     Tier-1 hosts and variables, then adds or replaces [tier2_agents].
+EOF
+  prompt_choice DEPLOYMENT_TIER "Deployment tier" "1" 1 2
+  if [ "${DEPLOYMENT_TIER}" = "1" ]; then
+    DEPLOYMENT_TIER="tier1"
+  else
+    DEPLOYMENT_TIER="tier2"
+  fi
 }
 
 choose_profile() {
@@ -268,6 +292,75 @@ collect_topology() {
   prompt_required WORKSHOP_TIMEZONE "Timezone for the workshop VMs" "${WORKSHOP_TIMEZONE}"
 }
 
+collect_tier2_topology() {
+  heading "Tier-2 overlay topology"
+
+  [ -f "${INVENTORY}" ] || die \
+    "Tier-2 requires an existing local Tier-1 inventory: ${INVENTORY}. Run the wizard in Tier-1 mode first."
+  [ -f "${VARS_FILE}" ] || die \
+    "Tier-2 requires existing local Tier-1 variables: ${VARS_FILE}. Run the wizard in Tier-1 mode first."
+
+  CENTRAL_HOST="$(awk '
+    /^\[tier1_server\]$/ { in_group=1; next }
+    /^\[/ { in_group=0 }
+    in_group && $0 !~ /^[[:space:]]*([#;]|$)/ {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^ansible_host=/) {
+          sub(/^ansible_host=/, "", $i)
+          print $i
+          exit
+        }
+      }
+    }
+  ' "${INVENTORY}")"
+  [ -n "${CENTRAL_HOST}" ] || die \
+    "Could not read an ansible_host from [tier1_server] in ${INVENTORY}."
+
+  local tier1_worker_count
+  tier1_worker_count="$(awk '
+    /^\[tier1_agents\]$/ { in_group=1; next }
+    /^\[/ { in_group=0 }
+    in_group && $0 !~ /^[[:space:]]*([#;]|$)/ { count++ }
+    END { print count + 0 }
+  ' "${INVENTORY}")"
+  [ "${tier1_worker_count}" -gt 0 ] || die \
+    "Tier-2 requires one or more hosts in [tier1_agents] in ${INVENTORY}."
+
+  SSH_USER="$(awk -F= '
+    /^ansible_user=/ { print $2; exit }
+  ' "${INVENTORY}")"
+  SSH_USER="${SSH_USER:-adam}"
+  validate_identifier "${SSH_USER}" || die \
+    "Invalid ansible_user in existing inventory: ${SSH_USER}"
+
+  printf 'Existing Tier-1 central server : %s\n' "${CENTRAL_HOST}"
+  printf 'Existing Tier-1 worker count   : %s\n' "${tier1_worker_count}"
+  printf 'Existing SSH user              : %s\n' "${SSH_USER}"
+
+  local workers_line worker
+  while true; do
+    read -r -p "New Tier-2 worker VM hostnames or IPs (space-separated; at least one): " workers_line
+    read -r -a WORKER_HOSTS <<< "${workers_line}"
+    [ "${#WORKER_HOSTS[@]}" -gt 0 ] || {
+      warn "At least one Tier-2 worker is required."
+      continue
+    }
+
+    for worker in "${WORKER_HOSTS[@]}"; do
+      validate_host "${worker}" || die "Invalid worker host value: ${worker}"
+      [ "${worker}" != "${CENTRAL_HOST}" ] || die \
+        "A Tier-2 worker cannot be the same as the central server."
+    done
+
+    if [ "$(printf '%s\n' "${WORKER_HOSTS[@]}" | sort -u | wc -l)" \
+      -ne "${#WORKER_HOSTS[@]}" ]; then
+      warn "Each Tier-2 worker must be listed only once."
+      continue
+    fi
+    break
+  done
+}
+
 check_ssh_access() {
   heading "Checking SSH access"
   local host
@@ -320,6 +413,51 @@ EOF
 ansible_user=${SSH_USER}
 ansible_become=true
 EOF
+}
+
+write_tier2_inventory() {
+  python3 - "${INVENTORY}" "${WORKER_HOSTS[@]}" <<'PY2'
+import re
+import sys
+from pathlib import Path
+
+inventory_path = Path(sys.argv[1])
+tier2_hosts = sys.argv[2:]
+text = inventory_path.read_text()
+
+if not re.search(r"(?m)^\[tier1_server\]\s*$", text):
+    raise SystemExit("Existing workshop inventory has no [tier1_server] group.")
+if not re.search(r"(?m)^\[tier1_agents\]\s*$", text):
+    raise SystemExit("Existing workshop inventory has no [tier1_agents] group.")
+if not re.search(r"(?m)^\[all:vars\]\s*$", text):
+    raise SystemExit("Existing workshop inventory has no [all:vars] group.")
+
+tier2_section = re.compile(r"(?ms)^\[tier2_agents\]\s*\n.*?(?=^\[|\Z)")
+text_without_tier2 = tier2_section.sub("", text)
+
+existing_hosts = set(
+    re.findall(r"(?m)\bansible_host=([^\s#;]+)", text_without_tier2)
+)
+duplicates = sorted(set(tier2_hosts) & existing_hosts)
+if duplicates:
+    raise SystemExit(
+        "Tier-2 worker address already belongs to the Tier-1 baseline: "
+        + ", ".join(duplicates)
+    )
+
+section = "[tier2_agents]\n" + "".join(
+    f"tier2-worker-{index} ansible_host={host}\n"
+    for index, host in enumerate(tier2_hosts, start=1)
+) + "\n"
+
+anchor = re.search(r"(?m)^\[all:vars\]\s*$", text_without_tier2)
+text = (
+    text_without_tier2[:anchor.start()]
+    + section
+    + text_without_tier2[anchor.start():]
+)
+inventory_path.write_text(text)
+PY2
 }
 
 write_variables() {
@@ -400,15 +538,24 @@ EOF
 
 show_summary() {
   heading "Workshop deployment summary"
-  printf 'Central k3s server : %s\n' "${CENTRAL_HOST}"
-  printf 'Worker nodes       : %s\n' "${#WORKER_HOSTS[@]}"
-  printf 'SSH user           : %s\n' "${SSH_USER}"
-  printf 'JupyterHub URL     : %s://%s/jupyter/\n' "$([ "${TLS_MODE}" = "none" ] && printf http || printf https)" "${PUBLIC_HOST}"
-  printf 'TLS                : %s\n' "${TLS_MODE}"
-  printf 'Authentication     : %s\n' "$([ "${OIDC_ENABLED}" = true ] && printf OIDC || printf 'workshop dummy login')"
-  printf 'Storage class      : %s\n' "${STORAGE_CLASS}"
-  printf 'Inventory          : %s\n' "${INVENTORY}"
-  printf 'Variables          : %s\n' "${VARS_FILE}"
+  printf 'Deployment tier     : %s\n' "${DEPLOYMENT_TIER}"
+  printf 'Central k3s server  : %s\n' "${CENTRAL_HOST}"
+  printf 'New worker nodes    : %s\n' "${#WORKER_HOSTS[@]}"
+  printf 'SSH user            : %s\n' "${SSH_USER}"
+  printf 'Inventory           : %s\n' "${INVENTORY}"
+
+  if [ "${DEPLOYMENT_TIER}" = "tier2" ]; then
+    printf 'Tier-1 variables    : %s (preserved)\n' "${VARS_FILE}"
+    return 0
+  fi
+
+  printf 'JupyterHub URL      : %s://%s/jupyter/\n' \
+    "$([ "${TLS_MODE}" = "none" ] && printf http || printf https)" "${PUBLIC_HOST}"
+  printf 'TLS                 : %s\n' "${TLS_MODE}"
+  printf 'Authentication      : %s\n' \
+    "$([ "${OIDC_ENABLED}" = true ] && printf OIDC || printf 'workshop dummy login')"
+  printf 'Storage class       : %s\n' "${STORAGE_CLASS}"
+  printf 'Variables           : %s\n' "${VARS_FILE}"
 
   if [ "${TLS_MODE}" = "selfsigned" ]; then
     warn "Participants will see a browser certificate warning. Verify the URL with them before they continue."
@@ -419,14 +566,16 @@ show_summary() {
 }
 
 run_optional_actions() {
-  if ! confirm "Run the Tier-1 deployment now?"; then
+  if ! confirm "Run the ${DEPLOYMENT_TIER} deployment now?"; then
     echo
     echo "Configuration is ready. Deploy later with:"
-    printf '  DIGITAFRICA_INVENTORY=%q %q tier1\n' "${INVENTORY}" "${DEPLOY_SCRIPT}"
+    printf '  DIGITAFRICA_INVENTORY=%q %q %s\n' \
+      "${INVENTORY}" "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
     return 0
   fi
 
-  DIGITAFRICA_INVENTORY="${INVENTORY}" "${DEPLOY_SCRIPT}" tier1
+  DIGITAFRICA_INVENTORY="${INVENTORY}" \
+    "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
 
   if confirm "Run the read-only health check now?"; then
     DIGITAFRICA_INVENTORY="${INVENTORY}" "${HEALTH_SCRIPT}" all
@@ -449,12 +598,18 @@ main() {
 
   cd "${REPO_ROOT}"
   heading "DIGITAfrica Edge-AI workshop setup wizard"
-  echo "This wizard configures a Tier-1 workshop. It does not deploy Tier-0."
+  echo "This wizard configures either a Tier-1 baseline or a Tier-2 overlay."
   echo
 
   check_prerequisites
-  choose_profile
-  collect_topology
+  choose_deployment_tier
+
+  if [ "${DEPLOYMENT_TIER}" = "tier1" ]; then
+    choose_profile
+    collect_topology
+  else
+    collect_tier2_topology
+  fi
   check_ssh_access
 
   if ! confirm "Write the local workshop configuration?"; then
@@ -463,12 +618,17 @@ main() {
   fi
 
   ensure_local_git_exclude
-  write_inventory
-  write_variables
-  info "Generated local workshop inventory and variables."
+  if [ "${DEPLOYMENT_TIER}" = "tier1" ]; then
+    write_inventory
+    write_variables
+    info "Generated local Tier-1 workshop inventory and variables."
+  else
+    write_tier2_inventory
+    info "Updated local workshop inventory with Tier-2 workers; Tier-1 variables were preserved."
+  fi
+
   show_summary
   run_optional_actions
 }
 
 main "$@"
-

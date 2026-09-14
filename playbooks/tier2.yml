@@ -1,0 +1,70 @@
+---
+# Tier-2 overlay — adds [tier2_agents] to an existing Tier-1 workshop.
+# It never reprovisions or removes [tier1_agents].
+# Run standalone: ansible-playbook -i <combined-inventory> playbooks/tier2.yml
+
+- name: Validate Tier-2 overlay preconditions
+  hosts: tier2_agents
+  gather_facts: false
+  tasks:
+    - name: Require add-only deployment mode
+      ansible.builtin.assert:
+        that:
+          - not (digitafrica_uninstall | default(false) | bool)
+        fail_msg: >-
+          playbooks/tier2.yml is add-only. Use the dedicated Tier-1 lifecycle
+          procedures for removal operations.
+
+    - name: Require an existing Tier-1 control plane and client baseline
+      ansible.builtin.assert:
+        that:
+          - groups['tier1_server'] is defined
+          - groups['tier1_server'] | length == 1
+          - groups['tier1_agents'] is defined
+          - groups['tier1_agents'] | length > 0
+        fail_msg: >-
+          Tier-2 requires a combined inventory containing exactly one
+          [tier1_server] and one or more existing [tier1_agents].
+
+- name: Base setup on new Tier-2 nodes
+  hosts: tier2_agents
+  roles:
+    - role: common
+
+- name: Join new Tier-2 nodes to the existing Tier-1 k3s cluster
+  hosts: tier2_agents
+  roles:
+    - role: k3s_agent
+
+- name: Stage isolated Flower client assets on Tier-2 worker nodes
+  hosts: tier2_agents
+  become: true
+  roles:
+    - role: fl_workshop_client_assets
+
+- name: Reconcile shared Flower and workshop resources for Tier-1 plus Tier-2
+  hosts: tier1_server
+  become: false
+  pre_tasks:
+    - name: Require at least one configured Tier-2 agent before reconciliation
+      ansible.builtin.assert:
+        that:
+          - groups['tier2_agents'] is defined
+          - groups['tier2_agents'] | length > 0
+        fail_msg: >-
+          Tier-2 reconciliation requires one or more hosts in [tier2_agents].
+          No central workshop resources were changed.
+
+    - name: Require add-only deployment mode on the control plane
+      ansible.builtin.assert:
+        that:
+          - not (digitafrica_uninstall | default(false) | bool)
+        fail_msg: >-
+          playbooks/tier2.yml is add-only. No central workshop resources were
+          changed.
+  roles:
+    - role: fl_workshop_server_assets
+    - role: fl_workshop_topology
+    - role: k8s_apps
+    - role: jupyterhub_deployment
+    - role: fl_workshop_server_runtime

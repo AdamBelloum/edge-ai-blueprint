@@ -1,0 +1,7 @@
+---
+fl_venv: "/home/adam/.venvs/fl-workshop"
+fl_runtime_root: "/home/adam/fl-workshop"
+fl_client_count: "{{ fl_workshop_client_hosts | length }}"
+fl_num_rounds: 5
+fl_server_service_template: >-
+  {{ playbook_dir }}/../workshop_assets/federated_learning/server/fl-workshop-server.service.j2

@@ -1,0 +1,24 @@
+---
+- name: Ensure the Flower runtime directory exists
+  ansible.builtin.file:
+    path: "{{ fl_runtime_root }}"
+    state: directory
+    owner: adam
+    group: adam
+    mode: "0755"
+
+- name: Stage committed federated-learning application assets
+  ansible.builtin.copy:
+    src: "{{ fl_asset_root }}/"
+    dest: "{{ fl_runtime_root }}/app/"
+    owner: adam
+    group: adam
+    mode: preserve
+    directory_mode: "0755"
+
+- name: Create a compatibility symlink to the repository-owned server
+  ansible.builtin.file:
+    src: "{{ fl_runtime_root }}/app/server/server.py"
+    dest: /home/adam/server.py
+    state: link
+  when: not ansible_check_mode

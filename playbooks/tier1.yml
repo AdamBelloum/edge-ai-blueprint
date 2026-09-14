@@ -22,6 +22,8 @@
 - name: Deploy DIGITAfrica apps on Tier-1 (install)
   hosts: tier1_server
   roles:
+    - role: fl_workshop_topology
+      when: not (digitafrica_uninstall | default(false) | bool)
     - role: k8s_apps
       when: not (digitafrica_uninstall | default(false) | bool)
 
@@ -53,34 +55,8 @@
     - name: Skip Flower server source staging during uninstall
       ansible.builtin.meta: end_play
       when: digitafrica_uninstall | default(false) | bool
-  vars:
-    fl_runtime_root: "/home/adam/fl-workshop"
-    fl_asset_root: "{{ playbook_dir }}/../workshop_assets/federated_learning"
-  tasks:
-    - name: Ensure the Flower runtime directory exists
-      ansible.builtin.file:
-        path: "{{ fl_runtime_root }}"
-        state: directory
-        owner: adam
-        group: adam
-        mode: "0755"
-
-    - name: Stage committed federated-learning application assets
-      ansible.builtin.copy:
-        src: "{{ fl_asset_root }}/"
-        dest: "{{ fl_runtime_root }}/app/"
-        owner: adam
-        group: adam
-        mode: preserve
-        directory_mode: "0755"
-
-    - name: Create a compatibility symlink to the repository-owned server
-      ansible.builtin.file:
-        src: "{{ fl_runtime_root }}/app/server/server.py"
-        dest: /home/adam/server.py
-        state: link
-      # Check mode does not stage the source file that this link targets.
-      when: not ansible_check_mode
+  roles:
+    - role: fl_workshop_server_assets
 
 - name: Stage isolated Flower client assets on Tier-1 worker nodes
   hosts: tier1_agents
@@ -89,55 +65,16 @@
     - name: Skip Flower client asset staging during uninstall
       ansible.builtin.meta: end_play
       when: digitafrica_uninstall | default(false) | bool
-  vars:
-    fl_silo_runtime_root: "/opt/digitafrica/fl-workshop"
-    fl_asset_root: "{{ playbook_dir }}/../workshop_assets/federated_learning"
-    fl_data_root: "{{ playbook_dir }}/../data"
-    fl_group_id: >-
-      group_{{ '%02d' | format(groups['tier1_agents'].index(inventory_hostname) + 1) }}
-  tasks:
-    - name: Ensure the worker Flower runtime directory exists
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      loop:
-        - "{{ fl_silo_runtime_root }}"
-        - "{{ fl_silo_runtime_root }}/app"
-        - "{{ fl_silo_runtime_root }}/data"
-
-    - name: Stage committed Flower client application assets
-      ansible.builtin.copy:
-        src: "{{ fl_asset_root }}/"
-        dest: "{{ fl_silo_runtime_root }}/app/"
-        owner: root
-        group: root
-        mode: preserve
-        directory_mode: "0755"
-
-    - name: Stage the worker-specific prepared partition
-      ansible.builtin.copy:
-        src: "{{ fl_data_root }}/partitions/{{ fl_group_id }}/train.csv"
-        dest: "{{ fl_silo_runtime_root }}/data/train.csv"
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Stage the partition manifest for worker-side integrity validation
-      ansible.builtin.copy:
-        src: "{{ fl_data_root }}/partitions/partition-manifest.json"
-        dest: "{{ fl_silo_runtime_root }}/data/partition-manifest.json"
-        owner: root
-        group: root
-        mode: "0644"
+  roles:
+    - role: fl_workshop_client_assets
 
 - name: Deploy Federated Learning Client Workspaces
   hosts: tier1_server
   become: false  # Use adam's existing kubectl configuration
 
   roles:
+    - role: fl_workshop_topology
+      when: not (digitafrica_uninstall | default(false) | bool)
     - role: jupyterhub_deployment
       when: not (digitafrica_uninstall | default(false) | bool)
 
@@ -151,54 +88,5 @@
     - name: Skip Flower venv setup during uninstall
       ansible.builtin.meta: end_play
       when: digitafrica_uninstall | default(false) | bool
-  vars:
-    fl_venv: "/home/adam/.venvs/fl-workshop"
-    fl_runtime_root: "/home/adam/fl-workshop"
-    fl_client_count: "{{ groups['tier1_agents'] | length }}"
-    fl_num_rounds: 5
-  tasks:
-    - name: Require at least two configured Flower client workers
-      ansible.builtin.assert:
-        that:
-          - fl_client_count | int >= 2
-        fail_msg: >-
-          The Flower workflow demonstration requires at least two hosts in
-          [tier1_agents].
-
-    - name: Create Flower virtual environment
-      tags: [fl_venv]
-      ansible.builtin.command:
-        cmd: python3 -m venv {{ fl_venv }}
-        creates: "{{ fl_venv }}/bin/python"
-
-    - name: Install pinned Flower runtime dependencies into venv
-      tags: [fl_venv]
-      ansible.builtin.pip:
-        requirements: "/home/adam/fl-workshop/app/requirements.lock"
-        virtualenv: "{{ fl_venv }}"
-
-    - name: Verify Flower is importable
-      tags: [fl_venv]
-      ansible.builtin.command:
-        cmd: "{{ fl_venv }}/bin/python -c 'import flwr; print(flwr.__version__)'"
-      register: flwr_version
-      changed_when: false
-
-    - name: Report installed Flower version
-      tags: [fl_venv]
-      ansible.builtin.debug:
-        msg: "Flower {{ flwr_version.stdout }} installed at {{ fl_venv }}"
-
-    - name: Install the organizer-controlled Flower server service
-      become: true
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../workshop_assets/federated_learning/server/fl-workshop-server.service.j2"
-        dest: /etc/systemd/system/fl-workshop-server.service
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Reload systemd after Flower service installation
-      become: true
-      ansible.builtin.systemd_service:
-        daemon_reload: true
+  roles:
+    - role: fl_workshop_server_runtime

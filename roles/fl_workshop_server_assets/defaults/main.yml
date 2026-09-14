@@ -1,0 +1,3 @@
+---
+fl_runtime_root: "/home/adam/fl-workshop"
+fl_asset_root: "{{ playbook_dir }}/../workshop_assets/federated_learning"

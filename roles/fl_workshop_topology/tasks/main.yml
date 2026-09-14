@@ -1,0 +1,14 @@
+---
+- name: Derive the ordered federated-learning client topology
+  ansible.builtin.set_fact:
+    fl_workshop_client_hosts: >-
+      {{ (groups['tier1_agents'] | default([]))
+         + (groups['tier2_agents'] | default([])) }}
+
+- name: Require unique client inventory aliases
+  ansible.builtin.assert:
+    that:
+      - fl_workshop_client_hosts | length == (fl_workshop_client_hosts | unique | list | length)
+    fail_msg: >-
+      A federated-learning client inventory alias occurs more than once across
+      [tier1_agents] and [tier2_agents]. Each client must have one unique alias.

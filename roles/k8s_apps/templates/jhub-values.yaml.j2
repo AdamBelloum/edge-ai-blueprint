@@ -1,5 +1,5 @@
 {% set workshop_group_users = [] %}
-{% for _worker in groups['tier1_agents'] | default([]) %}
+{% for _worker in fl_workshop_client_hosts %}
 {% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
 {% endfor %}
 {% set jupyterhub_admin_users = tier1.jupyterhub.jupyterhub_admin_users | default([]) %}

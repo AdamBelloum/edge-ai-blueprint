@@ -29,6 +29,7 @@ Actions:
   full           Deploy all configured tiers using playbooks/site.yml.
   tier0          Deploy Tier-0 using playbooks/tier0.yml.
   tier1          Deploy the complete Tier-1 topology, including agents.
+  tier2          Add configured Tier-2 agents to an existing Tier-1 workshop.
   tier1-server   Reconcile only the Tier-1 control-plane application resources.
   preflight      Run connectivity, syntax, and whitespace checks only.
   menu           Show the interactive action menu. This is the default.
@@ -47,9 +48,12 @@ run_preflight() {
   log "Checking Ansible connectivity to inventory hosts."
   check_ansible_connectivity
 
-  log "Checking Tier-1 playbook syntax."
+  log "Checking Tier-1 and Tier-2 playbook syntax."
   ansible-playbook -i "${DIGITAFRICA_INVENTORY}" \
     "${DIGITAFRICA_TIER1_PLAYBOOK}" \
+    --syntax-check
+  ansible-playbook -i "${DIGITAFRICA_INVENTORY}" \
+    "${DIGITAFRICA_REPO_ROOT}/playbooks/tier2.yml" \
     --syntax-check
 
   if git -C "${DIGITAFRICA_REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -82,6 +86,11 @@ run_deployment() {
     tier1)
       playbook="${DIGITAFRICA_TIER1_PLAYBOOK}"
       description="Deploy the complete Tier-1 cluster and application layer"
+      command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
+      ;;
+    tier2)
+      playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/tier2.yml"
+      description="Add Tier-2 workers and reconcile the shared workshop layer"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier1-server)
@@ -134,7 +143,8 @@ Choose an action:
   2) Deploy all configured tiers
   3) Deploy Tier-0 only
   4) Deploy complete Tier-1 topology
-  5) Reconcile Tier-1 control-plane application resources only
+  5) Add configured Tier-2 workers to an existing Tier-1 workshop
+  6) Reconcile Tier-1 control-plane application resources only
   0) Exit
 EOF
     read -r -p "Selection: " choice
@@ -144,9 +154,10 @@ EOF
       2) run_deployment full ;;
       3) run_deployment tier0 ;;
       4) run_deployment tier1 ;;
-      5) run_deployment tier1-server ;;
+      5) run_deployment tier2 ;;
+      6) run_deployment tier1-server ;;
       0) log "Exiting."; return 0 ;;
-      *) warn "Choose a number from 0 to 5." ;;
+      *) warn "Choose a number from 0 to 6." ;;
     esac
   done
 }
@@ -161,7 +172,7 @@ main() {
     preflight)
       run_preflight
       ;;
-    full|tier0|tier1|tier1-server)
+    full|tier0|tier1|tier2|tier1-server)
       run_deployment "${action}"
       ;;
     help|--help|-h)

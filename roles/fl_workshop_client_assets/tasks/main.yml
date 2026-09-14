@@ -1,0 +1,37 @@
+---
+- name: Ensure the worker Flower runtime directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ fl_silo_runtime_root }}"
+    - "{{ fl_silo_runtime_root }}/app"
+    - "{{ fl_silo_runtime_root }}/data"
+
+- name: Stage committed Flower client application assets
+  ansible.builtin.copy:
+    src: "{{ fl_asset_root }}/"
+    dest: "{{ fl_silo_runtime_root }}/app/"
+    owner: root
+    group: root
+    mode: preserve
+    directory_mode: "0755"
+
+- name: Stage the worker-specific prepared partition
+  ansible.builtin.copy:
+    src: "{{ fl_data_root }}/partitions/{{ fl_client_group_id }}/train.csv"
+    dest: "{{ fl_silo_runtime_root }}/data/train.csv"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Stage the partition manifest for worker-side integrity validation
+  ansible.builtin.copy:
+    src: "{{ fl_data_root }}/partitions/partition-manifest.json"
+    dest: "{{ fl_silo_runtime_root }}/data/partition-manifest.json"
+    owner: root
+    group: root
+    mode: "0644"

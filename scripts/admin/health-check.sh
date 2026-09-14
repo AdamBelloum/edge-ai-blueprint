@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only health and readiness checks for the DIGITAfrica Tier-1 deployment.
+# Read-only health and readiness checks for the DIGITAfrica workshop deployment.
 #
 # Usage:
 #   ./scripts/admin/health-check.sh
@@ -24,7 +24,7 @@ Scopes:
   all             Run infrastructure, JupyterHub, and Silo workspace checks.
   infrastructure  Check k3s nodes, namespace deployments, pods, and events.
   jupyterhub      Check the JupyterHub Helm release and ingress objects.
-  silos           Check Silo A and Silo B rollout, Git, and source checkout.
+  silos           Check every numbered Silo rollout and mounted runtime assets.
   help            Show this help text.
 
 The checks are read-only. A non-zero exit code means one or more required
