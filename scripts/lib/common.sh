@@ -14,6 +14,8 @@ readonly DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:-${DIGITAFRICA_REPO_ROOT
 readonly DIGITAFRICA_TIER1_PLAYBOOK="${DIGITAFRICA_TIER1_PLAYBOOK:-${DIGITAFRICA_REPO_ROOT}/playbooks/tier1.yml}"
 readonly DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:-digitafrica}"
 readonly DIGITAFRICA_TIER1_GROUP="${DIGITAFRICA_TIER1_GROUP:-tier1_server}"
+# Defaults to the established Tier-1 target for backward compatibility.
+readonly DIGITAFRICA_DEPLOYMENT_GROUP="${DIGITAFRICA_DEPLOYMENT_GROUP:-${DIGITAFRICA_TIER1_GROUP}}"
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -79,7 +81,7 @@ show_context() {
   printf 'Inventory       : %s\n' "${DIGITAFRICA_INVENTORY}"
   printf 'Tier-1 playbook : %s\n' "${DIGITAFRICA_TIER1_PLAYBOOK}"
   printf 'Namespace       : %s\n' "${DIGITAFRICA_NAMESPACE}"
-  printf 'Tier-1 group    : %s\n' "${DIGITAFRICA_TIER1_GROUP}"
+  printf 'Deployment group: %s\n' "${DIGITAFRICA_DEPLOYMENT_GROUP}"
 }
 
 run_ansible_playbook() {
@@ -112,7 +114,7 @@ check_ansible_connectivity() {
 }
 
 
-run_tier1_remote() {
+run_deployment_remote() {
   local remote_command="$1"
   local encoded_command
 
@@ -123,8 +125,13 @@ run_tier1_remote() {
 
   ANSIBLE_STDOUT_CALLBACK=default ansible \
     -i "${DIGITAFRICA_INVENTORY}" \
-    "${DIGITAFRICA_TIER1_GROUP}" \
+    "${DIGITAFRICA_DEPLOYMENT_GROUP}" \
     -b \
     -m ansible.builtin.shell \
     -a "printf '%s' '${encoded_command}' | base64 -d | /bin/bash"
+}
+
+# Backward-compatible Tier-1 name for existing workshop scripts.
+run_tier1_remote() {
+  run_deployment_remote "$@"
 }

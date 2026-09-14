@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Main role-based entry point for DIGITAfrica helper scripts.
 #
-# The administrator setup wizard creates a local workshop inventory. When that
-# inventory exists, this entry point uses it by default, unless the operator
-# explicitly supplies DIGITAFRICA_INVENTORY in the environment.
+# The administrator setup wizard creates independent Tier-1 and Tier-2 local
+# inventories. This entry point selects a tier before common.sh captures the
+# chosen inventory and server group as readonly values.
 
 set -o errexit
 set -o nounset
@@ -11,12 +11,27 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WORKSHOP_INVENTORY="${REPO_ROOT}/inventories/workshop/hosts.ini"
+WORKSHOP_TIER="${DIGITAFRICA_DEPLOYMENT_TIER:-tier1}"
+
+case "${WORKSHOP_TIER}" in
+  tier1|tier2)
+    ;;
+  *)
+    printf '[ERROR] DIGITAFRICA_DEPLOYMENT_TIER must be tier1 or tier2, not: %s\n' \
+      "${WORKSHOP_TIER}" >&2
+    exit 1
+    ;;
+esac
+
+WORKSHOP_INVENTORY="${REPO_ROOT}/inventories/workshop/${WORKSHOP_TIER}/hosts.ini"
 
 # This must happen before common.sh is sourced: common.sh records the selected
-# inventory as a readonly variable.
+# inventory and server group as readonly variables.
 if [[ -z "${DIGITAFRICA_INVENTORY:-}" && -f "${WORKSHOP_INVENTORY}" ]]; then
   export DIGITAFRICA_INVENTORY="${WORKSHOP_INVENTORY}"
+fi
+if [[ -z "${DIGITAFRICA_DEPLOYMENT_GROUP:-}" ]]; then
+  export DIGITAFRICA_DEPLOYMENT_GROUP="${WORKSHOP_TIER}_server"
 fi
 
 # shellcheck source=lib/common.sh
@@ -33,14 +48,21 @@ usage() {
 Usage:
   ./scripts/digitafrica.sh
   ./scripts/digitafrica.sh admin setup
-  ./scripts/digitafrica.sh admin deploy [full|tier0|tier1|tier1-server|preflight]
+  ./scripts/digitafrica.sh admin deploy [full|tier0|tier1|tier2|tier1-server|preflight]
   ./scripts/digitafrica.sh admin health [all|infrastructure|jupyterhub|silos]
   ./scripts/digitafrica.sh workshop [readiness]
   ./scripts/digitafrica.sh workshop helper [preflight|revisions|inspect-silo-a|inspect-silo-b|checklist|record-template]
 
 Inventory selection:
-  If inventories/workshop/hosts.ini exists, it is used automatically.
+  Tier-1 is selected by default:
+    inventories/workshop/tier1/hosts.ini
+
+  Select Tier-2 with:
+    DIGITAFRICA_DEPLOYMENT_TIER=tier2 ./scripts/digitafrica.sh ...
+
   Set DIGITAFRICA_INVENTORY=/path/to/hosts.ini to use another inventory.
+  When using a custom Tier-2 inventory directly, also set:
+    DIGITAFRICA_DEPLOYMENT_GROUP=tier2_server
 EOF
 }
 

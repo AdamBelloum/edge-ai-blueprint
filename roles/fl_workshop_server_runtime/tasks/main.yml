@@ -4,8 +4,8 @@
     that:
       - fl_client_count | int >= 2
     fail_msg: >-
-      The Flower workflow demonstration requires at least two hosts across
-      [tier1_agents] and [tier2_agents].
+      The Flower workflow demonstration requires at least two hosts in
+      [{{ fl_workshop_client_group }}].
 
 - name: Create Flower virtual environment
   tags: [fl_venv]

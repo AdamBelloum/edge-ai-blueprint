@@ -36,7 +36,7 @@ EOF
 check_infrastructure() {
   local remote_script
 
-  print_heading "Tier-1 infrastructure health"
+  print_heading "Infrastructure health: ${DIGITAFRICA_DEPLOYMENT_GROUP}"
 
   remote_script="$(cat <<'REMOTE_SCRIPT'
 set -euo pipefail
@@ -78,13 +78,13 @@ REMOTE_SCRIPT
 )"
 
   remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
-  run_tier1_remote "${remote_script}"
+  run_deployment_remote "${remote_script}"
 }
 
 check_jupyterhub() {
   print_heading "JupyterHub release and ingress health"
 
-  run_tier1_remote "$(cat <<EOF
+  run_deployment_remote "$(cat <<EOF
 set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
@@ -202,7 +202,7 @@ REMOTE_SCRIPT
 )"
 
   remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
-  run_tier1_remote "${remote_script}"
+  run_deployment_remote "${remote_script}"
 }
 run_scope() {
   local scope="$1"

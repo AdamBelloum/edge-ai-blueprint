@@ -26,10 +26,10 @@ usage() {
 Usage: scripts/admin/deploy-infrastructure.sh [ACTION]
 
 Actions:
-  full           Deploy all configured tiers using playbooks/site.yml.
+  full           Deploy the Tier-0 plus Tier-1 site profile using playbooks/site.yml.
   tier0          Deploy Tier-0 using playbooks/tier0.yml.
   tier1          Deploy the complete Tier-1 topology, including agents.
-  tier2          Add configured Tier-2 agents to an existing Tier-1 workshop.
+  tier2          Deploy a complete independent Tier-2 topology.
   tier1-server   Reconcile only the Tier-1 control-plane application resources.
   preflight      Run connectivity, syntax, and whitespace checks only.
   menu           Show the interactive action menu. This is the default.
@@ -70,32 +70,38 @@ run_deployment() {
   local action="$1"
   local playbook
   local description
+  local target_group
   local -a command
 
   case "${action}" in
     full)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/site.yml"
-      description="Deploy all tiers configured in the inventory"
+      description="Deploy the Tier-0 plus Tier-1 site profile"
+      target_group="all"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier0)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/tier0.yml"
       description="Deploy Tier-0"
+      target_group="tier0"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier1)
       playbook="${DIGITAFRICA_TIER1_PLAYBOOK}"
       description="Deploy the complete Tier-1 cluster and application layer"
+      target_group="tier1_server"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier2)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/tier2.yml"
-      description="Add Tier-2 workers and reconcile the shared workshop layer"
+      description="Deploy the complete independent Tier-2 cluster and application layer"
+      target_group="tier2_server"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier1-server)
       playbook="${DIGITAFRICA_TIER1_PLAYBOOK}"
       description="Reconcile Tier-1 control-plane application resources only"
+      target_group="tier1_server"
       command=(
         ansible-playbook
         -i "${DIGITAFRICA_INVENTORY}"
@@ -116,7 +122,7 @@ run_deployment() {
   printf 'Action    : %s\n' "${description}"
   printf 'Inventory : %s\n' "${DIGITAFRICA_INVENTORY}"
   printf 'Playbook  : %s\n' "${playbook}"
-  printf 'Target    : %s\n' "${DIGITAFRICA_TIER1_GROUP}"
+  printf 'Target    : %s\n' "${target_group}"
 
   if ! confirm "Continue with this infrastructure change?"; then
     log "Deployment cancelled; no playbook was run."
@@ -140,10 +146,10 @@ interactive_menu() {
 
 Choose an action:
   1) Preflight only: connectivity, syntax, and whitespace checks
-  2) Deploy all configured tiers
+  2) Deploy Tier-0 plus Tier-1 site profile
   3) Deploy Tier-0 only
   4) Deploy complete Tier-1 topology
-  5) Add configured Tier-2 workers to an existing Tier-1 workshop
+  5) Deploy complete independent Tier-2 topology
   6) Reconcile Tier-1 control-plane application resources only
   0) Exit
 EOF

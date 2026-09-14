@@ -5,8 +5,8 @@
       - fl_workshop_client_hosts is defined
       - fl_workshop_client_hosts | length > 0
     fail_msg: >-
-      No federated-learning client VMs are configured across [tier1_agents]
-      and [tier2_agents].
+      No federated-learning client VMs are configured in
+      [{{ fl_workshop_client_group }}].
 
 - name: Verify every configured client VM is a Ready Kubernetes node
   ansible.builtin.command:
@@ -30,8 +30,8 @@
     client_vm: "{{ hostvars[item].ansible_fqdn | default(item) }}"
     fl_silo_runtime_root: "/opt/digitafrica/fl-workshop"
     flower_server_address: >-
-      {{ hostvars[groups['tier1_server'][0]].ansible_host
-         | default(groups['tier1_server'][0]) }}:8080
+      {{ hostvars[groups[fl_workshop_server_group][0]].ansible_host
+         | default(groups[fl_workshop_server_group][0]) }}:8080
 
 - name: Apply one numbered Silo deployment for every configured client VM
   ansible.builtin.command:

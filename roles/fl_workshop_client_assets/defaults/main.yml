@@ -2,5 +2,10 @@
 fl_silo_runtime_root: "/opt/digitafrica/fl-workshop"
 fl_asset_root: "{{ playbook_dir }}/../workshop_assets/federated_learning"
 fl_data_root: "{{ playbook_dir }}/../data"
+
+# Tier-1 compatibility default; standalone Tier-2 overrides this per play.
+fl_workshop_client_group: "tier1_agents"
+fl_workshop_client_hosts: "{{ groups[fl_workshop_client_group] | default([]) }}"
+
 fl_client_group_id: >-
   group_{{ '%02d' | format(fl_workshop_client_hosts.index(inventory_hostname) + 1) }}

@@ -1,70 +1,108 @@
 ---
-# Tier-2 overlay — adds [tier2_agents] to an existing Tier-1 workshop.
-# It never reprovisions or removes [tier1_agents].
-# Run standalone: ansible-playbook -i <combined-inventory> playbooks/tier2.yml
+# Tier-2 playbook — deploys an independent workshop cluster.
+# It touches only tier2_server/tier2_agents and reads tier2.* plus oidc.*.
+# Run standalone: ansible-playbook -i <tier2-inventory> playbooks/tier2.yml
 
-- name: Validate Tier-2 overlay preconditions
-  hosts: tier2_agents
-  gather_facts: false
-  tasks:
-    - name: Require add-only deployment mode
-      ansible.builtin.assert:
-        that:
-          - not (digitafrica_uninstall | default(false) | bool)
-        fail_msg: >-
-          playbooks/tier2.yml is add-only. Use the dedicated Tier-1 lifecycle
-          procedures for removal operations.
-
-    - name: Require an existing Tier-1 control plane and client baseline
-      ansible.builtin.assert:
-        that:
-          - groups['tier1_server'] is defined
-          - groups['tier1_server'] | length == 1
-          - groups['tier1_agents'] is defined
-          - groups['tier1_agents'] | length > 0
-        fail_msg: >-
-          Tier-2 requires a combined inventory containing exactly one
-          [tier1_server] and one or more existing [tier1_agents].
-
-- name: Base setup on new Tier-2 nodes
-  hosts: tier2_agents
+- name: Base setup on Tier-2 nodes
+  hosts: tier2_server:tier2_agents
+  vars: &tier2_deployment_vars
+    digitafrica_deployment: "{{ tier2 }}"
+    fl_workshop_server_group: "tier2_server"
+    fl_workshop_client_group: "tier2_agents"
   roles:
     - role: common
+      when: not (digitafrica_uninstall | default(false) | bool)
 
-- name: Join new Tier-2 nodes to the existing Tier-1 k3s cluster
+- name: Tier-2 k3s server (install)
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  roles:
+    - role: k3s_server
+      when: not (digitafrica_uninstall | default(false) | bool)
+
+- name: Tier-2 k3s agents (install)
   hosts: tier2_agents
+  vars: *tier2_deployment_vars
   roles:
     - role: k3s_agent
+      when: not (digitafrica_uninstall | default(false) | bool)
+
+- name: Deploy DIGITAfrica apps on Tier-2 (install)
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  roles:
+    - role: fl_workshop_topology
+      when: not (digitafrica_uninstall | default(false) | bool)
+    - role: k8s_apps
+      when: not (digitafrica_uninstall | default(false) | bool)
+
+- name: Deploy DIGITAfrica apps on Tier-2 (uninstall)
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  roles:
+    - role: k8s_apps
+      when: digitafrica_uninstall | default(false) | bool
+
+- name: Tier-2 k3s agents (uninstall)
+  hosts: tier2_agents
+  vars: *tier2_deployment_vars
+  roles:
+    - role: k3s_agent
+      when: digitafrica_uninstall | default(false) | bool
+
+- name: Tier-2 k3s server (uninstall)
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  roles:
+    - role: k3s_server
+      when: digitafrica_uninstall | default(false) | bool
+
+# ====================================================================
+# FLOWER SERVER ASSETS ON THE TIER-2 CONTROL PLANE
+# ====================================================================
+- name: Stage repository-owned Flower server source on the control plane
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  become: false
+  pre_tasks:
+    - name: Skip Flower server source staging during uninstall
+      ansible.builtin.meta: end_play
+      when: digitafrica_uninstall | default(false) | bool
+  roles:
+    - role: fl_workshop_server_assets
 
 - name: Stage isolated Flower client assets on Tier-2 worker nodes
   hosts: tier2_agents
+  vars: *tier2_deployment_vars
   become: true
+  pre_tasks:
+    - name: Skip Flower client asset staging during uninstall
+      ansible.builtin.meta: end_play
+      when: digitafrica_uninstall | default(false) | bool
   roles:
     - role: fl_workshop_client_assets
 
-- name: Reconcile shared Flower and workshop resources for Tier-1 plus Tier-2
-  hosts: tier1_server
+- name: Deploy Federated Learning Client Workspaces
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
+  become: false  # Use adam's existing kubectl configuration
+
+  roles:
+    - role: fl_workshop_topology
+      when: not (digitafrica_uninstall | default(false) | bool)
+    - role: jupyterhub_deployment
+      when: not (digitafrica_uninstall | default(false) | bool)
+
+# ====================================================================
+# FLOWER SERVER RUNTIME: virtual environment on tier2_server
+# ====================================================================
+- name: Prepare Flower server virtual environment on Control Plane
+  hosts: tier2_server
+  vars: *tier2_deployment_vars
   become: false
   pre_tasks:
-    - name: Require at least one configured Tier-2 agent before reconciliation
-      ansible.builtin.assert:
-        that:
-          - groups['tier2_agents'] is defined
-          - groups['tier2_agents'] | length > 0
-        fail_msg: >-
-          Tier-2 reconciliation requires one or more hosts in [tier2_agents].
-          No central workshop resources were changed.
-
-    - name: Require add-only deployment mode on the control plane
-      ansible.builtin.assert:
-        that:
-          - not (digitafrica_uninstall | default(false) | bool)
-        fail_msg: >-
-          playbooks/tier2.yml is add-only. No central workshop resources were
-          changed.
+    - name: Skip Flower venv setup during uninstall
+      ansible.builtin.meta: end_play
+      when: digitafrica_uninstall | default(false) | bool
   roles:
-    - role: fl_workshop_server_assets
-    - role: fl_workshop_topology
-    - role: k8s_apps
-    - role: jupyterhub_deployment
     - role: fl_workshop_server_runtime

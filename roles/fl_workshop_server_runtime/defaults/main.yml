@@ -5,3 +5,6 @@ fl_client_count: "{{ fl_workshop_client_hosts | length }}"
 fl_num_rounds: 5
 fl_server_service_template: >-
   {{ playbook_dir }}/../workshop_assets/federated_learning/server/fl-workshop-server.service.j2
+
+# Tier-1 compatibility default; standalone Tier-2 overrides this per play.
+fl_workshop_client_group: "tier1_agents"

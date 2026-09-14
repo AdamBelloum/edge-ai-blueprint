@@ -1,7 +1,7 @@
 - name: Read k3s node token from server
   ansible.builtin.slurp:
     src: /var/lib/rancher/k3s/server/node-token
-  delegate_to: "{{ tier1.k3s_server_host }}"
+  delegate_to: "{{ digitafrica_deployment.k3s_server_host }}"
   register: k3s_token
 
 - name: Set join token
@@ -10,11 +10,11 @@
 
 #- name: Fetch token from k3s server hostvars
 #  ansible.builtin.set_fact:
-#    k3s_join_token: "{{ hostvars[tier1.k3s_server_host].k3s_node_token_decoded }}"
+#    k3s_join_token: "{{ hostvars[digitafrica_deployment.k3s_server_host].k3s_node_token_decoded }}"
 
-- name: Install k3s agent (join Tier-1 server)
+- name: Install k3s agent (join configured k3s server)
   ansible.builtin.shell: |
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ tier1.k3s_version }}" K3S_URL="https://{{ hostvars[tier1.k3s_server_host].ansible_host }}:6443" K3S_TOKEN="{{ k3s_join_token }}" sh -s - agent
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ digitafrica_deployment.k3s_version }}" K3S_URL="https://{{ hostvars[digitafrica_deployment.k3s_server_host].ansible_host }}:6443" K3S_TOKEN="{{ k3s_join_token }}" sh -s - agent
   args:
     creates: /usr/local/bin/k3s
 
@@ -22,7 +22,7 @@
   ansible.builtin.shell: |
     set -e
     k3s kubectl get nodes --no-headers | awk '{print $1}' | grep -Fx -e "{{ ansible_hostname }}" -e "{{ ansible_fqdn }}" >/dev/null
-  delegate_to: "{{ tier1.k3s_server_host }}"
+  delegate_to: "{{ digitafrica_deployment.k3s_server_host }}"
   args:
     executable: /bin/bash
   retries: 30

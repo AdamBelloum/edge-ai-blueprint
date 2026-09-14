@@ -2,42 +2,42 @@
 {% for _worker in fl_workshop_client_hosts %}
 {% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
 {% endfor %}
-{% set jupyterhub_admin_users = tier1.jupyterhub.jupyterhub_admin_users | default([]) %}
+{% set jupyterhub_admin_users = digitafrica_deployment.jupyterhub.jupyterhub_admin_users | default([]) %}
 {% set jupyterhub_allowed_users = (workshop_group_users + jupyterhub_admin_users) | unique | list %}
 proxy:
   service:
-{% if tier1.expose_mode == 'ingress' %}
+{% if digitafrica_deployment.expose_mode == 'ingress' %}
     type: ClusterIP
 {% else %}
     type: NodePort
     nodePorts:
-      http: {{ tier1.jupyterhub.jupyter_nodeport }}
+      http: {{ digitafrica_deployment.jupyterhub.jupyter_nodeport }}
 {% endif %}
 
 ingress:
-{% if tier1.expose_mode == 'ingress' %}
+{% if digitafrica_deployment.expose_mode == 'ingress' %}
   enabled: true
   annotations:
     kubernetes.io/ingress.class: traefik
-    traefik.ingress.kubernetes.io/router.middlewares: "{{ tier1.digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
-{% if tier1.tls_mode | default('none') != 'none' %}
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ digitafrica_deployment.digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
+{% if digitafrica_deployment.tls_mode | default('none') != 'none' %}
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-{% if tier1.tls_mode | default('none') == 'letsencrypt' %}
+{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' %}
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 {% endif %}
 {% endif %}
-{% set jhub_host = tier1.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
+{% set jhub_host = digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
 {% if jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}
   # Host is a raw IP — omit hosts field so Traefik matches all incoming requests
 {% else %}
   hosts:
     - {{ jhub_host }}
 {% endif %}
-{% if tier1.tls_mode | default('none') != 'none' %}
+{% if digitafrica_deployment.tls_mode | default('none') != 'none' %}
   tls:
     - secretName: jhub-tls
-{% if tier1.tls_mode | default('none') == 'letsencrypt' and not (jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')) %}
+{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' and not (jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')) %}
       hosts:
         - {{ jhub_host }}
 {% endif %}
@@ -67,7 +67,7 @@ hub:
       username_claim: "{{ oidc.oidc_username_claim }}"
       tls_verify: false
       validate_server_cert: false
-      oauth_callback_url: "{{ tier1.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
+      oauth_callback_url: "{{ digitafrica_deployment.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
 
 {% endif %}
     Authenticator:
@@ -96,7 +96,7 @@ singleuser:
     type: dynamic
     capacity: 10Gi
     dynamic:
-      storageClass: {{ tier1.jupyterhub.storage_class }}
+      storageClass: {{ digitafrica_deployment.jupyterhub.storage_class }}
       volumeNameTemplate: home   # keeps the home PVC volume named "home" so the chart can inject it into initContainers
 
     # Seed notebooks come from a ConfigMap — works on any node, no hostPath needed
