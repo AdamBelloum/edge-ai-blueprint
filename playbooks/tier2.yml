@@ -82,7 +82,7 @@
   roles:
     - role: fl_workshop_client_assets
 
-- name: Deploy Federated Learning Client Workspaces
+- name: Reconcile student-driven federated-learning workspaces
   hosts: tier2_server
   vars: *tier2_deployment_vars
   become: false  # Use adam's existing kubectl configuration

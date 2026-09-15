@@ -1,4 +1,7 @@
 ---
+# JupyterHub now creates student-controlled Flower clients on demand. This role
+# verifies the client-node topology and removes the legacy autonomous Silo pods.
+
 - name: Validate that at least one federated-learning client VM is configured
   ansible.builtin.assert:
     that:
@@ -16,79 +19,36 @@
   loop: "{{ fl_workshop_client_hosts }}"
   changed_when: false
 
-- name: Render one numbered Silo manifest for every configured client VM
-  ansible.builtin.template:
-    src: fl-client-silo.yml.j2
-    dest: "/home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml"
-    mode: '0644'
-  loop: "{{ fl_workshop_client_hosts }}"
-  loop_control:
-    index_var: silo_index
-  vars:
-    silo_id: "{{ '%02d' | format(silo_index + 1) }}"
-    group_id: "group_{{ '%02d' | format(silo_index + 1) }}"
-    client_vm: "{{ hostvars[item].ansible_fqdn | default(item) }}"
-    fl_silo_runtime_root: "/opt/digitafrica/fl-workshop"
-    flower_server_address: >-
-      {{ hostvars[groups[fl_workshop_server_group][0]].ansible_host
-         | default(groups[fl_workshop_server_group][0]) }}:8080
-
-- name: Apply one numbered Silo deployment for every configured client VM
-  ansible.builtin.command:
-    cmd: kubectl apply -f /home/adam/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}.yml
-  loop: "{{ fl_workshop_client_hosts }}"
-  loop_control:
-    index_var: silo_index
-  register: silo_apply_output
-  changed_when: >-
-    'created' in silo_apply_output.stdout or
-    'configured' in silo_apply_output.stdout
-
-- name: Wait for all numbered Silo deployments to become available
+- name: List legacy autonomous Flower Silo deployments
   ansible.builtin.command:
     cmd: >-
-      kubectl -n digitafrica rollout status
-      deployment/fl-client-silo-{{ '%02d' | format(silo_index + 1) }}
-      --timeout=300s
-  loop: "{{ fl_workshop_client_hosts }}"
-  loop_control:
-    index_var: silo_index
-  changed_when: false
-
-- name: Initialise the desired numbered Silo deployment list
-  ansible.builtin.set_fact:
-    fl_expected_silo_deployments: []
-
-- name: Build the desired numbered Silo deployment list
-  ansible.builtin.set_fact:
-    fl_expected_silo_deployments: >-
-      {{ fl_expected_silo_deployments
-         + ['fl-client-silo-%02d' | format(silo_index + 1)] }}
-  loop: "{{ fl_workshop_client_hosts }}"
-  loop_control:
-    index_var: silo_index
-
-- name: List currently deployed Flower Silos
-  ansible.builtin.command:
-    cmd: >-
-      kubectl -n digitafrica get deployment
+      kubectl -n {{ digitafrica_deployment.digitafrica_namespace }}
+      get deployment
       -l app=fl-client-silo
       -o custom-columns=NAME:.metadata.name
       --no-headers
-  register: fl_existing_silos
+  register: fl_legacy_silos
   changed_when: false
 
-- name: Derive stale Flower Silo deployments
-  ansible.builtin.set_fact:
-    fl_stale_silo_deployments: >-
-      {{ fl_existing_silos.stdout_lines
-         | difference(fl_expected_silo_deployments) }}
-
-- name: Remove stale Flower Silo deployments after successful reconciliation
+- name: Remove legacy autonomous Flower Silo deployments
   ansible.builtin.command:
     cmd: >-
-      kubectl -n digitafrica delete deployment {{ item }}
+      kubectl -n {{ digitafrica_deployment.digitafrica_namespace }}
+      delete deployment {{ item }}
       --ignore-not-found=true
-  loop: "{{ fl_stale_silo_deployments }}"
-  register: fl_stale_silo_delete
-  changed_when: "'deleted' in fl_stale_silo_delete.stdout"
+  loop: "{{ fl_legacy_silos.stdout_lines }}"
+  register: fl_legacy_silo_delete
+  changed_when: "'deleted' in fl_legacy_silo_delete.stdout"
+
+- name: Find obsolete rendered Flower Silo manifests
+  ansible.builtin.find:
+    paths: /home/adam
+    patterns: "fl-client-silo-*.yml"
+    file_type: file
+  register: fl_legacy_silo_manifests
+
+- name: Remove obsolete rendered Flower Silo manifests
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ fl_legacy_silo_manifests.files }}"
