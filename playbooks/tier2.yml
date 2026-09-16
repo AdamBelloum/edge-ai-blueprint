@@ -9,6 +9,10 @@
     digitafrica_deployment: "{{ tier2 }}"
     fl_workshop_server_group: "tier2_server"
     fl_workshop_client_group: "tier2_agents"
+    workshop_notebook_runtime:
+      enabled: true
+      image_name: "quay.io/jupyterhub/k8s-singleuser-sample"
+      image_tag: "4.4.2"
   roles:
     - role: common
       when: not (digitafrica_uninstall | default(false) | bool)

@@ -148,6 +148,20 @@
     dest: /opt/digitafrica/k8s-notebooks/
     mode: "0644"
 
+- name: Ensure Tier-2 notebook runtime staging directory exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-runtime
+    state: directory
+    mode: "0755"
+  when: workshop_notebook_runtime.enabled | default(false) | bool
+
+- name: Stage locked Tier-2 notebook runtime requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/federated_learning/requirements.lock"
+    dest: /opt/digitafrica/k8s-runtime/requirements.lock
+    mode: "0644"
+  when: workshop_notebook_runtime.enabled | default(false) | bool
+
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2
@@ -180,6 +194,16 @@
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
+
+- name: Create/update Tier-2 notebook runtime requirements ConfigMap
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap digitafrica-runtime-requirements \
+      --from-file=requirements.lock=/opt/digitafrica/k8s-runtime/requirements.lock \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  when: workshop_notebook_runtime.enabled | default(false) | bool
 
 # When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
 # Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.

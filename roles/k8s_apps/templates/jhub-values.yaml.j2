@@ -83,28 +83,30 @@ hub:
           spawner.node_selector = node_selector
 
           volume_name = "digitafrica-workshop"
-          volumes = [
-              volume for volume in list(spawner.volumes or [])
+          volumes = {
+              key: volume
+              for key, volume in dict(spawner.volumes or {}).items()
               if volume.get("name") != volume_name
-          ]
-          volumes.append({
+          }
+          volumes[volume_name] = {
               "name": volume_name,
               "hostPath": {
                   "path": WORKSHOP_HOST_PATH,
                   "type": "Directory",
               },
-          })
+          }
           spawner.volumes = volumes
 
-          volume_mounts = [
-              mount for mount in list(spawner.volume_mounts or [])
+          volume_mounts = {
+              key: mount
+              for key, mount in dict(spawner.volume_mounts or {}).items()
               if mount.get("name") != volume_name
-          ]
-          volume_mounts.append({
+          }
+          volume_mounts[volume_name] = {
               "name": volume_name,
               "mountPath": WORKSHOP_MOUNT_PATH,
               "readOnly": True,
-          })
+          }
           spawner.volume_mounts = volume_mounts
 
           environment = dict(spawner.environment or {})
@@ -142,8 +144,13 @@ hub:
 
 singleuser:
   image:
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+    name: {{ workshop_notebook_runtime.image_name }}
+    tag: "{{ workshop_notebook_runtime.image_tag }}"
+{% else %}
     name: jupyter/minimal-notebook
     tag: "python-3.11"
+{% endif %}
   defaultUrl: "/lab"
 
   cpu:
@@ -172,6 +179,11 @@ singleuser:
       - name: digitafrica-seed
         configMap:
           name: digitafrica-notebooks
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      - name: digitafrica-runtime-requirements
+        configMap:
+          name: digitafrica-runtime-requirements
+{% endif %}
 
     extraVolumeMounts:
       - name: digitafrica-seed
@@ -179,6 +191,37 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+    # Install once per group PVC, before the participant reaches JupyterLab.
+    # The marker ties the cached environment to the exact locked requirements.
+    - name: prepare-workshop-runtime
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+      command: ["bash", "-lc"]
+      args:
+        - |
+          set -euo pipefail
+          requirements=/runtime/requirements.lock
+          runtime_dir=/home/jovyan/.local/share/digitafrica
+          marker="$runtime_dir/requirements.sha256"
+          expected="$(sha256sum "$requirements" | cut -d " " -f1)"
+
+          if [ "$(cat "$marker" 2>/dev/null || true)" != "$expected" ]; then
+            echo "[runtime] Installing locked workshop dependencies."
+            python -m pip install --user --no-cache-dir --requirement "$requirements"
+            mkdir -p "$runtime_dir"
+            printf "%s\n" "$expected" > "$marker"
+          else
+            echo "[runtime] Locked workshop dependencies are already available."
+          fi
+
+          python -c "import flwr, numpy, pandas, sklearn; print('[runtime] Flower', flwr.__version__, 'is ready.')"
+      volumeMounts:
+        - name: digitafrica-runtime-requirements
+          mountPath: /runtime
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}
     - name: seed-notebooks
       image: alpine:3.20
       command: ["sh", "-lc"]

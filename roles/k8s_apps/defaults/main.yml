@@ -1,3 +1,11 @@
 ---
 # Tier-1 compatibility default; standalone Tier-2 overrides this per play.
 digitafrica_deployment: "{{ tier1 }}"
+
+# Disabled by default to preserve the existing Tier-1 user-image and spawn
+# behaviour. Tier-2 enables this explicitly for the federated-learning
+# workshop, where the participant runtime must be ready before JupyterLab opens.
+workshop_notebook_runtime:
+  enabled: false
+  image_name: "quay.io/jupyterhub/k8s-singleuser-sample"
+  image_tag: "4.4.2"
