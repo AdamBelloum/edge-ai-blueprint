@@ -166,7 +166,7 @@
   ansible.builtin.template:
     src: jhub-values.yaml.j2
     dest: /opt/digitafrica/k8s/jhub-values.yaml
-    mode: "0644"
+    mode: "0600"
 
 - name: Install helm if missing
   ansible.builtin.shell: |
