@@ -22,3 +22,6 @@ scripts/workshop/workshop-release.env
 # Tier-1 topology and must not be committed.
 data/source/
 data/partitions/
+
+# Locally generated workshop inventories, topology, and organiser-supplied OIDC settings.
+/inventories/workshop/

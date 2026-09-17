@@ -176,7 +176,18 @@ MLflow and Grafana flags are reserved for future service implementation where ap
 | `oidc.oidc_client_secret` | — | Keycloak client secret |
 | `oidc.oidc_scope` | `[openid, profile, email]` | OAuth scopes to request |
 | `oidc.oidc_username_claim` | `preferred_username` | JWT claim used as the JupyterHub username |
-| `oidc.oidc_tls_verify` | `false` | Set to `true` if the Keycloak certificate is trusted |
+| `oidc.oidc_tls_verify` | `true` | Keep certificate verification enabled; set to `false` only for a controlled self-signed test deployment |
+
+### Workshop-organiser OIDC preparation
+
+The platform deploys JupyterHub and may provide Keycloak, but the workshop organiser creates the JupyterHub OIDC client during workshop preparation.
+
+- Enable the Authorization Code / Standard Flow.
+- Register `https://<jupyterhub-public-host>/jupyter/hub/oauth_callback` as the redirect URI.
+- Record the realm issuer URL, client ID, and, for a confidential client, client secret.
+- In the setup wizard, choose Advanced deployment, enable OIDC, and enter these values.
+
+The generated inventory is under `inventories/workshop/`, which is ignored by Git. Do not commit organiser-supplied OIDC settings or client secrets. Keep `oidc_tls_verify: true` when the JupyterHub environment trusts the Keycloak certificate chain.
 
 ---
 

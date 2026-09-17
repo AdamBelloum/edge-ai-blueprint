@@ -1,9 +1,9 @@
-{% set workshop_group_users = [] %}
+{% set workshop_groups = [] %}
 {% for _worker in fl_workshop_client_hosts %}
-{% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
+{% set _ = workshop_groups.append('group_%02d' | format(loop.index)) %}
 {% endfor %}
 {% set jupyterhub_admin_users = digitafrica_deployment.jupyterhub.jupyterhub_admin_users | default([]) %}
-{% set jupyterhub_allowed_users = (workshop_group_users + jupyterhub_admin_users) | unique | list %}
+{% set jupyterhub_legacy_allowed_users = (workshop_groups + jupyterhub_admin_users) | unique | list %}
 {% set workshop_group_nodes = {} %}
 {% for _worker in fl_workshop_client_hosts %}
 {% set _group_name = 'group_%02d' | format(loop.index) %}
@@ -63,15 +63,45 @@ hub:
 
   extraConfig:
     10-digitafrica-group-workspace: |
-      # This mapping is generated from the ordered Tier-2 client inventory.
-      # Each group can receive only the local workshop directory of its VM.
+      # This mapping is generated from the ordered worker inventory.
+      # Keycloak group membership, rather than the account username, selects
+      # the permitted local workshop directory and worker placement.
       WORKSHOP_GROUP_NODES = {{ workshop_group_nodes | to_json }}
+      WORKSHOP_ADMIN_USERS = {{ jupyterhub_admin_users | to_json }}
+      OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
       WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
       WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
 
       async def configure_digitafrica_group_workspace(spawner):
           username = spawner.user.name.lower()
-          assigned_node = WORKSHOP_GROUP_NODES.get(username)
+          if OIDC_ENABLED:
+              user_group_names = {
+                  group.name.lower()
+                  for group in (spawner.user.groups or [])
+              }
+              assigned_groups = sorted(
+                  group_name
+                  for group_name in user_group_names
+                  if group_name in WORKSHOP_GROUP_NODES
+              )
+
+              if len(assigned_groups) == 0:
+                  if username in WORKSHOP_ADMIN_USERS:
+                      return
+                  raise RuntimeError(
+                      "No workshop group is assigned to this account."
+                  )
+              if len(assigned_groups) != 1:
+                  raise RuntimeError(
+                      "Each workshop participant must have exactly one "
+                      "workshop group assignment."
+                  )
+              group_id = assigned_groups[0]
+          else:
+              # Deprecated compatibility path for non-OIDC regression tests.
+              group_id = username
+
+          assigned_node = WORKSHOP_GROUP_NODES.get(group_id)
 
           # Administrators may use JupyterHub but do not receive a student
           # partition or a client-VM placement.
@@ -110,7 +140,7 @@ hub:
           spawner.volume_mounts = volume_mounts
 
           environment = dict(spawner.environment or {})
-          environment["GROUP_ID"] = username
+          environment["GROUP_ID"] = group_id
           spawner.environment = environment
 
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
@@ -132,14 +162,21 @@ hub:
       userdata_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
       scope: {{ oidc.oidc_scope | to_json }}
       username_claim: "{{ oidc.oidc_username_claim }}"
-      tls_verify: false
-      validate_server_cert: false
+      tls_verify: {{ oidc.oidc_tls_verify | default(true) | to_json }}
+      manage_groups: true
+      auth_state_groups_key: "{{ oidc.oidc_groups_claim | default('groups') }}"
       oauth_callback_url: "{{ digitafrica_deployment.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
 
 {% endif %}
     Authenticator:
       allow_all: false
-      allowed_users: {{ jupyterhub_allowed_users | to_json }}
+{% if oidc.oidc_enabled %}
+      allowed_users: {{ jupyterhub_admin_users | to_json }}
+      allowed_groups: {{ workshop_groups | to_json }}
+{% else %}
+      # Deprecated compatibility path for non-OIDC regression tests.
+      allowed_users: {{ jupyterhub_legacy_allowed_users | to_json }}
+{% endif %}
       admin_users: {{ jupyterhub_admin_users | to_json }}
 
 singleuser:

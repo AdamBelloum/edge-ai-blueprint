@@ -50,14 +50,20 @@ tier1:
   grafana_enabled: false   # not tested yet
 
 # OIDC / Keycloak
+# Required for participant-facing workshop deployments. Configure the realm and
+# JupyterHub client through the deployed user portal, then set
+# `oidc_enabled: true` in the ignored local all.yml.
+# Keycloak must emit the participant's workshop membership in the `groups`
+# claim, including exactly one of group_01 through group_N.
 oidc:
   oidc_enabled: false
-  oidc_issuer_url: "https://auth.theblueprintfactory.org:8080/realms/slices-test"
-  oidc_client_id: "jupyterhub-client"
-  oidc_client_secret: "CHANGE_ME"
+  oidc_issuer_url: "https://ab-01.lab.uvalight.net/keycloak/realms/<portal-managed-realm>"
+  oidc_client_id: "<portal-managed-jupyterhub-client-id>"
+  oidc_client_secret: "<set-only-in-local-all.yml>"
   oidc_scope:
     - "openid"
     - "profile"
     - "email"
   oidc_username_claim: "preferred_username"
-  oidc_tls_verify: false
+  oidc_groups_claim: "groups"
+  oidc_tls_verify: true
