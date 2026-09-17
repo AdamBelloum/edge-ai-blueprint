@@ -154,8 +154,6 @@ hub:
 {% endif %}
 
 {% if oidc.oidc_enabled %}
-    Authenticator:
-      auto_login: true
     GenericOAuthenticator:
       client_id: "{{ oidc.oidc_client_id }}"
       client_secret: "{{ oidc.oidc_client_secret }}"
@@ -173,6 +171,7 @@ hub:
     Authenticator:
       allow_all: false
 {% if oidc.oidc_enabled %}
+      auto_login: true
       allowed_users: {{ jupyterhub_admin_users | to_json }}
       allowed_groups: {{ workshop_groups | to_json }}
 {% else %}
