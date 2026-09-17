@@ -154,6 +154,8 @@ hub:
 {% endif %}
 
 {% if oidc.oidc_enabled %}
+    Authenticator:
+      auto_login: true
     GenericOAuthenticator:
       client_id: "{{ oidc.oidc_client_id }}"
       client_secret: "{{ oidc.oidc_client_secret }}"
