@@ -332,7 +332,8 @@
   args:
     executable: /bin/bash
 
-# Optional: remove your previous non-helm resources (safe if they don't exist)
+# One-time migration only: never remove Helm-managed resources during routine reconciliation.
+# Set digitafrica_cleanup_legacy_jupyterhub_resources: true explicitly when needed.
 - name: Cleanup previous manual JupyterHub resources (best-effort)
   ansible.builtin.shell: |
     set -e
@@ -340,6 +341,7 @@
       -l app=jupyterhub --ignore-not-found || true
   args:
     executable: /bin/bash
+  when: digitafrica_cleanup_legacy_jupyterhub_resources | default(false) | bool
 
 - name: Apply Traefik redirect-slash middleware for JupyterHub
   ansible.builtin.shell: |
