@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./scripts/admin/health-check.sh
+#   ./scripts/admin/health-check.sh deployment
 #   ./scripts/admin/health-check.sh all
 #   ./scripts/admin/health-check.sh infrastructure
 #   ./scripts/admin/health-check.sh jupyterhub
@@ -21,16 +22,82 @@ usage() {
 Usage: scripts/admin/health-check.sh [SCOPE]
 
 Scopes:
-  all             Run infrastructure, JupyterHub, and Silo workspace checks.
+  deployment      Run infrastructure and JupyterHub deployment checks (default).
+                  This scope does not require workshop Silo resources.
+  all             Run deployment checks and explicit Silo workspace checks.
   infrastructure  Check k3s nodes, namespace deployments, pods, and events.
-  jupyterhub      Check the JupyterHub Helm release and ingress objects.
+  jupyterhub      Check the JupyterHub Helm release, ingress, and public login path.
   silos           Check every numbered Silo rollout and mounted runtime assets.
   help            Show this help text.
 
 The checks are read-only. A non-zero exit code means one or more required
-health conditions were not met. A successful static JupyterHub check does not
-replace a real login and user-server spawn test.
+health conditions were not met. The OIDC check validates the redirect path,
+not an interactive credentialed login or user-server spawn.
 EOF
+}
+
+load_jupyterhub_health_configuration() {
+  JUPYTERHUB_PUBLIC_URL="$(deployment_public_setting jupyterhub_public_url)"
+  DEPLOYMENT_TLS_MODE="$(deployment_public_setting tls_mode)"
+  OIDC_ENABLED="$(deployment_public_setting oidc_enabled)"
+
+  if [[ "${OIDC_ENABLED}" == "true" ]]; then
+    OIDC_ISSUER_URL="$(deployment_public_setting oidc_issuer_url)"
+  else
+    OIDC_ISSUER_URL=""
+  fi
+}
+
+check_jupyterhub_public_endpoint() {
+  local curl_args=() curl_result http_status effective_url
+
+  load_jupyterhub_health_configuration
+  require_command curl
+
+  print_heading "JupyterHub public endpoint health"
+
+  curl_args=(
+    --silent
+    --show-error
+    --location
+    --max-redirs 10
+    --output /dev/null
+    --write-out '%{http_code} %{url_effective}'
+  )
+  case "${DEPLOYMENT_TLS_MODE}" in
+    letsencrypt)
+      ;;
+    selfsigned|none)
+      # These modes can use a certificate that is not trusted by this host.
+      # The endpoint remains reachable, but this check does not validate trust.
+      curl_args+=(--insecure)
+      ;;
+    *)
+      die "Unsupported TLS mode in deployment configuration: ${DEPLOYMENT_TLS_MODE}"
+      ;;
+  esac
+
+  if ! curl_result="$(curl "${curl_args[@]}" "${JUPYTERHUB_PUBLIC_URL%/}/hub/login")"; then
+    die "Could not reach the configured JupyterHub login endpoint."
+  fi
+
+  http_status="${curl_result%% *}"
+  effective_url="${curl_result#* }"
+  [[ "${http_status}" =~ ^2 ]] ||
+    die "JupyterHub login path returned unexpected HTTP status ${http_status}."
+
+  if [[ "${OIDC_ENABLED}" == "true" ]]; then
+    case "${effective_url}" in
+      "${OIDC_ISSUER_URL%/}"/*)
+        log "JupyterHub login redirects to the configured OIDC issuer."
+        ;;
+      *)
+        die "JupyterHub login did not redirect to the configured OIDC issuer."
+        ;;
+    esac
+  else
+    log "OIDC is disabled; verified the configured JupyterHub login endpoint."
+  fi
 }
 
 check_infrastructure() {
@@ -98,9 +165,10 @@ printf '%s\\n' '===== Ingress details ====='
 k3s kubectl -n ${DIGITAFRICA_NAMESPACE} describe ingress || true
 
 echo 'JupyterHub static health check passed.'
-echo 'NOTE: Perform a browser login and user-server spawn test separately.'
 EOF
 )"
+
+  check_jupyterhub_public_endpoint
 }
 
 check_silos() {
@@ -208,6 +276,10 @@ run_scope() {
   local scope="$1"
 
   case "${scope}" in
+    deployment)
+      check_infrastructure
+      check_jupyterhub
+      ;;
     all)
       check_infrastructure
       check_jupyterhub
@@ -230,13 +302,13 @@ run_scope() {
 }
 
 main() {
-  local scope="${1:-all}"
+  local scope="${1:-deployment}"
 
   case "${scope}" in
     help|--help|-h)
       usage
       ;;
-    all|infrastructure|jupyterhub|silos)
+    deployment|all|infrastructure|jupyterhub|silos)
       show_context
       run_scope "${scope}"
       print_heading "Health-check result"

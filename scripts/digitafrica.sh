@@ -49,7 +49,7 @@ Usage:
   ./scripts/digitafrica.sh
   ./scripts/digitafrica.sh admin setup
   ./scripts/digitafrica.sh admin deploy [full|tier0|tier1|tier2|tier1-server|preflight]
-  ./scripts/digitafrica.sh admin health [all|infrastructure|jupyterhub|silos]
+  ./scripts/digitafrica.sh admin health [deployment|all|infrastructure|jupyterhub|silos]
   ./scripts/digitafrica.sh workshop [readiness]
   ./scripts/digitafrica.sh workshop helper [preflight|revisions|inspect-silo-a|inspect-silo-b|checklist|record-template]
 
@@ -83,16 +83,18 @@ admin_menu() {
     cat <<'EOF'
   1) Set up or reconfigure a workshop
   2) Deploy or reconcile infrastructure
-  3) Run health checks
+  3) Run deployment health checks
+  4) Run workshop Silo runtime readiness checks
   0) Return
 EOF
     read -r -p "Selection: " choice
     case "${choice}" in
       1) bash "${SETUP_SCRIPT}" ;;
       2) bash "${DEPLOY_SCRIPT}" menu ;;
-      3) bash "${HEALTH_SCRIPT}" all ;;
+      3) bash "${HEALTH_SCRIPT}" deployment ;;
+      4) bash "${HEALTH_SCRIPT}" silos ;;
       0) return 0 ;;
-      *) warn "Choose a number from 0 to 3." ;;
+      *) warn "Choose a number from 0 to 4." ;;
     esac
   done
 }
@@ -135,7 +137,7 @@ main() {
       case "${action:-menu}" in
         setup) bash "${SETUP_SCRIPT}" ;;
         deploy) bash "${DEPLOY_SCRIPT}" "${argument:-menu}" ;;
-        health) bash "${HEALTH_SCRIPT}" "${argument:-all}" ;;
+        health) bash "${HEALTH_SCRIPT}" "${argument:-deployment}" ;;
         menu) admin_menu ;;
         *) usage >&2; die "Unknown administrator action: ${action}" ;;
       esac
