@@ -120,21 +120,30 @@ check_ansible_connectivity() {
 }
 
 
-run_deployment_remote() {
-  local remote_command="$1"
+run_inventory_target_remote() {
+  local target="$1"
+  local remote_script="$2"
   local encoded_command
+
+  [[ $# -eq 2 ]] || die "Usage: run_inventory_target_remote <target> <script>"
+  [[ "${target}" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Unsafe Ansible inventory target: ${target@Q}"
 
   require_ansible_environment
   require_command base64
 
-  encoded_command="$(printf '%s' "${remote_command}" | base64 | tr -d '\n')"
+  encoded_command="$(printf '%s' "${remote_script}" | base64 | tr -d '\n')"
 
   ANSIBLE_STDOUT_CALLBACK=default ansible \
     -i "${DIGITAFRICA_INVENTORY}" \
-    "${DIGITAFRICA_DEPLOYMENT_GROUP}" \
+    "${target}" \
     -b \
     -m ansible.builtin.shell \
     -a "printf '%s' '${encoded_command}' | base64 -d | /bin/bash"
+}
+
+run_deployment_remote() {
+  [[ $# -eq 1 ]] || die "Usage: run_deployment_remote <script>"
+  run_inventory_target_remote "${DIGITAFRICA_DEPLOYMENT_GROUP}" "$1"
 }
 
 deployment_tier_name() {
@@ -152,6 +161,19 @@ deployment_tier_name() {
       die "Cannot determine deployment tier. Set DIGITAFRICA_DEPLOYMENT_TIER to tier1 or tier2."
       ;;
   esac
+}
+
+deployment_worker_group() {
+  local worker_group="${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP:-}"
+
+  if [[ -z "${worker_group}" ]]; then
+    worker_group="$(deployment_tier_name)_agents"
+  fi
+
+  [[ "${worker_group}" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+    die "Unsafe deployment worker group: ${worker_group@Q}"
+
+  printf '%s\n' "${worker_group}"
 }
 
 deployment_group_vars_file() {
