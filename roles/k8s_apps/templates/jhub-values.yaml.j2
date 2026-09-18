@@ -164,7 +164,7 @@ hub:
       username_claim: "{{ oidc.oidc_username_claim }}"
       tls_verify: {{ oidc.oidc_tls_verify | default(true) | to_json }}
       manage_groups: true
-      auth_state_groups_key: "{{ oidc.oidc_groups_claim | default('groups') }}"
+      auth_state_groups_key: "oauth_user.{{ oidc.oidc_groups_claim | default('groups') }}"
       oauth_callback_url: "{{ digitafrica_deployment.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
 
 {% endif %}
