@@ -1,43 +1,52 @@
-{% set workshop_group_users = [] %}
-{% for _worker in groups['tier1_agents'] | default([]) %}
-{% set _ = workshop_group_users.append('group_%02d' | format(loop.index)) %}
+{% set workshop_groups = [] %}
+{% for _worker in fl_workshop_client_hosts %}
+{% set _ = workshop_groups.append('group_%02d' | format(loop.index)) %}
 {% endfor %}
-{% set jupyterhub_admin_users = tier1.jupyterhub.jupyterhub_admin_users | default([]) %}
-{% set jupyterhub_allowed_users = (workshop_group_users + jupyterhub_admin_users) | unique | list %}
+{% set jupyterhub_admin_users = digitafrica_deployment.jupyterhub.jupyterhub_admin_users | default([]) %}
+{% set jupyterhub_legacy_allowed_users = (workshop_groups + jupyterhub_admin_users) | unique | list %}
+{% set workshop_group_nodes = {} %}
+{% for _worker in fl_workshop_client_hosts %}
+{% set _group_name = 'group_%02d' | format(loop.index) %}
+{% set _node_name = hostvars[_worker].ansible_fqdn | default(_worker) %}
+{% set _ = workshop_group_nodes.update({_group_name: _node_name}) %}
+{% endfor %}
+{% set flower_server_host = groups[fl_workshop_server_group][0] %}
+{% set flower_server_address = (hostvars[flower_server_host].ansible_host | default(flower_server_host)) ~ ':8080' %}
+{% set jupyterhub_control_node = hostvars[flower_server_host].ansible_fqdn | default(flower_server_host) %}
 proxy:
   service:
-{% if tier1.expose_mode == 'ingress' %}
+{% if digitafrica_deployment.expose_mode == 'ingress' %}
     type: ClusterIP
 {% else %}
     type: NodePort
     nodePorts:
-      http: {{ tier1.jupyterhub.jupyter_nodeport }}
+      http: {{ digitafrica_deployment.jupyterhub.jupyter_nodeport }}
 {% endif %}
 
 ingress:
-{% if tier1.expose_mode == 'ingress' %}
+{% if digitafrica_deployment.expose_mode == 'ingress' %}
   enabled: true
   annotations:
     kubernetes.io/ingress.class: traefik
-    traefik.ingress.kubernetes.io/router.middlewares: "{{ tier1.digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
-{% if tier1.tls_mode | default('none') != 'none' %}
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ digitafrica_deployment.digitafrica_namespace }}-jupyterhub-redirect-slash@kubernetescrd"
+{% if digitafrica_deployment.tls_mode | default('none') != 'none' %}
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-{% if tier1.tls_mode | default('none') == 'letsencrypt' %}
+{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' %}
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 {% endif %}
 {% endif %}
-{% set jhub_host = tier1.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
+{% set jhub_host = digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
 {% if jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}
   # Host is a raw IP — omit hosts field so Traefik matches all incoming requests
 {% else %}
   hosts:
     - {{ jhub_host }}
 {% endif %}
-{% if tier1.tls_mode | default('none') != 'none' %}
+{% if digitafrica_deployment.tls_mode | default('none') != 'none' %}
   tls:
     - secretName: jhub-tls
-{% if tier1.tls_mode | default('none') == 'letsencrypt' and not (jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')) %}
+{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' and not (jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')) %}
       hosts:
         - {{ jhub_host }}
 {% endif %}
@@ -47,7 +56,95 @@ ingress:
 {% endif %}
 
 hub:
+  # Hub retains Kubernetes' existing placement because its SQLite database uses
+  # a node-local PVC. Group notebook kernels are placed separately on their
+  # assigned client VMs by the pre-spawn hook below.
   baseUrl: /jupyter
+
+  extraConfig:
+    10-digitafrica-group-workspace: |
+      # This mapping is generated from the ordered worker inventory.
+      # Keycloak group membership, rather than the account username, selects
+      # the permitted local workshop directory and worker placement.
+      WORKSHOP_GROUP_NODES = {{ workshop_group_nodes | to_json }}
+      WORKSHOP_ADMIN_USERS = {{ jupyterhub_admin_users | to_json }}
+      OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
+      WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
+      WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
+
+      async def configure_digitafrica_group_workspace(spawner):
+          username = spawner.user.name.lower()
+          if OIDC_ENABLED:
+              user_group_names = {
+                  group.name.lower()
+                  for group in (spawner.user.groups or [])
+              }
+              assigned_groups = sorted(
+                  group_name
+                  for group_name in user_group_names
+                  if group_name in WORKSHOP_GROUP_NODES
+              )
+
+              if len(assigned_groups) == 0:
+                  if username in WORKSHOP_ADMIN_USERS:
+                      return
+                  raise RuntimeError(
+                      "No workshop group is assigned to this account."
+                  )
+              if len(assigned_groups) != 1:
+                  raise RuntimeError(
+                      "Each workshop participant must have exactly one "
+                      "workshop group assignment."
+                  )
+              group_id = assigned_groups[0]
+          else:
+              # Deprecated compatibility path for non-OIDC regression tests.
+              group_id = username
+
+          assigned_node = WORKSHOP_GROUP_NODES.get(group_id)
+
+          # Administrators may use JupyterHub but do not receive a student
+          # partition or a client-VM placement.
+          if assigned_node is None:
+              return
+
+          node_selector = dict(spawner.node_selector or {})
+          node_selector["kubernetes.io/hostname"] = assigned_node
+          spawner.node_selector = node_selector
+
+          volume_name = "digitafrica-workshop"
+          volumes = {
+              key: volume
+              for key, volume in dict(spawner.volumes or {}).items()
+              if volume.get("name") != volume_name
+          }
+          volumes[volume_name] = {
+              "name": volume_name,
+              "hostPath": {
+                  "path": WORKSHOP_HOST_PATH,
+                  "type": "Directory",
+              },
+          }
+          spawner.volumes = volumes
+
+          volume_mounts = {
+              key: mount
+              for key, mount in dict(spawner.volume_mounts or {}).items()
+              if mount.get("name") != volume_name
+          }
+          volume_mounts[volume_name] = {
+              "name": volume_name,
+              "mountPath": WORKSHOP_MOUNT_PATH,
+              "readOnly": True,
+          }
+          spawner.volume_mounts = volume_mounts
+
+          environment = dict(spawner.environment or {})
+          environment["GROUP_ID"] = group_id
+          spawner.environment = environment
+
+      c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
+
   config:
     JupyterHub:
 {% if oidc.oidc_enabled %}
@@ -65,20 +162,33 @@ hub:
       userdata_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
       scope: {{ oidc.oidc_scope | to_json }}
       username_claim: "{{ oidc.oidc_username_claim }}"
-      tls_verify: false
-      validate_server_cert: false
-      oauth_callback_url: "{{ tier1.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
+      tls_verify: {{ oidc.oidc_tls_verify | default(true) | to_json }}
+      manage_groups: true
+      auth_state_groups_key: "oauth_user.{{ oidc.oidc_groups_claim | default('groups') }}"
+      oauth_callback_url: "{{ digitafrica_deployment.jupyterhub.jupyterhub_public_url.rstrip('/') }}/hub/oauth_callback"
 
 {% endif %}
     Authenticator:
       allow_all: false
-      allowed_users: {{ jupyterhub_allowed_users | to_json }}
+{% if oidc.oidc_enabled %}
+      auto_login: true
+      allowed_users: {{ jupyterhub_admin_users | to_json }}
+      allowed_groups: {{ workshop_groups | to_json }}
+{% else %}
+      # Deprecated compatibility path for non-OIDC regression tests.
+      allowed_users: {{ jupyterhub_legacy_allowed_users | to_json }}
+{% endif %}
       admin_users: {{ jupyterhub_admin_users | to_json }}
 
 singleuser:
   image:
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+    name: {{ workshop_notebook_runtime.image_name }}
+    tag: "{{ workshop_notebook_runtime.image_tag }}"
+{% else %}
     name: jupyter/minimal-notebook
     tag: "python-3.11"
+{% endif %}
   defaultUrl: "/lab"
 
   cpu:
@@ -88,6 +198,9 @@ singleuser:
 
   extraEnv:
     MLFLOW_TRACKING_URI: "https://mlflow.digitafrica.eu"
+    FLOWER_SERVER_ADDRESS: "{{ flower_server_address }}"
+    DIGITAFRICA_WORKSHOP_ROOT: "/home/jovyan/digitafrica/workshop"
+    CLIENT_DATA_PATH: "/home/jovyan/digitafrica/workshop/data/train.csv"
 
   # Important for first spawn on k3s local-path (image pulls + PVC provisioning)
   startTimeout: 900
@@ -96,7 +209,7 @@ singleuser:
     type: dynamic
     capacity: 10Gi
     dynamic:
-      storageClass: {{ tier1.jupyterhub.storage_class }}
+      storageClass: {{ digitafrica_deployment.jupyterhub.storage_class }}
       volumeNameTemplate: home   # keeps the home PVC volume named "home" so the chart can inject it into initContainers
 
     # Seed notebooks come from a ConfigMap — works on any node, no hostPath needed
@@ -104,6 +217,11 @@ singleuser:
       - name: digitafrica-seed
         configMap:
           name: digitafrica-notebooks
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      - name: digitafrica-runtime-requirements
+        configMap:
+          name: digitafrica-runtime-requirements
+{% endif %}
 
     extraVolumeMounts:
       - name: digitafrica-seed
@@ -111,6 +229,37 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+    # Install once per group PVC, before the participant reaches JupyterLab.
+    # The marker ties the cached environment to the exact locked requirements.
+    - name: prepare-workshop-runtime
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+      command: ["bash", "-lc"]
+      args:
+        - |
+          set -euo pipefail
+          requirements=/runtime/requirements.lock
+          runtime_dir=/home/jovyan/.local/share/digitafrica
+          marker="$runtime_dir/requirements.sha256"
+          expected="$(sha256sum "$requirements" | cut -d " " -f1)"
+
+          if [ "$(cat "$marker" 2>/dev/null || true)" != "$expected" ]; then
+            echo "[runtime] Installing locked workshop dependencies."
+            python -m pip install --user --no-cache-dir --requirement "$requirements"
+            mkdir -p "$runtime_dir"
+            printf "%s\n" "$expected" > "$marker"
+          else
+            echo "[runtime] Locked workshop dependencies are already available."
+          fi
+
+          python -c "import flwr, numpy, pandas, sklearn; print('[runtime] Flower', flwr.__version__, 'is ready.')"
+      volumeMounts:
+        - name: digitafrica-runtime-requirements
+          mountPath: /runtime
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}
     - name: seed-notebooks
       image: alpine:3.20
       command: ["sh", "-lc"]
@@ -120,7 +269,14 @@ singleuser:
           echo "[seed] /seed content:"
           ls -la /seed || true
           mkdir -p /home/jovyan/digitafrica
-          # copy every time (overwrites same names)
+          # Retire only workshop files superseded by the student-driven tutorial.
+          # Do not remove personal files from the persistent user workspace.
+          rm -f \
+            /home/jovyan/digitafrica/01_Group_Workspace.ipynb \
+            /home/jovyan/digitafrica/01_precision_agriculture_edge_ml.ipynb \
+            /home/jovyan/digitafrica/02_ml_basics_training_vs_inference.ipynb \
+            /home/jovyan/digitafrica/requirements.txt
+          # Copy current workshop material every time (overwrites same names).
           cp -a /seed/. /home/jovyan/digitafrica/ 2>/dev/null || true
           echo "[seed] /home/jovyan/digitafrica after copy:"
           ls -la /home/jovyan/digitafrica | head -n 50 || true

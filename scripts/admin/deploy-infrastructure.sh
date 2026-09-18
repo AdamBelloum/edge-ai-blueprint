@@ -26,9 +26,10 @@ usage() {
 Usage: scripts/admin/deploy-infrastructure.sh [ACTION]
 
 Actions:
-  full           Deploy all configured tiers using playbooks/site.yml.
+  full           Deploy the Tier-0 plus Tier-1 site profile using playbooks/site.yml.
   tier0          Deploy Tier-0 using playbooks/tier0.yml.
   tier1          Deploy the complete Tier-1 topology, including agents.
+  tier2          Deploy a complete independent Tier-2 topology.
   tier1-server   Reconcile only the Tier-1 control-plane application resources.
   preflight      Run connectivity, syntax, and whitespace checks only.
   menu           Show the interactive action menu. This is the default.
@@ -47,9 +48,12 @@ run_preflight() {
   log "Checking Ansible connectivity to inventory hosts."
   check_ansible_connectivity
 
-  log "Checking Tier-1 playbook syntax."
+  log "Checking Tier-1 and Tier-2 playbook syntax."
   ansible-playbook -i "${DIGITAFRICA_INVENTORY}" \
     "${DIGITAFRICA_TIER1_PLAYBOOK}" \
+    --syntax-check
+  ansible-playbook -i "${DIGITAFRICA_INVENTORY}" \
+    "${DIGITAFRICA_REPO_ROOT}/playbooks/tier2.yml" \
     --syntax-check
 
   if git -C "${DIGITAFRICA_REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -66,27 +70,45 @@ run_deployment() {
   local action="$1"
   local playbook
   local description
+  local target_group
   local -a command
+
+  # Select the dedicated workshop Tier-2 inventory by default.  Preserve an
+  # explicitly supplied inventory for deliberate custom deployments.
+  if [[ "${action}" == "tier2" &&
+        "${DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET}" != "true" ]]; then
+    DIGITAFRICA_INVENTORY="${DIGITAFRICA_REPO_ROOT}/inventories/workshop/tier2/hosts.ini"
+  fi
 
   case "${action}" in
     full)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/site.yml"
-      description="Deploy all tiers configured in the inventory"
+      description="Deploy the Tier-0 plus Tier-1 site profile"
+      target_group="all"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier0)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/tier0.yml"
       description="Deploy Tier-0"
+      target_group="tier0"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier1)
       playbook="${DIGITAFRICA_TIER1_PLAYBOOK}"
       description="Deploy the complete Tier-1 cluster and application layer"
+      target_group="tier1_server"
+      command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
+      ;;
+    tier2)
+      playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/tier2.yml"
+      description="Deploy the complete independent Tier-2 cluster and application layer"
+      target_group="tier2_server"
       command=(ansible-playbook -i "${DIGITAFRICA_INVENTORY}" "${playbook}")
       ;;
     tier1-server)
       playbook="${DIGITAFRICA_TIER1_PLAYBOOK}"
       description="Reconcile Tier-1 control-plane application resources only"
+      target_group="tier1_server"
       command=(
         ansible-playbook
         -i "${DIGITAFRICA_INVENTORY}"
@@ -107,7 +129,7 @@ run_deployment() {
   printf 'Action    : %s\n' "${description}"
   printf 'Inventory : %s\n' "${DIGITAFRICA_INVENTORY}"
   printf 'Playbook  : %s\n' "${playbook}"
-  printf 'Target    : %s\n' "${DIGITAFRICA_TIER1_GROUP}"
+  printf 'Target    : %s\n' "${target_group}"
 
   if ! confirm "Continue with this infrastructure change?"; then
     log "Deployment cancelled; no playbook was run."
@@ -131,10 +153,11 @@ interactive_menu() {
 
 Choose an action:
   1) Preflight only: connectivity, syntax, and whitespace checks
-  2) Deploy all configured tiers
+  2) Deploy Tier-0 plus Tier-1 site profile
   3) Deploy Tier-0 only
   4) Deploy complete Tier-1 topology
-  5) Reconcile Tier-1 control-plane application resources only
+  5) Deploy complete independent Tier-2 topology
+  6) Reconcile Tier-1 control-plane application resources only
   0) Exit
 EOF
     read -r -p "Selection: " choice
@@ -144,9 +167,10 @@ EOF
       2) run_deployment full ;;
       3) run_deployment tier0 ;;
       4) run_deployment tier1 ;;
-      5) run_deployment tier1-server ;;
+      5) run_deployment tier2 ;;
+      6) run_deployment tier1-server ;;
       0) log "Exiting."; return 0 ;;
-      *) warn "Choose a number from 0 to 5." ;;
+      *) warn "Choose a number from 0 to 6." ;;
     esac
   done
 }
@@ -161,7 +185,7 @@ main() {
     preflight)
       run_preflight
       ;;
-    full|tier0|tier1|tier1-server)
+    full|tier0|tier1|tier2|tier1-server)
       run_deployment "${action}"
       ;;
     help|--help|-h)

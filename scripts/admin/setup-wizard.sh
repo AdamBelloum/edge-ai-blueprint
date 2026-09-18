@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Configure a local Tier-1 DIGITAfrica federated-learning workshop deployment.
+# Configure a local DIGITAfrica federated-learning workshop deployment.
 #
-# This wizard creates an untracked inventory in inventories/workshop/. It does
-# not modify the repository's example or production configuration.
+# Tier-1 and Tier-2 each create an independent local workshop deployment.
+# Neither mode modifies repository example or production configuration.
 #
 # Usage:
 #   ./scripts/admin/setup-wizard.sh
@@ -11,10 +11,11 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-WORKSHOP_DIR="${REPO_ROOT}/inventories/workshop"
-INVENTORY="${WORKSHOP_DIR}/hosts.ini"
-VARS_DIR="${WORKSHOP_DIR}/group_vars"
-VARS_FILE="${VARS_DIR}/all.yml"
+WORKSHOP_ROOT="${REPO_ROOT}/inventories/workshop"
+WORKSHOP_DIR=""
+INVENTORY=""
+VARS_DIR=""
+VARS_FILE=""
 DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-infrastructure.sh"
 HEALTH_SCRIPT="${SCRIPT_DIR}/health-check.sh"
 
@@ -25,6 +26,7 @@ SSH_USER="adam"
 ADMIN_USER="admin"
 WORKER_HOSTS=()
 PROFILE=""
+DEPLOYMENT_TIER=""
 TLS_MODE="selfsigned"
 TLS_CERT_DIR=""
 TLS_ACME_EMAIL=""
@@ -60,12 +62,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/admin/setup-wizard.sh
 
-Creates a local Tier-1 workshop inventory and configuration in:
-  inventories/workshop/hosts.ini
-  inventories/workshop/group_vars/all.yml
+Creates or replaces an independent local workshop inventory and configuration in:
+  inventories/workshop/<tier>/hosts.ini
+  inventories/workshop/<tier>/group_vars/all.yml
 
-These files are locally excluded from Git. The wizard can optionally run the
-existing Tier-1 deployment and health-check workflows afterwards.
+Choose Tier-1 or Tier-2 to create or replace that tier's independent
+workshop inventory and configuration. Each tier is written below
+inventories/workshop/<tier>/ and is locally excluded from Git. The wizard can
+optionally run the corresponding deployment and health-check workflows afterwards.
 EOF
 }
 
@@ -174,9 +178,35 @@ check_prerequisites() {
   require_command ansible-playbook
   require_command git
   [ -f "${REPO_ROOT}/playbooks/tier1.yml" ] || die "Tier-1 playbook not found. Run the wizard from a complete repository checkout."
+  [ -f "${REPO_ROOT}/playbooks/tier2.yml" ] || die "Tier-2 playbook not found. Run the wizard from a complete repository checkout."
   [ -x "${DEPLOY_SCRIPT}" ] || die "Deployment helper is missing or not executable: ${DEPLOY_SCRIPT}"
   [ -x "${HEALTH_SCRIPT}" ] || die "Health-check helper is missing or not executable: ${HEALTH_SCRIPT}"
   info "ssh, Ansible and repository deployment helpers are available."
+}
+
+choose_deployment_tier() {
+  heading "Choose deployment tier"
+  cat <<'EOF'
+
+  1) Tier-1 deployment
+     Creates or replaces an independent Tier-1 workshop inventory and configuration.
+
+  2) Tier-2 deployment
+     Creates or replaces an independent Tier-2 workshop inventory and configuration.
+EOF
+  prompt_choice DEPLOYMENT_TIER "Deployment tier" "1" 1 2
+  if [ "${DEPLOYMENT_TIER}" = "1" ]; then
+    DEPLOYMENT_TIER="tier1"
+  else
+    DEPLOYMENT_TIER="tier2"
+  fi
+}
+
+set_deployment_paths() {
+  WORKSHOP_DIR="${WORKSHOP_ROOT}/${DEPLOYMENT_TIER}"
+  INVENTORY="${WORKSHOP_DIR}/hosts.ini"
+  VARS_DIR="${WORKSHOP_DIR}/group_vars"
+  VARS_FILE="${VARS_DIR}/all.yml"
 }
 
 choose_profile() {
@@ -232,18 +262,18 @@ EOF
 }
 
 collect_topology() {
-  heading "Workshop topology"
+  heading "${DEPLOYMENT_TIER^} workshop topology"
   echo "Enter the address used by Ansible to reach each VM."
-  prompt_required CENTRAL_HOST "Central Tier-1 server hostname or IP"
+
+  prompt_required CENTRAL_HOST "Central ${DEPLOYMENT_TIER^} server hostname or IP"
   validate_host_or_die "${CENTRAL_HOST}"
 
   prompt_required SSH_USER "SSH username" "adam"
   validate_identifier "${SSH_USER}" || die "Invalid SSH username: ${SSH_USER}"
 
-  # The current bundled Tier-1 Flower bootstrap has intentional references to
-  # /home/adam and owner/group adam. Do not pretend that another account works.
+  # The bundled Flower bootstrap uses /home/adam and owner/group adam.
   if [ "${SSH_USER}" != "adam" ]; then
-    die "This repository's current Tier-1 Flower bootstrap is tied to the Linux account 'adam' (/home/adam). Use adam, or first generalise playbooks/tier1.yml."
+    die "This repository's Flower bootstrap is tied to the Linux account 'adam' (/home/adam). Use adam, or generalise the workshop roles first."
   fi
 
   prompt_required ADMIN_USER "JupyterHub administrator username" "admin"
@@ -251,14 +281,23 @@ collect_topology() {
 
   local workers_line worker
   while true; do
-    read -r -p "Worker VM hostnames or IPs (space-separated; at least one): " workers_line
+    read -r -p "Worker VM hostnames or IPs (space-separated; at least two): " workers_line
     read -r -a WORKER_HOSTS <<< "${workers_line}"
-    [ "${#WORKER_HOSTS[@]}" -gt 0 ] || { warn "At least one worker is required for the workshop profile."; continue; }
+    [ "${#WORKER_HOSTS[@]}" -ge 2 ] || {
+      warn "At least two workers are required for the Flower workflow demonstration."
+      continue
+    }
 
     for worker in "${WORKER_HOSTS[@]}"; do
       validate_host "${worker}" || die "Invalid worker host value: ${worker}"
       [ "${worker}" != "${CENTRAL_HOST}" ] || die "A worker cannot be the same as the central server."
     done
+
+    if [ "$(printf '%s\n' "${WORKER_HOSTS[@]}" | sort -u | wc -l)" \
+      -ne "${#WORKER_HOSTS[@]}" ]; then
+      warn "Each worker must be listed only once."
+      continue
+    fi
     break
   done
 
@@ -301,16 +340,17 @@ write_inventory() {
   mkdir -p "${VARS_DIR}"
   cat > "${INVENTORY}" <<EOF
 # Generated by scripts/admin/setup-wizard.sh. Do not commit this local file.
-[tier1_server]
-tier1-server ansible_host=${CENTRAL_HOST}
+[${DEPLOYMENT_TIER}_server]
+${DEPLOYMENT_TIER}-server ansible_host=${CENTRAL_HOST}
 
-[tier1_agents]
+[${DEPLOYMENT_TIER}_agents]
 EOF
 
   local index=1
   local worker
   for worker in "${WORKER_HOSTS[@]}"; do
-    printf 'tier1-worker-%s ansible_host=%s\n' "${index}" "${worker}" >> "${INVENTORY}"
+    printf '%s-worker-%s ansible_host=%s\n' \
+      "${DEPLOYMENT_TIER}" "${index}" "${worker}" >> "${INVENTORY}"
     index=$((index + 1))
   done
 
@@ -331,11 +371,11 @@ write_variables() {
 # Profile: $([ "${PROFILE}" = "1" ] && printf 'basic workshop' || printf 'advanced')
 timezone: "${WORKSHOP_TIMEZONE}"
 
-tier1:
+${DEPLOYMENT_TIER}:
   expose_mode: "ingress"
   tls_mode: "${TLS_MODE}"
   k3s_version: "v1.30.4+k3s1"
-  k3s_server_host: "tier1-server"
+  k3s_server_host: "${DEPLOYMENT_TIER}-server"
   k3s_cluster_cidr: "10.42.0.0/16"
   k3s_service_cidr: "10.43.0.0/16"
   digitafrica_namespace: "digitafrica"
@@ -400,15 +440,19 @@ EOF
 
 show_summary() {
   heading "Workshop deployment summary"
-  printf 'Central k3s server : %s\n' "${CENTRAL_HOST}"
-  printf 'Worker nodes       : %s\n' "${#WORKER_HOSTS[@]}"
-  printf 'SSH user           : %s\n' "${SSH_USER}"
-  printf 'JupyterHub URL     : %s://%s/jupyter/\n' "$([ "${TLS_MODE}" = "none" ] && printf http || printf https)" "${PUBLIC_HOST}"
-  printf 'TLS                : %s\n' "${TLS_MODE}"
-  printf 'Authentication     : %s\n' "$([ "${OIDC_ENABLED}" = true ] && printf OIDC || printf 'workshop dummy login')"
-  printf 'Storage class      : %s\n' "${STORAGE_CLASS}"
-  printf 'Inventory          : %s\n' "${INVENTORY}"
-  printf 'Variables          : %s\n' "${VARS_FILE}"
+  printf 'Deployment tier     : %s\n' "${DEPLOYMENT_TIER}"
+  printf 'Central k3s server  : %s\n' "${CENTRAL_HOST}"
+  printf 'New worker nodes    : %s\n' "${#WORKER_HOSTS[@]}"
+  printf 'SSH user            : %s\n' "${SSH_USER}"
+  printf 'Inventory           : %s\n' "${INVENTORY}"
+
+  printf 'JupyterHub URL      : %s://%s/jupyter/\n' \
+    "$([ "${TLS_MODE}" = "none" ] && printf http || printf https)" "${PUBLIC_HOST}"
+  printf 'TLS                 : %s\n' "${TLS_MODE}"
+  printf 'Authentication      : %s\n' \
+    "$([ "${OIDC_ENABLED}" = true ] && printf OIDC || printf 'workshop dummy login')"
+  printf 'Storage class       : %s\n' "${STORAGE_CLASS}"
+  printf 'Variables           : %s\n' "${VARS_FILE}"
 
   if [ "${TLS_MODE}" = "selfsigned" ]; then
     warn "Participants will see a browser certificate warning. Verify the URL with them before they continue."
@@ -419,17 +463,21 @@ show_summary() {
 }
 
 run_optional_actions() {
-  if ! confirm "Run the Tier-1 deployment now?"; then
+  if ! confirm "Run the ${DEPLOYMENT_TIER} deployment now?"; then
     echo
     echo "Configuration is ready. Deploy later with:"
-    printf '  DIGITAFRICA_INVENTORY=%q %q tier1\n' "${INVENTORY}" "${DEPLOY_SCRIPT}"
+    printf '  DIGITAFRICA_INVENTORY=%q %q %s\n' \
+      "${INVENTORY}" "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
     return 0
   fi
 
-  DIGITAFRICA_INVENTORY="${INVENTORY}" "${DEPLOY_SCRIPT}" tier1
+  DIGITAFRICA_INVENTORY="${INVENTORY}" \
+    "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
 
   if confirm "Run the read-only health check now?"; then
-    DIGITAFRICA_INVENTORY="${INVENTORY}" "${HEALTH_SCRIPT}" all
+    DIGITAFRICA_INVENTORY="${INVENTORY}" \
+      DIGITAFRICA_DEPLOYMENT_GROUP="${DEPLOYMENT_TIER}_server" \
+      "${HEALTH_SCRIPT}" all
   fi
 }
 
@@ -449,10 +497,12 @@ main() {
 
   cd "${REPO_ROOT}"
   heading "DIGITAfrica Edge-AI workshop setup wizard"
-  echo "This wizard configures a Tier-1 workshop. It does not deploy Tier-0."
+  echo "This wizard configures an independent Tier-1 or Tier-2 workshop deployment."
   echo
 
   check_prerequisites
+  choose_deployment_tier
+  set_deployment_paths
   choose_profile
   collect_topology
   check_ssh_access
@@ -465,10 +515,10 @@ main() {
   ensure_local_git_exclude
   write_inventory
   write_variables
-  info "Generated local workshop inventory and variables."
+  info "Generated independent local ${DEPLOYMENT_TIER^} workshop inventory and variables."
+
   show_summary
   run_optional_actions
 }
 
 main "$@"
-

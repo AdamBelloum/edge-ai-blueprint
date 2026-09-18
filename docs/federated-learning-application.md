@@ -176,7 +176,7 @@ MLflow and Grafana flags are reserved for future service implementation where ap
 | `oidc.oidc_client_secret` | — | Keycloak client secret |
 | `oidc.oidc_scope` | `[openid, profile, email]` | OAuth scopes to request |
 | `oidc.oidc_username_claim` | `preferred_username` | JWT claim used as the JupyterHub username |
-| `oidc.oidc_tls_verify` | `false` | Set to `true` if the Keycloak certificate is trusted |
+| `oidc.oidc_tls_verify` | `true` | Keep certificate verification enabled; set to `false` only for a controlled self-signed test deployment |
 
 ---
 

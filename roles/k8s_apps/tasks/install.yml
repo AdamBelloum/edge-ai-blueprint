@@ -148,11 +148,25 @@
     dest: /opt/digitafrica/k8s-notebooks/
     mode: "0644"
 
+- name: Ensure Tier-2 notebook runtime staging directory exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-runtime
+    state: directory
+    mode: "0755"
+  when: workshop_notebook_runtime.enabled | default(false) | bool
+
+- name: Stage locked Tier-2 notebook runtime requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/federated_learning/requirements.lock"
+    dest: /opt/digitafrica/k8s-runtime/requirements.lock
+    mode: "0644"
+  when: workshop_notebook_runtime.enabled | default(false) | bool
+
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2
     dest: /opt/digitafrica/k8s/jhub-values.yaml
-    mode: "0644"
+    mode: "0600"
 
 - name: Install helm if missing
   ansible.builtin.shell: |
@@ -168,18 +182,28 @@
   ansible.builtin.shell: |
     set -e
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    k3s kubectl get ns {{ tier1.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ tier1.digitafrica_namespace }}
+    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
   args:
     executable: /bin/bash
 
 - name: Create/update notebook seed ConfigMap
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ tier1.digitafrica_namespace }} create configmap digitafrica-notebooks \
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap digitafrica-notebooks \
       --from-file=/opt/digitafrica/k8s-notebooks/ \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
+
+- name: Create/update Tier-2 notebook runtime requirements ConfigMap
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap digitafrica-runtime-requirements \
+      --from-file=requirements.lock=/opt/digitafrica/k8s-runtime/requirements.lock \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  when: workshop_notebook_runtime.enabled | default(false) | bool
 
 # When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
 # Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.
@@ -194,7 +218,7 @@
   args:
     executable: /bin/bash
   changed_when: false
-  when: tier1.expose_mode == 'ingress'
+  when: digitafrica_deployment.expose_mode == 'ingress'
 
 - name: Assign node IP as externalIP on Traefik service (servicelb disabled)
   ansible.builtin.shell: |
@@ -203,7 +227,7 @@
       -p "{\"spec\":{\"externalIPs\":[\"{{ ansible_host | default(inventory_hostname) }}\"]}}"
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress'
+  when: digitafrica_deployment.expose_mode == 'ingress'
   changed_when: false
 
 # ── TLS: self-signed ──────────────────────────────────────────────────────────
@@ -221,18 +245,18 @@
     fi
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'selfsigned'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'selfsigned'
 
 - name: Create/update jhub-tls secret (self-signed)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ tier1.digitafrica_namespace }} create secret tls jhub-tls \
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create secret tls jhub-tls \
       --cert=/opt/digitafrica/tls/tls.crt \
       --key=/opt/digitafrica/tls/tls.key \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'selfsigned'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'selfsigned'
 
 # ── TLS: provided (user supplies their own cert) ───────────────────────────────
 - name: Copy provided TLS certificate files to server
@@ -241,25 +265,26 @@
     dest: "/opt/digitafrica/tls/{{ item | basename }}"
     mode: "0600"
   loop:
-    - "{{ tier1.tls_cert_dir }}/tls.crt"
-    - "{{ tier1.tls_cert_dir }}/tls.key"
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'provided'
+    - "{{ digitafrica_deployment.tls_cert_dir }}/tls.crt"
+    - "{{ digitafrica_deployment.tls_cert_dir }}/tls.key"
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'provided'
 
 - name: Create/update jhub-tls secret (provided cert)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ tier1.digitafrica_namespace }} create secret tls jhub-tls \
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create secret tls jhub-tls \
       --cert=/opt/digitafrica/tls/tls.crt \
       --key=/opt/digitafrica/tls/tls.key \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'provided'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'provided'
 
 # ── TLS: Let's Encrypt via cert-manager ───────────────────────────────────────
 - name: Install cert-manager via Helm (Let's Encrypt)
   ansible.builtin.shell: |
     set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
     helm repo add jetstack https://charts.jetstack.io || true
     helm repo update
     helm upgrade --install cert-manager jetstack/cert-manager \
@@ -268,7 +293,7 @@
       --wait --timeout 5m
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'letsencrypt'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'letsencrypt'
 
 - name: Write Let's Encrypt ClusterIssuer manifest
   ansible.builtin.copy:
@@ -280,7 +305,7 @@
       spec:
         acme:
           server: https://acme-v02.api.letsencrypt.org/directory
-          email: {{ tier1.tls_acme_email }}
+          email: {{ digitafrica_deployment.tls_acme_email }}
           privateKeySecretRef:
             name: letsencrypt-prod-key
           solvers:
@@ -289,7 +314,7 @@
                   class: traefik
     dest: /opt/digitafrica/k8s/letsencrypt-issuer.yaml
     mode: "0644"
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'letsencrypt'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'letsencrypt'
 
 - name: Apply Let's Encrypt ClusterIssuer
   ansible.builtin.shell: |
@@ -297,7 +322,7 @@
     k3s kubectl apply -f /opt/digitafrica/k8s/letsencrypt-issuer.yaml
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress' and tier1.tls_mode | default('none') == 'letsencrypt'
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.tls_mode | default('none') == 'letsencrypt'
 
 - name: Add JupyterHub helm repo and update
   ansible.builtin.shell: |
@@ -307,14 +332,16 @@
   args:
     executable: /bin/bash
 
-# Optional: remove your previous non-helm resources (safe if they don't exist)
+# One-time migration only: never remove Helm-managed resources during routine reconciliation.
+# Set digitafrica_cleanup_legacy_jupyterhub_resources: true explicitly when needed.
 - name: Cleanup previous manual JupyterHub resources (best-effort)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ tier1.digitafrica_namespace }} delete all,cm,secret,role,rolebinding,sa \
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} delete all,cm,secret,role,rolebinding,sa \
       -l app=jupyterhub --ignore-not-found || true
   args:
     executable: /bin/bash
+  when: digitafrica_cleanup_legacy_jupyterhub_resources | default(false) | bool
 
 - name: Apply Traefik redirect-slash middleware for JupyterHub
   ansible.builtin.shell: |
@@ -322,14 +349,14 @@
     k3s kubectl apply -f /opt/digitafrica/k8s/05-traefik-middleware.yaml
   args:
     executable: /bin/bash
-  when: tier1.expose_mode == 'ingress'
+  when: digitafrica_deployment.expose_mode == 'ingress'
 
 - name: Install/upgrade JupyterHub via Helm (NodePort)
   ansible.builtin.shell: |
     set -e
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
     helm upgrade --install jhub jupyterhub/jupyterhub \
-      --namespace {{ tier1.digitafrica_namespace }} \
+      --namespace {{ digitafrica_deployment.digitafrica_namespace }} \
       --timeout 15m0s \
       -f /opt/digitafrica/k8s/jhub-values.yaml
   args:
@@ -338,9 +365,9 @@
 - name: List resources created by Helm release (debug)
   ansible.builtin.shell: |
     set -e
-    k3s kubectl -n {{ tier1.digitafrica_namespace }} get deploy,sts,po,svc -o wide
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} get deploy,sts,po,svc -o wide
     echo "----"
-    helm -n {{ tier1.digitafrica_namespace }} status jhub || true
+    helm -n {{ digitafrica_deployment.digitafrica_namespace }} status jhub || true
   args:
     executable: /bin/bash
   become: true
@@ -350,18 +377,18 @@
   ansible.builtin.shell: |
     set -e
     # Find deployments created by this helm release
-    deps=$(k3s kubectl -n {{ tier1.digitafrica_namespace }} get deploy \
+    deps=$(k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} get deploy \
       -l app.kubernetes.io/instance=jhub \
       -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}')
     if [ -z "$deps" ]; then
-      echo "No deployments found for release jhub in namespace {{ tier1.digitafrica_namespace }}"
-      k3s kubectl -n {{ tier1.digitafrica_namespace }} get all
+      echo "No deployments found for release jhub in namespace {{ digitafrica_deployment.digitafrica_namespace }}"
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} get all
       exit 1
     fi
 
     for d in $deps; do
       echo "Waiting for deployment/$d"
-      k3s kubectl -n {{ tier1.digitafrica_namespace }} rollout status deploy/$d --timeout=600s
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} rollout status deploy/$d --timeout=600s
     done
   args:
     executable: /bin/bash
@@ -370,20 +397,20 @@
 - name: Show access URL (NodePort)
   ansible.builtin.debug:
     msg:
-      - "JupyterHub URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ tier1.jupyterhub.jupyter_nodeport }}"
-  when: tier1.expose_mode == 'nodeport'
+      - "JupyterHub URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ digitafrica_deployment.jupyterhub.jupyter_nodeport }}"
+  when: digitafrica_deployment.expose_mode == 'nodeport'
 
 - name: Show JupyterHub URL (Ingress)
   ansible.builtin.debug:
-    msg: "JupyterHub URL: {{ tier1.jupyterhub.jupyterhub_public_url }}/"
-  when: tier1.expose_mode == 'ingress'
+    msg: "JupyterHub URL: {{ digitafrica_deployment.jupyterhub.jupyterhub_public_url }}/"
+  when: digitafrica_deployment.expose_mode == 'ingress'
 
 - name: Show MLflow URL (Ingress)
   ansible.builtin.debug:
-    msg: "MLflow URL:     https://mlflow.{{ tier1.digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
-  when: tier1.expose_mode == 'ingress' and tier1.mlflow.enabled | default(false) | bool
+    msg: "MLflow URL:     https://mlflow.{{ digitafrica_deployment.digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.mlflow.enabled | default(false) | bool
 
 - name: Show Grafana URL (Ingress)
   ansible.builtin.debug:
-    msg: "Grafana URL:    https://grafana.{{ tier1.digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
-  when: tier1.expose_mode == 'ingress' and tier1.grafana_enabled | default(false) | bool
+    msg: "Grafana URL:    https://grafana.{{ digitafrica_deployment.digitafrica_namespace }}.eu  (configure DNS → {{ ansible_host | default(inventory_hostname) }})"
+  when: digitafrica_deployment.expose_mode == 'ingress' and digitafrica_deployment.grafana_enabled | default(false) | bool

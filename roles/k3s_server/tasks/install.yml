@@ -1,11 +1,11 @@
 - name: Install k3s server
   ansible.builtin.shell: |
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ tier1.k3s_version }}" sh -s - server \
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ digitafrica_deployment.k3s_version }}" sh -s - server \
       --write-kubeconfig-mode 644 \
-      --cluster-cidr "{{ tier1.k3s_cluster_cidr }}" \
-      --service-cidr "{{ tier1.k3s_service_cidr }}" \
-      {% if tier1.expose_mode == 'ingress' %} --disable servicelb {% endif %} \
-      {% if tier1.expose_mode != 'ingress' %} --disable traefik {% endif %}
+      --cluster-cidr "{{ digitafrica_deployment.k3s_cluster_cidr }}" \
+      --service-cidr "{{ digitafrica_deployment.k3s_service_cidr }}" \
+      {% if digitafrica_deployment.expose_mode == 'ingress' %} --disable servicelb {% endif %} \
+      {% if digitafrica_deployment.expose_mode != 'ingress' %} --disable traefik {% endif %}
   args:
     creates: /usr/local/bin/k3s
 

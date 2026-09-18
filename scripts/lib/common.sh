@@ -10,10 +10,18 @@ readonly DIGITAFRICA_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pw
 readonly DIGITAFRICA_REPO_ROOT="$(cd "${DIGITAFRICA_SCRIPTS_DIR}/.." && pwd)"
 
 # Operators may override these values through their environment.
-readonly DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:-${DIGITAFRICA_REPO_ROOT}/inventories/prod/hosts.ini}"
+if [[ -n "${DIGITAFRICA_INVENTORY:-}" ]]; then
+  readonly DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET=true
+else
+  readonly DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET=false
+fi
+
+DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:-${DIGITAFRICA_REPO_ROOT}/inventories/prod/hosts.ini}"
 readonly DIGITAFRICA_TIER1_PLAYBOOK="${DIGITAFRICA_TIER1_PLAYBOOK:-${DIGITAFRICA_REPO_ROOT}/playbooks/tier1.yml}"
 readonly DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:-digitafrica}"
 readonly DIGITAFRICA_TIER1_GROUP="${DIGITAFRICA_TIER1_GROUP:-tier1_server}"
+# Defaults to the established Tier-1 target for backward compatibility.
+readonly DIGITAFRICA_DEPLOYMENT_GROUP="${DIGITAFRICA_DEPLOYMENT_GROUP:-${DIGITAFRICA_TIER1_GROUP}}"
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -79,7 +87,7 @@ show_context() {
   printf 'Inventory       : %s\n' "${DIGITAFRICA_INVENTORY}"
   printf 'Tier-1 playbook : %s\n' "${DIGITAFRICA_TIER1_PLAYBOOK}"
   printf 'Namespace       : %s\n' "${DIGITAFRICA_NAMESPACE}"
-  printf 'Tier-1 group    : %s\n' "${DIGITAFRICA_TIER1_GROUP}"
+  printf 'Deployment group: %s\n' "${DIGITAFRICA_DEPLOYMENT_GROUP}"
 }
 
 run_ansible_playbook() {
@@ -112,19 +120,131 @@ check_ansible_connectivity() {
 }
 
 
-run_tier1_remote() {
-  local remote_command="$1"
+run_inventory_target_remote() {
+  local target="$1"
+  local remote_script="$2"
   local encoded_command
+
+  [[ $# -eq 2 ]] || die "Usage: run_inventory_target_remote <target> <script>"
+  [[ "${target}" =~ ^[A-Za-z0-9_.-]+$ ]] || die "Unsafe Ansible inventory target: ${target@Q}"
 
   require_ansible_environment
   require_command base64
 
-  encoded_command="$(printf '%s' "${remote_command}" | base64 | tr -d '\n')"
+  encoded_command="$(printf '%s' "${remote_script}" | base64 | tr -d '\n')"
 
   ANSIBLE_STDOUT_CALLBACK=default ansible \
     -i "${DIGITAFRICA_INVENTORY}" \
-    "${DIGITAFRICA_TIER1_GROUP}" \
+    "${target}" \
     -b \
     -m ansible.builtin.shell \
     -a "printf '%s' '${encoded_command}' | base64 -d | /bin/bash"
+}
+
+run_deployment_remote() {
+  [[ $# -eq 1 ]] || die "Usage: run_deployment_remote <script>"
+  run_inventory_target_remote "${DIGITAFRICA_DEPLOYMENT_GROUP}" "$1"
+}
+
+deployment_tier_name() {
+  local tier="${DIGITAFRICA_DEPLOYMENT_TIER:-}"
+
+  if [[ -z "${tier}" && "${DIGITAFRICA_DEPLOYMENT_GROUP}" =~ ^(tier1|tier2)_server$ ]]; then
+    tier="${BASH_REMATCH[1]}"
+  fi
+
+  case "${tier}" in
+    tier1|tier2)
+      printf '%s\n' "${tier}"
+      ;;
+    *)
+      die "Cannot determine deployment tier. Set DIGITAFRICA_DEPLOYMENT_TIER to tier1 or tier2."
+      ;;
+  esac
+}
+
+deployment_worker_group() {
+  local worker_group="${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP:-}"
+
+  if [[ -z "${worker_group}" ]]; then
+    worker_group="$(deployment_tier_name)_agents"
+  fi
+
+  [[ "${worker_group}" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+    die "Unsafe deployment worker group: ${worker_group@Q}"
+
+  printf '%s\n' "${worker_group}"
+}
+
+deployment_group_vars_file() {
+  local vars_file
+
+  vars_file="$(dirname "${DIGITAFRICA_INVENTORY}")/group_vars/all.yml"
+  if [[ ! -f "${vars_file}" ]]; then
+    printf '[ERROR] Required deployment configuration file not found: %s\n' "${vars_file}" >&2
+    return 1
+  fi
+
+  printf '%s\n' "${vars_file}"
+}
+
+# Reads only explicitly whitelisted, non-secret settings from the selected
+# inventory's group_vars/all.yml. Never add credentials or client secrets here.
+deployment_public_setting() {
+  local setting="$1"
+  local vars_file tier value
+
+  case "${setting}" in
+    jupyterhub_public_url|oidc_enabled|oidc_issuer_url|tls_mode)
+      ;;
+    *)
+      die "Unsupported public deployment setting requested: ${setting}"
+      ;;
+  esac
+
+  require_command python3
+  if ! vars_file="$(deployment_group_vars_file)"; then
+    die "Cannot locate deployment configuration for the selected inventory."
+  fi
+  tier="$(deployment_tier_name)"
+
+  if ! value="$(python3 - "${vars_file}" "${tier}" "${setting}" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+vars_file = Path(sys.argv[1])
+tier = sys.argv[2]
+setting = sys.argv[3]
+
+with vars_file.open(encoding="utf-8") as handle:
+    data = yaml.safe_load(handle) or {}
+
+if setting == "jupyterhub_public_url":
+    value = data.get(tier, {}).get("jupyterhub", {}).get("jupyterhub_public_url")
+elif setting == "tls_mode":
+    value = data.get(tier, {}).get("tls_mode")
+else:
+    value = data.get("oidc", {}).get(setting)
+
+if value is None or value == "":
+    raise SystemExit(2)
+if isinstance(value, bool):
+    print(str(value).lower())
+elif isinstance(value, str):
+    print(value)
+else:
+    raise SystemExit(2)
+PY
+  )"; then
+    die "Could not read public deployment setting '${setting}' from ${vars_file}."
+  fi
+
+  printf '%s\n' "${value}"
+}
+
+# Backward-compatible Tier-1 name for existing workshop scripts.
+run_tier1_remote() {
+  run_deployment_remote "$@"
 }

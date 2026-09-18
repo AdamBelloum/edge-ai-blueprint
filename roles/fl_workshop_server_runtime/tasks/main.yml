@@ -1,0 +1,46 @@
+---
+- name: Require at least two configured Flower client workers
+  ansible.builtin.assert:
+    that:
+      - fl_client_count | int >= 2
+    fail_msg: >-
+      The Flower workflow demonstration requires at least two hosts in
+      [{{ fl_workshop_client_group }}].
+
+- name: Create Flower virtual environment
+  tags: [fl_venv]
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ fl_venv }}
+    creates: "{{ fl_venv }}/bin/python"
+
+- name: Install pinned Flower runtime dependencies into venv
+  tags: [fl_venv]
+  ansible.builtin.pip:
+    requirements: "{{ fl_runtime_root }}/app/requirements.lock"
+    virtualenv: "{{ fl_venv }}"
+
+- name: Verify Flower is importable
+  tags: [fl_venv]
+  ansible.builtin.command:
+    cmd: "{{ fl_venv }}/bin/python -c 'import flwr; print(flwr.__version__)'"
+  register: flwr_version
+  changed_when: false
+
+- name: Report installed Flower version
+  tags: [fl_venv]
+  ansible.builtin.debug:
+    msg: "Flower {{ flwr_version.stdout }} installed at {{ fl_venv }}"
+
+- name: Install the organizer-controlled Flower server service
+  become: true
+  ansible.builtin.template:
+    src: "{{ fl_server_service_template }}"
+    dest: /etc/systemd/system/fl-workshop-server.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Reload systemd after Flower service installation
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
