@@ -10,7 +10,13 @@ readonly DIGITAFRICA_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pw
 readonly DIGITAFRICA_REPO_ROOT="$(cd "${DIGITAFRICA_SCRIPTS_DIR}/.." && pwd)"
 
 # Operators may override these values through their environment.
-readonly DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:-${DIGITAFRICA_REPO_ROOT}/inventories/prod/hosts.ini}"
+if [[ -n "${DIGITAFRICA_INVENTORY:-}" ]]; then
+  readonly DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET=true
+else
+  readonly DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET=false
+fi
+
+DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:-${DIGITAFRICA_REPO_ROOT}/inventories/prod/hosts.ini}"
 readonly DIGITAFRICA_TIER1_PLAYBOOK="${DIGITAFRICA_TIER1_PLAYBOOK:-${DIGITAFRICA_REPO_ROOT}/playbooks/tier1.yml}"
 readonly DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:-digitafrica}"
 readonly DIGITAFRICA_TIER1_GROUP="${DIGITAFRICA_TIER1_GROUP:-tier1_server}"

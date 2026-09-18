@@ -73,6 +73,13 @@ run_deployment() {
   local target_group
   local -a command
 
+  # Select the dedicated workshop Tier-2 inventory by default.  Preserve an
+  # explicitly supplied inventory for deliberate custom deployments.
+  if [[ "${action}" == "tier2" &&
+        "${DIGITAFRICA_INVENTORY_WAS_EXPLICITLY_SET}" != "true" ]]; then
+    DIGITAFRICA_INVENTORY="${DIGITAFRICA_REPO_ROOT}/inventories/workshop/tier2/hosts.ini"
+  fi
+
   case "${action}" in
     full)
       playbook="${DIGITAFRICA_REPO_ROOT}/playbooks/site.yml"
