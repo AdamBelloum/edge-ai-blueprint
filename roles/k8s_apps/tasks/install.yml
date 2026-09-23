@@ -147,6 +147,63 @@
     src: notebooks/
     dest: /opt/digitafrica/k8s-notebooks/
     mode: "0644"
+  tags:
+    - workshop_assets
+
+- name: Generate notebook seed provenance
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PYTHON'
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    root = Path("/opt/digitafrica/k8s-notebooks")
+    asset_names = (
+        "00_START_HERE.md",
+        "01_Inspect_Local_Partition.ipynb",
+        "02_Run_Federated_Client.ipynb",
+    )
+
+    assets = {}
+    for name in asset_names:
+        path = root / name
+        if not path.is_file():
+            raise SystemExit(f"missing staged notebook asset: {path}")
+        assets[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    canonical_assets = json.dumps(
+        assets,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    manifest_sha256 = hashlib.sha256(canonical_assets).hexdigest()
+
+    provenance = {
+        "schema_version": 1,
+        "asset_version": f"sha256:{manifest_sha256}",
+        "asset_manifest_sha256": manifest_sha256,
+        "configmap_generated_at_utc": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "assets": assets,
+    }
+
+    destination = root / "WORKSHOP_VERSION.json"
+    temporary = destination.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(0o644)
+    temporary.replace(destination)
+    PYTHON
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_assets
 
 - name: Ensure Tier-2 notebook runtime staging directory exists
   ansible.builtin.file:
@@ -154,6 +211,8 @@
     state: directory
     mode: "0755"
   when: workshop_notebook_runtime.enabled | default(false) | bool
+  tags:
+    - workshop_assets
 
 - name: Stage locked Tier-2 notebook runtime requirements
   ansible.builtin.copy:
@@ -161,12 +220,16 @@
     dest: /opt/digitafrica/k8s-runtime/requirements.lock
     mode: "0644"
   when: workshop_notebook_runtime.enabled | default(false) | bool
+  tags:
+    - workshop_assets
 
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2
     dest: /opt/digitafrica/k8s/jhub-values.yaml
     mode: "0600"
+  tags:
+    - workshop_seed
 
 - name: Install helm if missing
   ansible.builtin.shell: |
@@ -194,6 +257,8 @@
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
+  tags:
+    - workshop_assets
 
 - name: Create/update Tier-2 notebook runtime requirements ConfigMap
   ansible.builtin.shell: |
@@ -204,6 +269,8 @@
   args:
     executable: /bin/bash
   when: workshop_notebook_runtime.enabled | default(false) | bool
+  tags:
+    - workshop_assets
 
 # When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
 # Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.
@@ -361,6 +428,8 @@
       -f /opt/digitafrica/k8s/jhub-values.yaml
   args:
     executable: /bin/bash
+  tags:
+    - workshop_seed
 
 - name: List resources created by Helm release (debug)
   ansible.builtin.shell: |

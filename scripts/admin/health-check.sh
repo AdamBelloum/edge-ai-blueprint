@@ -24,10 +24,10 @@ Usage: scripts/admin/health-check.sh [SCOPE]
 Scopes:
   deployment      Run infrastructure and JupyterHub deployment checks (default).
                   This scope does not require workshop Silo resources.
-  all             Run deployment checks and explicit Silo workspace checks.
+  all             Run deployment checks and explicit participant worker-runtime checks.
   infrastructure  Check k3s nodes, namespace deployments, pods, and events.
   jupyterhub      Check the JupyterHub Helm release, ingress, and public login path.
-  silos           Check every numbered Silo rollout and mounted runtime assets.
+  silos           Check every inventory-derived participant worker runtime.
   help            Show this help text.
 
 The checks are read-only. A non-zero exit code means one or more required
@@ -172,55 +172,78 @@ EOF
 }
 
 check_silos() {
-  local remote_script
+  local worker_group
+  local runtime_root
+  local topology_output
+  local worker
+  local group_id
+  local index
+  local expected_group_q
+  local runtime_root_q
+  local -a workers
 
-  print_heading "Federated-learning Silo runtime readiness"
+  print_heading "Federated-learning participant worker runtime readiness"
 
-  remote_script="$(cat <<'REMOTE_SCRIPT'
-set -euo pipefail
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+  worker_group="$(deployment_worker_group)"
+  runtime_root="${WORKSHOP_RUNTIME_ROOT:-/opt/digitafrica/fl-workshop}"
 
-mapfile -t deployments < <(
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get deployments \
-    -l app=fl-client-silo \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
-)
+  [[ "${runtime_root}" == /* ]] ||
+    die "WORKSHOP_RUNTIME_ROOT must be an absolute path: ${runtime_root@Q}"
 
-if [ "${#deployments[@]}" -eq 0 ]; then
-  echo 'ERROR: no numbered Silo deployments found.' >&2
-  exit 1
-fi
+  require_command ansible-inventory
 
-for deployment in "${deployments[@]}"; do
-  silo_id="${deployment#fl-client-silo-}"
+  if ! topology_output="$(
+    ansible-inventory -i "${DIGITAFRICA_INVENTORY}" --list |
+      python3 -c '
+import json
+import sys
 
-  printf '===== %s: rollout =====\n' "${deployment}"
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ rollout status \
-    "deployment/${deployment}" --timeout=60s
+inventory = json.load(sys.stdin)
+group = inventory.get(sys.argv[1])
+if not isinstance(group, dict) or not isinstance(group.get("hosts"), list):
+    raise SystemExit("missing ordered inventory worker group: " + sys.argv[1])
 
-  pod="$(k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get pods \
-    -l "app=fl-client-silo,digitafrica.org/silo-id=${silo_id}" \
-    -o jsonpath='{.items[0].metadata.name}')"
-  group_id="$(k3s kubectl -n __DIGITAFRICA_NAMESPACE__ get pods \
-    -l "app=fl-client-silo,digitafrica.org/silo-id=${silo_id}" \
-    -o jsonpath='{.items[0].metadata.labels.digitafrica\.org/group-id}')"
-
-  if [ -z "${pod}" ] || [[ ! "${group_id}" =~ ^group_[0-9]{2}$ ]]; then
-    echo "ERROR: ${deployment} has no pod or valid group_NN label." >&2
-    exit 1
+for host in group["hosts"]:
+    if not isinstance(host, str) or not host:
+        raise SystemExit("invalid worker name in inventory")
+    print(host)
+' "${worker_group}"
+  )"; then
+    die "Could not resolve ordered workers from inventory group: ${worker_group}"
   fi
 
-  printf '===== %s: mounted runtime assets =====\n' "${deployment}"
-  k3s kubectl -n __DIGITAFRICA_NAMESPACE__ exec "${pod}" -- \
-    env EXPECTED_GROUP_ID="${group_id}" python3 -c '
+  mapfile -t workers < <(printf '%s\n' "${topology_output}" | sed '/^$/d')
+  ((${#workers[@]} > 0)) ||
+    die "Inventory worker group ${worker_group} has no workers."
+
+  for index in "${!workers[@]}"; do
+    worker="${workers[$index]}"
+    group_id="$(printf 'group_%02d' "$((index + 1))")"
+
+    [[ "${worker}" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+      die "Unsafe worker name from inventory: ${worker@Q}"
+
+    printf '\n===== %s / %s: worker runtime =====\n' "${group_id}" "${worker}"
+
+    printf -v expected_group_q '%q' "${group_id}"
+    printf -v runtime_root_q '%q' "${runtime_root}"
+
+    run_inventory_target_remote "${worker}" "$(cat <<REMOTE_SCRIPT
+set -euo pipefail
+
+env \
+  EXPECTED_GROUP_ID=${expected_group_q} \
+  WORKSHOP_RUNTIME_ROOT=${runtime_root_q} \
+  python3 - <<'PYTHON'
 import csv
 import hashlib
 import json
 import os
 from pathlib import Path
 
-root = Path("/workspace")
+root = Path(os.environ["WORKSHOP_RUNTIME_ROOT"])
 group_id = os.environ["EXPECTED_GROUP_ID"]
+
 client = root / "app" / "client" / "client.py"
 requirements = root / "app" / "requirements.lock"
 manifest_path = root / "data" / "partition-manifest.json"
@@ -228,7 +251,7 @@ partition_path = root / "data" / "train.csv"
 
 for required in (client, requirements, manifest_path, partition_path):
     if not required.is_file():
-        raise SystemExit(f"missing mounted runtime asset: {required}")
+        raise SystemExit(f"missing worker runtime asset: {required}")
 
 with manifest_path.open(encoding="utf-8") as handle:
     manifest = json.load(handle)
@@ -247,10 +270,11 @@ if digest != entry.get("sha256"):
 
 with partition_path.open(newline="", encoding="utf-8") as handle:
     rows = sum(1 for _ in csv.reader(handle)) - 1
+
 expected_rows = entry.get("rows")
 if rows != expected_rows:
     raise SystemExit(
-        "partition row count {} differs from manifest {}".format(rows, expected_rows)
+        f"partition row count {rows} differs from manifest {expected_rows}"
     )
 
 for line in requirements.read_text(encoding="utf-8").splitlines():
@@ -258,20 +282,20 @@ for line in requirements.read_text(encoding="utf-8").splitlines():
     if line and not line.startswith("#") and "==" not in line:
         raise SystemExit(f"unlocked requirement: {line}")
 
+print(f"runtime_root={root}")
 print(f"group_id={group_id}")
+print(f"client_sha256={hashlib.sha256(client.read_bytes()).hexdigest()}")
 print(f"partition_rows={rows}")
 print(f"partition_sha256={digest}")
-print("mounted_runtime_integrity=PASSED")
-'
-done
-
-echo 'Silo runtime health check passed.'
+print("worker_runtime_integrity=PASSED")
+PYTHON
 REMOTE_SCRIPT
 )"
+  done
 
-  remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
-  run_deployment_remote "${remote_script}"
+  log "Participant worker runtime health check passed."
 }
+
 run_scope() {
   local scope="$1"
 

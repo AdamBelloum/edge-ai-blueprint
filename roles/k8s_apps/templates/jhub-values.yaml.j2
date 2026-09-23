@@ -265,21 +265,59 @@ singleuser:
       command: ["sh", "-lc"]
       args:
         - |
-          set -e
-          echo "[seed] /seed content:"
-          ls -la /seed || true
-          mkdir -p /home/jovyan/digitafrica
+          set -eu
+          source_dir=/seed
+          destination_dir=/home/jovyan/digitafrica
+
+          managed_files="
+          00_START_HERE.md
+          01_Inspect_Local_Partition.ipynb
+          02_Run_Federated_Client.ipynb
+          WORKSHOP_VERSION.json
+          "
+
+          mkdir -p "$destination_dir"
+
           # Retire only workshop files superseded by the student-driven tutorial.
           # Do not remove personal files from the persistent user workspace.
           rm -f \
-            /home/jovyan/digitafrica/01_Group_Workspace.ipynb \
-            /home/jovyan/digitafrica/01_precision_agriculture_edge_ml.ipynb \
-            /home/jovyan/digitafrica/02_ml_basics_training_vs_inference.ipynb \
-            /home/jovyan/digitafrica/requirements.txt
-          # Copy current workshop material every time (overwrites same names).
-          cp -a /seed/. /home/jovyan/digitafrica/ 2>/dev/null || true
-          echo "[seed] /home/jovyan/digitafrica after copy:"
-          ls -la /home/jovyan/digitafrica | head -n 50 || true
+            "$destination_dir/01_Group_Workspace.ipynb" \
+            "$destination_dir/01_precision_agriculture_edge_ml.ipynb" \
+            "$destination_dir/02_ml_basics_training_vs_inference.ipynb" \
+            "$destination_dir/requirements.txt" \
+            "$destination_dir/..data"
+
+          # Copy regular files, rather than preserving Kubernetes ConfigMap
+          # symlinks, ownership, and read-only source modes.
+          for filename in $managed_files; do
+            source_file="$source_dir/$filename"
+            destination_file="$destination_dir/$filename"
+
+            if [ ! -f "$source_file" ]; then
+              echo "[seed] ERROR: missing required seed file: $source_file" >&2
+              exit 1
+            fi
+
+            rm -f "$destination_file"
+            cp -L "$source_file" "$destination_file"
+            chown 1000:100 "$destination_file"
+            chmod 0644 "$destination_file"
+          done
+
+          (
+            printf "seeded_at_utc=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf "provenance_file=WORKSHOP_VERSION.json\n"
+          ) > "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
+          chown 1000:100 "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
+          chmod 0644 "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
+
+          echo "[seed] managed workshop files:"
+          ls -l \
+            "$destination_dir/00_START_HERE.md" \
+            "$destination_dir/01_Inspect_Local_Partition.ipynb" \
+            "$destination_dir/02_Run_Federated_Client.ipynb" \
+            "$destination_dir/WORKSHOP_VERSION.json" \
+            "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
       volumeMounts:
         - name: digitafrica-seed
           mountPath: /seed

@@ -17,12 +17,13 @@ server_url=""
 realm="${DEFAULT_REALM}"
 group_prefix="${DEFAULT_GROUP_PREFIX}"
 credentials_output=""
-admin_realm="master"
+admin_realm=""
 admin_client_id=""
 admin_client_secret_file=""
 admin_user=""
 password_file="${KEYCLOAK_ADMIN_PASSWORD_FILE:-}"
 dry_run=false
+reset_password_for=""
 
 usage() {
   cat <<'EOF'
@@ -54,12 +55,14 @@ Authentication: choose one method
     KEYCLOAK_ADMIN_PASSWORD_FILE points to a readable mode-0600 file.
 
 Safety:
+  --reset-password-for USER    Reset exactly one existing expected participant account
   --dry-run                    Show intended actions without changing Keycloak
   -h, --help                   Show this help
 
 Notes:
-  Existing accounts are never reset and their passwords cannot be recovered.
-  The TSV output therefore contains passwords only for accounts created by this run.
+  Existing accounts are preserved unless --reset-password-for explicitly selects one.
+  A reset verifies that both the selected user and matching Keycloak group exist.
+  The TSV output contains passwords created or reset by this run only.
 EOF
 }
 
@@ -88,11 +91,22 @@ while [[ $# -gt 0 ]]; do
     --admin-client-id) admin_client_id="${2:-}"; shift 2 ;;
     --admin-client-secret-file) admin_client_secret_file="${2:-}"; shift 2 ;;
     --admin-user) admin_user="${2:-}"; shift 2 ;;
+    --reset-password-for) reset_password_for="${2:-}"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
+
+# Service-account clients belong to the workshop realm.  Human Keycloak
+# administrators normally authenticate in the master realm.
+if [[ -z "${admin_realm}" ]]; then
+  if [[ -n "${admin_client_id}${admin_client_secret_file}" ]]; then
+    admin_realm="${realm}"
+  else
+    admin_realm="master"
+  fi
+fi
 
 require_command ansible-inventory
 require_command curl
@@ -103,6 +117,8 @@ require_command python3
 [[ -f "${inventory}" ]] || fail "Inventory not found: ${inventory}"
 [[ "${server_url}" =~ ^https:// ]] || fail "--server-url must use https://"
 [[ "${group_prefix}" =~ ^[A-Za-z0-9_-]+$ ]] || fail "--group-prefix may contain only letters, numbers, _ and -"
+[[ -z "${reset_password_for}" || "${reset_password_for}" =~ ^[A-Za-z0-9_-]+$ ]] || \
+  fail "--reset-password-for may contain only letters, numbers, _ and -"
 
 if [[ "${dry_run}" != true ]]; then
   if [[ -n "${admin_client_id}${admin_client_secret_file}" ]]; then
@@ -148,12 +164,34 @@ mapfile -t workers < <(
 [[ ${#workers[@]} -gt 0 ]] || fail "No hosts resolved from inventory group '${worker_group}'"
 info "Resolved ${#workers[@]} worker(s) from ${worker_group}: ${workers[*]}"
 
+selected_count="${#workers[@]}"
+if [[ -n "${reset_password_for}" ]]; then
+  reset_target_known=false
+  for index in "${!workers[@]}"; do
+    expected_username="$(printf '%s%02d' "${group_prefix}" "$((index + 1))")"
+    if [[ "${expected_username}" == "${reset_password_for}" ]]; then
+      reset_target_known=true
+      break
+    fi
+  done
+  [[ "${reset_target_known}" == true ]] || \
+    fail "--reset-password-for must name an expected participant identity: ${reset_password_for}"
+  selected_count=1
+fi
+
 if [[ "${dry_run}" == true ]]; then
   for index in "${!workers[@]}"; do
-    printf 'Would reconcile user and group: %s (worker: %s)\n' \
-      "$(printf '%s%02d' "${group_prefix}" "$((index + 1))")" "${workers[index]}"
+    username="$(printf '%s%02d' "${group_prefix}" "$((index + 1))")"
+    [[ -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
+    if [[ -n "${reset_password_for}" ]]; then
+      printf 'Would reset the existing password for: %s (worker: %s)\n' \
+        "${username}" "${workers[index]}"
+    else
+      printf 'Would reconcile user and group: %s (worker: %s)\n' \
+        "${username}" "${workers[index]}"
+    fi
   done
-  printf 'Dry run complete: %d participant account(s) would be reconciled.\n' "${#workers[@]}"
+  printf 'Dry run complete: %d participant account(s) selected.\n' "${selected_count}"
   exit 0
 fi
 
@@ -208,10 +246,31 @@ PY
 }
 
 created=0
+reset=0
 existing=0
 for index in "${!workers[@]}"; do
   number=$((index + 1))
   username="$(printf '%s%02d' "${group_prefix}" "${number}")"
+
+  [[ -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
+
+  if [[ -n "${reset_password_for}" ]]; then
+    user_id="$(find_user_id "${username}")" || \
+      fail "Cannot reset '${username}': the existing Keycloak user was not found"
+    group_id="$(find_group_id "${username}")" || \
+      fail "Cannot reset '${username}': the matching Keycloak group was not found"
+
+    password="$(random_password)"
+    api PUT "/users/${user_id}/reset-password" \
+      --data "$(jq -cn --arg value "${password}" '{type: "password", value: $value, temporary: true}')" >/dev/null
+    api PUT "/users/${user_id}/groups/${group_id}" >/dev/null
+
+    printf '%s\t%s\t%s\n' "${username}" "${password}" "${workers[index]}" >> "${credentials_output}"
+    info "Reset participant password: ${username} (temporary password; change required at next login)"
+    unset password
+    reset=$((reset + 1))
+    continue
+  fi
 
   if group_id="$(find_group_id "${username}" 2>/dev/null)"; then
     :
@@ -240,6 +299,6 @@ for index in "${!workers[@]}"; do
   created=$((created + 1))
 done
 
-printf 'Participant account preparation complete: created=%d, existing=%d, total=%d.\n' \
-  "${created}" "${existing}" "${#workers[@]}"
+printf 'Participant account preparation complete: created=%d, reset=%d, existing=%d, selected=%d.\n' \
+  "${created}" "${reset}" "${existing}" "${selected_count}"
 printf 'New credentials (mode 0600): %s\n' "${credentials_output}"

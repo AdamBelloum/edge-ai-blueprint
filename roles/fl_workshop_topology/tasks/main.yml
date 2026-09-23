@@ -3,6 +3,9 @@
   ansible.builtin.set_fact:
     fl_workshop_client_hosts: >-
       {{ groups[fl_workshop_client_group] | default([]) }}
+  tags:
+    - workshop_assets
+    - workshop_seed
 
 - name: Require at least one configured federated-learning client VM
   ansible.builtin.assert:
@@ -11,6 +14,9 @@
     fail_msg: >-
       No federated-learning client VMs are configured in
       [{{ fl_workshop_client_group }}].
+  tags:
+    - workshop_assets
+    - workshop_seed
 
 - name: Require unique client inventory aliases
   ansible.builtin.assert:
@@ -19,3 +25,6 @@
     fail_msg: >-
       A federated-learning client inventory alias occurs more than once in
       [{{ fl_workshop_client_group }}]. Each client must have one unique alias.
+  tags:
+    - workshop_assets
+    - workshop_seed
