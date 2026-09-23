@@ -151,11 +151,15 @@ class WorkflowDemoClient(fl.client.NumPyClient):
         num_classes: int,
         learning_rate: float,
         local_epochs: int,
+        group_id: str,
     ) -> None:
         self.features = features
         self.labels = labels
         self.learning_rate = learning_rate
         self.local_epochs = local_epochs
+        self.group_id = group_id
+        self.fit_calls = 0
+        self.evaluation_calls = 0
         self.weights = np.zeros((features.shape[1], num_classes), dtype=np.float32)
         self.bias = np.zeros(num_classes, dtype=np.float32)
 
@@ -203,6 +207,19 @@ class WorkflowDemoClient(fl.client.NumPyClient):
         loss, accuracy = loss_and_accuracy(
             self.features, self.labels, self.weights, self.bias
         )
+        self.fit_calls += 1
+        print(
+            "Local training complete:",
+            {
+                "group_id": self.group_id,
+                "fit_call": self.fit_calls,
+                "samples": sample_count,
+                "local_epochs": self.local_epochs,
+                "loss": round(loss, 6),
+                "accuracy": round(accuracy, 6),
+            },
+            flush=True,
+        )
 
         return (
             self.get_parameters({}),
@@ -221,6 +238,18 @@ class WorkflowDemoClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         loss, accuracy = loss_and_accuracy(
             self.features, self.labels, self.weights, self.bias
+        )
+        self.evaluation_calls += 1
+        print(
+            "Local evaluation of shared model:",
+            {
+                "group_id": self.group_id,
+                "evaluation_call": self.evaluation_calls,
+                "samples": len(self.labels),
+                "loss": round(loss, 6),
+                "accuracy": round(accuracy, 6),
+            },
+            flush=True,
         )
         return (
             loss,
@@ -273,6 +302,7 @@ def main() -> None:
         num_classes=num_classes,
         learning_rate=learning_rate,
         local_epochs=local_epochs,
+        group_id=group_id,
     )
     fl.client.start_numpy_client(server_address=server_address, client=client)
 
