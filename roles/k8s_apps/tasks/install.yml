@@ -319,8 +319,15 @@
       path: /opt/digitafrica/k8s-notebooks/advanced
     - name: digitafrica-notebooks-solutions
       path: /opt/digitafrica/k8s-notebooks/solutions
+<<<<<<< HEAD
   changed_when: >-
     'created' in stdout or 'configured' in stdout
+=======
+  register: tutorial_asset_configmaps
+  changed_when: >-
+    'created' in tutorial_asset_configmaps.stdout or
+    'configured' in tutorial_asset_configmaps.stdout
+>>>>>>> 6721e46 (feat(workshop): add tutorial cohort reset controls)
   tags:
     - workshop_assets
 
