@@ -195,7 +195,7 @@ deployment_public_setting() {
   local vars_file tier value
 
   case "${setting}" in
-    jupyterhub_public_url|oidc_enabled|oidc_issuer_url|tls_mode)
+    jupyterhub_public_url|oidc_enabled|oidc_issuer_url|oidc_identity_namespace|tls_mode)
       ;;
     *)
       die "Unsupported public deployment setting requested: ${setting}"

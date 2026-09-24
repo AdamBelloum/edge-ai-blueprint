@@ -14,12 +14,61 @@ set -o nounset
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve an explicit --tier option before common.sh establishes deployment
+# context variables as readonly.
+HEALTH_REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+HEALTH_SELECTED_TIER=""
+
+for ((health_arg_index = 1; health_arg_index <= $#; health_arg_index++)); do
+  health_arg="${!health_arg_index}"
+
+  case "${health_arg}" in
+    --tier)
+      health_next_index=$((health_arg_index + 1))
+      if ((health_next_index > $#)); then
+        printf '%s\n' '[ERROR] Missing value after --tier.' >&2
+        exit 2
+      fi
+      HEALTH_SELECTED_TIER="${!health_next_index}"
+      ;;
+    --tier=*)
+      HEALTH_SELECTED_TIER="${health_arg#--tier=}"
+      ;;
+  esac
+done
+
+case "${HEALTH_SELECTED_TIER}" in
+  "")
+    # Retain existing environment-driven and Tier-1 default behaviour.
+    ;;
+  tier1)
+    export DIGITAFRICA_DEPLOYMENT_TIER="tier1"
+    export DIGITAFRICA_INVENTORY="${HEALTH_REPO_ROOT}/inventories/prod/hosts.ini"
+    export DIGITAFRICA_DEPLOYMENT_GROUP="tier1_server"
+    ;;
+  tier2)
+    export DIGITAFRICA_DEPLOYMENT_TIER="tier2"
+    export DIGITAFRICA_INVENTORY="${HEALTH_REPO_ROOT}/inventories/workshop/tier2/hosts.ini"
+    export DIGITAFRICA_DEPLOYMENT_GROUP="tier2_server"
+    ;;
+  *)
+    printf '[ERROR] Unsupported deployment tier for health checking: %s. Expected tier1 or tier2.\n' \
+      "${HEALTH_SELECTED_TIER}" >&2
+    exit 2
+    ;;
+esac
+
 # shellcheck source=../lib/common.sh
 source "${SCRIPT_DIR}/../lib/common.sh"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/admin/health-check.sh [SCOPE]
+Usage: scripts/admin/health-check.sh [--tier TIER] [SCOPE]
+
+Options:
+  --tier TIER     Select deployment context: tier1 or tier2.
+                  When omitted, the existing Tier-1 environment defaults apply.
 
 Scopes:
   deployment      Run infrastructure and JupyterHub deployment checks (default).
@@ -421,24 +470,61 @@ run_scope() {
   esac
 }
 
-main() {
-  local scope="${1:-deployment}"
+configure_health_tier() {
+  local tier="$1"
 
-  case "${scope}" in
-    help|--help|-h)
-      usage
-      ;;
-    deployment|all|infrastructure|identity|jupyterhub|silos)
-      show_context
-      run_scope "${scope}"
-      print_heading "Health-check result"
-      log "All requested checks passed."
+  # The context has already been selected before common.sh was sourced.
+  case "${tier}" in
+    tier1|tier2)
       ;;
     *)
-      usage >&2
-      die "Unknown option: ${scope}"
+      die "Unsupported deployment tier for health checking: ${tier}. Expected tier1 or tier2."
       ;;
   esac
+}
+
+main() {
+  local scope="deployment"
+  local tier=""
+  local scope_seen="false"
+
+  while (($# > 0)); do
+    case "$1" in
+      --tier)
+        (($# >= 2)) || die "Missing value after --tier."
+        tier="$2"
+        shift 2
+        ;;
+      --tier=*)
+        tier="${1#--tier=}"
+        shift
+        ;;
+      help|--help|-h)
+        usage
+        return 0
+        ;;
+      deployment|all|infrastructure|identity|jupyterhub|silos)
+        [[ "${scope_seen}" == "false" ]] ||
+          die "Specify at most one health-check scope."
+        scope="$1"
+        scope_seen="true"
+        shift
+        ;;
+      *)
+        usage >&2
+        die "Unknown option: $1"
+        ;;
+    esac
+  done
+
+  if [[ -n "${tier}" ]]; then
+    configure_health_tier "${tier}"
+  fi
+
+  show_context
+  run_scope "${scope}"
+  print_heading "Health-check result"
+  log "All requested checks passed."
 }
 
 main "$@"
