@@ -212,11 +212,22 @@ singleuser:
       storageClass: {{ digitafrica_deployment.jupyterhub.storage_class }}
       volumeNameTemplate: home   # keeps the home PVC volume named "home" so the chart can inject it into initContainers
 
-    # Seed notebooks come from a ConfigMap — works on any node, no hostPath needed
+    # Tutorial sources are read-only ConfigMaps. Only beginner assets remain
+    # mounted in the regular notebook container for backwards compatibility.
+    # Advanced assets, solutions, and organiser state are init-container-only.
     extraVolumes:
-      - name: digitafrica-seed
+      - name: digitafrica-seed-beginner
         configMap:
-          name: digitafrica-notebooks
+          name: digitafrica-notebooks-beginner
+      - name: digitafrica-seed-advanced
+        configMap:
+          name: digitafrica-notebooks-advanced
+      - name: digitafrica-seed-solutions
+        configMap:
+          name: digitafrica-notebooks-solutions
+      - name: digitafrica-workshop-state
+        configMap:
+          name: digitafrica-workshop-state
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
       - name: digitafrica-runtime-requirements
         configMap:
@@ -224,7 +235,7 @@ singleuser:
 {% endif %}
 
     extraVolumeMounts:
-      - name: digitafrica-seed
+      - name: digitafrica-seed-beginner
         mountPath: /seed
         readOnly: true
 
@@ -266,62 +277,146 @@ singleuser:
       args:
         - |
           set -eu
-          source_dir=/seed
-          destination_dir=/home/jovyan/digitafrica
 
-          managed_files="
-          00_START_HERE.md
-          01_Inspect_Local_Partition.ipynb
-          02_Run_Federated_Client.ipynb
-          WORKSHOP_VERSION.json
-          "
+          workspace=/home/jovyan/digitafrica
+          beginner_source=/seed/beginner
+          advanced_source=/seed/advanced
+          solutions_source=/seed/solutions
+          state_dir=/state
 
-          mkdir -p "$destination_dir"
+          mode="$(tr -d '\r\n' < "$state_dir/mode")"
+          solutions_released="$(tr -d '\r\n' < "$state_dir/solutions_released")"
 
-          # Retire only workshop files superseded by the student-driven tutorial.
-          # Do not remove personal files from the persistent user workspace.
-          rm -f \
-            "$destination_dir/01_Group_Workspace.ipynb" \
-            "$destination_dir/01_precision_agriculture_edge_ml.ipynb" \
-            "$destination_dir/02_ml_basics_training_vs_inference.ipynb" \
-            "$destination_dir/requirements.txt" \
-            "$destination_dir/..data"
+          case "$mode" in
+            beginner|advanced) ;;
+            *)
+              echo "[seed] ERROR: unsupported workshop mode: $mode" >&2
+              exit 1
+              ;;
+          esac
 
-          # Copy regular files, rather than preserving Kubernetes ConfigMap
-          # symlinks, ownership, and read-only source modes.
-          for filename in $managed_files; do
-            source_file="$source_dir/$filename"
-            destination_file="$destination_dir/$filename"
+          case "$solutions_released" in
+            true|false) ;;
+            *)
+              echo "[seed] ERROR: invalid solutions_released state: $solutions_released" >&2
+              exit 1
+              ;;
+          esac
+
+          copy_seed_file() {
+            source_file="$1"
+            destination_file="$2"
+            overwrite="$3"
 
             if [ ! -f "$source_file" ]; then
               echo "[seed] ERROR: missing required seed file: $source_file" >&2
               exit 1
             fi
 
+            if [ "$overwrite" = "false" ] && [ -e "$destination_file" ]; then
+              echo "[seed] preserving existing file: $destination_file"
+              return 0
+            fi
+
             rm -f "$destination_file"
             cp -L "$source_file" "$destination_file"
             chown 1000:100 "$destination_file"
             chmod 0644 "$destination_file"
-          done
+          }
 
-          (
-            printf "seeded_at_utc=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            printf "provenance_file=WORKSHOP_VERSION.json\n"
-          ) > "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
-          chown 1000:100 "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
-          chmod 0644 "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
+          write_receipt_if_absent() {
+            receipt="$1"
+            provenance_file="$2"
 
-          echo "[seed] managed workshop files:"
-          ls -l \
-            "$destination_dir/00_START_HERE.md" \
-            "$destination_dir/01_Inspect_Local_Partition.ipynb" \
-            "$destination_dir/02_Run_Federated_Client.ipynb" \
-            "$destination_dir/WORKSHOP_VERSION.json" \
-            "$destination_dir/WORKSHOP_SEED_RECEIPT.txt"
+            if [ -e "$receipt" ]; then
+              return 0
+            fi
+
+            (
+              printf "seeded_at_utc=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf "provenance_file=%s\n" "$provenance_file"
+            ) > "$receipt"
+            chown 1000:100 "$receipt"
+            chmod 0644 "$receipt"
+          }
+
+          mkdir -p "$workspace"
+
+          if [ "$mode" = "beginner" ]; then
+            # Preserve the established beginner behaviour: only these managed
+            # files at the workspace root are refreshed on each spawn.
+            rm -f \
+              "$workspace/01_Group_Workspace.ipynb" \
+              "$workspace/01_precision_agriculture_edge_ml.ipynb" \
+              "$workspace/02_ml_basics_training_vs_inference.ipynb" \
+              "$workspace/requirements.txt" \
+              "$workspace/..data"
+
+            for filename in \
+              00_START_HERE.md \
+              01_Inspect_Local_Partition.ipynb \
+              02_Run_Federated_Client.ipynb \
+              WORKSHOP_VERSION.json; do
+              copy_seed_file "$beginner_source/$filename" "$workspace/$filename" true
+            done
+
+            (
+              printf "seeded_at_utc=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf "provenance_file=WORKSHOP_VERSION.json\n"
+            ) > "$workspace/WORKSHOP_SEED_RECEIPT.txt"
+            chown 1000:100 "$workspace/WORKSHOP_SEED_RECEIPT.txt"
+            chmod 0644 "$workspace/WORKSHOP_SEED_RECEIPT.txt"
+          else
+            # Mode changes cannot replace beginner work or participant files.
+            advanced_workspace="$workspace/advanced"
+            mkdir -p "$advanced_workspace"
+
+            for filename in \
+              00_START_HERE.md \
+              01_Inspect_Local_Partition.ipynb \
+              02_Run_Federated_Client.ipynb \
+              WORKSHOP_VERSION.json; do
+              copy_seed_file "$advanced_source/$filename" \
+                "$advanced_workspace/$filename" false
+            done
+
+            write_receipt_if_absent \
+              "$advanced_workspace/WORKSHOP_SEED_RECEIPT.txt" \
+              "WORKSHOP_VERSION.json"
+          fi
+
+          if [ "$solutions_released" = "true" ]; then
+            solutions_workspace="$workspace/reference-solutions"
+            mkdir -p "$solutions_workspace"
+
+            for filename in \
+              01_Inspect_Local_Partition_solution.ipynb \
+              02_Run_Federated_Client_solution.ipynb \
+              WORKSHOP_VERSION.json; do
+              copy_seed_file "$solutions_source/$filename" \
+                "$solutions_workspace/$filename" false
+            done
+
+            write_receipt_if_absent \
+              "$solutions_workspace/SOLUTIONS_RELEASE_RECEIPT.txt" \
+              "WORKSHOP_VERSION.json"
+          fi
+
+          echo "[seed] workshop mode: $mode"
+          echo "[seed] solutions released: $solutions_released"
       volumeMounts:
-        - name: digitafrica-seed
-          mountPath: /seed
+        - name: digitafrica-seed-beginner
+          mountPath: /seed/beginner
           readOnly: true
-        # This is the user PVC mount, made predictable via volumeNameTemplate: home
+        - name: digitafrica-seed-advanced
+          mountPath: /seed/advanced
+          readOnly: true
+        - name: digitafrica-seed-solutions
+          mountPath: /seed/solutions
+          readOnly: true
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
           mountPath: /home/jovyan

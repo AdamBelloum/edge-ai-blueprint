@@ -142,64 +142,119 @@
     dest: /opt/digitafrica/k8s/05-traefik-middleware.yaml
     mode: "0644"
 
-- name: Stage seed notebooks on Tier-1 node
+- name: Ensure tutorial asset staging directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/digitafrica/k8s-notebooks/beginner
+    - /opt/digitafrica/k8s-notebooks/advanced
+    - /opt/digitafrica/k8s-notebooks/solutions
+  tags:
+    - workshop_assets
+
+- name: Stage beginner tutorial assets on central node
   ansible.builtin.copy:
     src: notebooks/beginner/
-    dest: /opt/digitafrica/k8s-notebooks/
+    dest: /opt/digitafrica/k8s-notebooks/beginner/
     mode: "0644"
   tags:
     - workshop_assets
 
-- name: Generate notebook seed provenance
+- name: Stage advanced tutorial assets on central node
+  ansible.builtin.copy:
+    src: notebooks/advanced/
+    dest: /opt/digitafrica/k8s-notebooks/advanced/
+    mode: "0644"
+  tags:
+    - workshop_assets
+
+- name: Stage reference-solution assets on central node
+  ansible.builtin.copy:
+    src: notebooks/solutions/
+    dest: /opt/digitafrica/k8s-notebooks/solutions/
+    mode: "0644"
+  tags:
+    - workshop_assets
+
+- name: Generate tutorial asset provenance
   ansible.builtin.shell: |
     set -euo pipefail
-    python3 - <<'PYTHON'
+    python3 - <<'PYTHON_PROVENANCE'
     import hashlib
     import json
     from datetime import datetime, timezone
     from pathlib import Path
 
-    root = Path("/opt/digitafrica/k8s-notebooks")
-    asset_names = (
-        "00_START_HERE.md",
-        "01_Inspect_Local_Partition.ipynb",
-        "02_Run_Federated_Client.ipynb",
-    )
-
-    assets = {}
-    for name in asset_names:
-        path = root / name
-        if not path.is_file():
-            raise SystemExit(f"missing staged notebook asset: {path}")
-        assets[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-
-    canonical_assets = json.dumps(
-        assets,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    manifest_sha256 = hashlib.sha256(canonical_assets).hexdigest()
-
-    provenance = {
-        "schema_version": 1,
-        "asset_version": f"sha256:{manifest_sha256}",
-        "asset_manifest_sha256": manifest_sha256,
-        "configmap_generated_at_utc": datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z"),
-        "assets": assets,
+    asset_sets = {
+        "/opt/digitafrica/k8s-notebooks/beginner": (
+            "00_START_HERE.md",
+            "01_Inspect_Local_Partition.ipynb",
+            "02_Run_Federated_Client.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/advanced": (
+            "00_START_HERE.md",
+            "01_Inspect_Local_Partition.ipynb",
+            "02_Run_Federated_Client.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/solutions": (
+            "01_Inspect_Local_Partition_solution.ipynb",
+            "02_Run_Federated_Client_solution.ipynb",
+        ),
     }
 
-    destination = root / "WORKSHOP_VERSION.json"
-    temporary = destination.with_suffix(".json.tmp")
-    temporary.write_text(
-        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary.chmod(0o644)
-    temporary.replace(destination)
-    PYTHON
+    for root_string, asset_names in asset_sets.items():
+        root = Path(root_string)
+        assets = {}
+
+        for name in asset_names:
+            asset = root / name
+            if not asset.is_file():
+                raise SystemExit(f"missing staged tutorial asset: {asset}")
+            assets[name] = hashlib.sha256(asset.read_bytes()).hexdigest()
+
+        manifest_sha256 = hashlib.sha256(
+            json.dumps(assets, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+        destination = root / "WORKSHOP_VERSION.json"
+
+        # Do not rewrite provenance when the staged asset set is identical.
+        # This keeps ConfigMaps stable across routine reconciliations.
+        if destination.is_file():
+            try:
+                existing = json.loads(destination.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+
+            if (
+                isinstance(existing, dict)
+                and existing.get("schema_version") == 1
+                and existing.get("asset_manifest_sha256") == manifest_sha256
+                and existing.get("assets") == assets
+            ):
+                continue
+
+        provenance = {
+            "schema_version": 1,
+            "asset_version": f"sha256:{manifest_sha256}",
+            "asset_manifest_sha256": manifest_sha256,
+            "generated_at_utc": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "assets": assets,
+        }
+
+        temporary = destination.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.chmod(0o644)
+        temporary.replace(destination)
+    PYTHON_PROVENANCE
   args:
     executable: /bin/bash
   tags:
@@ -249,14 +304,43 @@
   args:
     executable: /bin/bash
 
-- name: Create/update notebook seed ConfigMap
+- name: Create/update tutorial asset ConfigMaps
   ansible.builtin.shell: |
-    set -e
-    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap digitafrica-notebooks \
-      --from-file=/opt/digitafrica/k8s-notebooks/ \
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap {{ item.name }} \
+      --from-file={{ item.path }}/ \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
+  loop:
+    - name: digitafrica-notebooks-beginner
+      path: /opt/digitafrica/k8s-notebooks/beginner
+    - name: digitafrica-notebooks-advanced
+      path: /opt/digitafrica/k8s-notebooks/advanced
+    - name: digitafrica-notebooks-solutions
+      path: /opt/digitafrica/k8s-notebooks/solutions
+  changed_when: >-
+    'created' in stdout or 'configured' in stdout
+  tags:
+    - workshop_assets
+
+- name: Create initial workshop tutorial state when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      get configmap digitafrica-workshop-state >/dev/null 2>&1; then
+      echo "preserved"
+    else
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        create configmap digitafrica-workshop-state \
+        --from-literal=mode=beginner \
+        --from-literal=solutions_released=false
+      echo "created"
+    fi
+  args:
+    executable: /bin/bash
+  register: workshop_tutorial_state_configmap
+  changed_when: "'created' in workshop_tutorial_state_configmap.stdout"
   tags:
     - workshop_assets
 

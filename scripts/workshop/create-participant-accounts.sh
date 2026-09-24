@@ -24,6 +24,7 @@ admin_user=""
 password_file="${KEYCLOAK_ADMIN_PASSWORD_FILE:-}"
 dry_run=false
 reset_password_for=""
+reset_all_passwords=false
 
 usage() {
   cat <<'EOF'
@@ -56,12 +57,13 @@ Authentication: choose one method
 
 Safety:
   --reset-password-for USER    Reset exactly one existing expected participant account
+  --reset-all-passwords        Reset every expected participant account from the inventory
   --dry-run                    Show intended actions without changing Keycloak
   -h, --help                   Show this help
 
 Notes:
-  Existing accounts are preserved unless --reset-password-for explicitly selects one.
-  A reset verifies that both the selected user and matching Keycloak group exist.
+  Existing accounts are preserved unless an explicit password-reset option is selected.
+  A reset verifies that every selected user and matching Keycloak group exist.
   The TSV output contains passwords created or reset by this run only.
 EOF
 }
@@ -92,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --admin-client-secret-file) admin_client_secret_file="${2:-}"; shift 2 ;;
     --admin-user) admin_user="${2:-}"; shift 2 ;;
     --reset-password-for) reset_password_for="${2:-}"; shift 2 ;;
+    --reset-all-passwords) reset_all_passwords=true; shift ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
@@ -119,6 +122,8 @@ require_command python3
 [[ "${group_prefix}" =~ ^[A-Za-z0-9_-]+$ ]] || fail "--group-prefix may contain only letters, numbers, _ and -"
 [[ -z "${reset_password_for}" || "${reset_password_for}" =~ ^[A-Za-z0-9_-]+$ ]] || \
   fail "--reset-password-for may contain only letters, numbers, _ and -"
+[[ ! ( -n "${reset_password_for}" && "${reset_all_passwords}" == true ) ]] || \
+  fail "Choose either --reset-password-for or --reset-all-passwords, not both"
 
 if [[ "${dry_run}" != true ]]; then
   if [[ -n "${admin_client_id}${admin_client_secret_file}" ]]; then
@@ -182,8 +187,8 @@ fi
 if [[ "${dry_run}" == true ]]; then
   for index in "${!workers[@]}"; do
     username="$(printf '%s%02d' "${group_prefix}" "$((index + 1))")"
-    [[ -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
-    if [[ -n "${reset_password_for}" ]]; then
+    [[ "${reset_all_passwords}" == true || -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
+    if [[ "${reset_all_passwords}" == true || -n "${reset_password_for}" ]]; then
       printf 'Would reset the existing password for: %s (worker: %s)\n' \
         "${username}" "${workers[index]}"
     else
@@ -252,9 +257,9 @@ for index in "${!workers[@]}"; do
   number=$((index + 1))
   username="$(printf '%s%02d' "${group_prefix}" "${number}")"
 
-  [[ -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
+  [[ "${reset_all_passwords}" == true || -z "${reset_password_for}" || "${username}" == "${reset_password_for}" ]] || continue
 
-  if [[ -n "${reset_password_for}" ]]; then
+  if [[ "${reset_all_passwords}" == true || -n "${reset_password_for}" ]]; then
     user_id="$(find_user_id "${username}")" || \
       fail "Cannot reset '${username}': the existing Keycloak user was not found"
     group_id="$(find_group_id "${username}")" || \

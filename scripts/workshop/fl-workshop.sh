@@ -27,6 +27,12 @@ Actions:
   inspect-workspaces  List application files in all assigned participant workspaces.
   checklist         Print the workshop readiness checklist.
   record-template   Print an experiment record template.
+  tutorial-state    Show the current tutorial mode and solution-release state.
+  set-tutorial-mode beginner|advanced
+                    Set the tutorial mode for subsequently spawned servers.
+  release-solutions Mark reference solutions as released for subsequent spawns.
+  new-cohort beginner|advanced
+                    Delete participant workspaces and initialise a fresh cohort.
   help              Show this help text.
 
 This helper does not launch training. Start a Flower server and clients only
@@ -38,6 +44,8 @@ EOF
 SELECTED_TIER="tier1"
 INVENTORY_OVERRIDE=""
 SELECTED_ACTION="menu"
+TUTORIAL_MODE=""
+COHORT_MODE=""
 
 while (($#)); do
   case "$1" in
@@ -51,7 +59,7 @@ while (($#)); do
       INVENTORY_OVERRIDE="$2"
       shift 2
       ;;
-    menu|preflight|revisions|inspect-workspaces|checklist|record-template|help|--help|-h)
+    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
         usage >&2
@@ -59,6 +67,50 @@ while (($#)); do
       fi
       SELECTED_ACTION="$1"
       shift
+      ;;
+    set-tutorial-mode)
+      if [[ "$SELECTED_ACTION" != "menu" ]]; then
+        printf 'Only one action may be specified.\n' >&2
+        usage >&2
+        exit 2
+      fi
+      (($# >= 2)) || {
+        printf 'set-tutorial-mode requires beginner or advanced.\n' >&2
+        usage >&2
+        exit 2
+      }
+      case "$2" in
+        beginner|advanced) ;;
+        *)
+          printf 'Invalid tutorial mode: %s (expected beginner or advanced).\n' "$2" >&2
+          exit 2
+          ;;
+      esac
+      SELECTED_ACTION="set-tutorial-mode"
+      TUTORIAL_MODE="$2"
+      shift 2
+      ;;
+    new-cohort)
+      if [[ "$SELECTED_ACTION" != "menu" ]]; then
+        printf 'Only one action may be specified.\n' >&2
+        usage >&2
+        exit 2
+      fi
+      (($# >= 2)) || {
+        printf 'new-cohort requires beginner or advanced.\n' >&2
+        usage >&2
+        exit 2
+      }
+      case "$2" in
+        beginner|advanced) ;;
+        *)
+          printf 'Invalid cohort mode: %s (expected beginner or advanced).\n' "$2" >&2
+          exit 2
+          ;;
+      esac
+      SELECTED_ACTION="new-cohort"
+      COHORT_MODE="$2"
+      shift 2
       ;;
     *)
       printf 'Unknown option or action: %s\n' "$1" >&2
@@ -233,6 +285,212 @@ REMOTE
   done
 }
 
+
+show_tutorial_state() {
+  print_heading "Workshop tutorial state"
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+echo "Namespace: ${DIGITAFRICA_NAMESPACE}"
+echo "ConfigMap: digitafrica-workshop-state"
+echo
+echo "mode:"
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.mode}{"\n"}'
+echo "solutions_released:"
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.solutions_released}{"\n"}'
+REMOTE
+)"
+
+  cat <<'EOF'
+
+The state applies when a participant server is next spawned. Existing running
+servers are unchanged because their init containers have already completed.
+EOF
+}
+
+set_tutorial_mode() {
+  local mode="$1"
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *) die "Invalid tutorial mode: ${mode}" ;;
+  esac
+
+  print_heading "Set workshop tutorial mode"
+  printf 'Requested mode: %s\n' "$mode"
+  printf '%s\n' \
+    "This affects subsequently spawned participant servers only." \
+    "Existing user servers and files are not modified."
+
+  if ! confirm "Update the workshop tutorial mode"; then
+    log "No change made."
+    return 0
+  fi
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"mode":"${mode}"}}'
+REMOTE
+)"
+
+  show_tutorial_state
+}
+
+release_reference_solutions() {
+  print_heading "Release reference solutions"
+  printf '%s\n' \
+    "This is a one-way organiser action for subsequently spawned participant servers." \
+    "Existing user servers and files are not modified."
+
+  if ! confirm "Release reference solutions"; then
+    log "No change made."
+    return 0
+  fi
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"solutions_released":"true"}}'
+REMOTE
+)"
+
+  show_tutorial_state
+}
+
+start_new_cohort() {
+  local mode="$1"
+  local group_ids_csv
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *) die "Invalid cohort mode: ${mode}" ;;
+  esac
+
+  resolve_participant_workers
+  group_ids_csv="$(IFS=,; printf '%s' "${WORKSHOP_GROUP_IDS[*]}")"
+
+  print_heading "Start a fresh workshop cohort"
+  printf 'Selected mode: %s\n' "$mode"
+  printf 'Participant identities: %s\n' "${WORKSHOP_GROUP_IDS[*]}"
+  cat <<'EOF'
+
+This action deletes only the persistent JupyterHub home workspaces of the
+inventory-derived participant identities. Participant servers must first be
+stopped through JupyterHub.
+
+It does not reset Keycloak passwords. Reset those separately with:
+  create-participant-accounts.sh --reset-all-passwords ...
+
+Administrator, hub, PostgreSQL, Redis, and non-participant storage are excluded.
+EOF
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+
+namespace="${DIGITAFRICA_NAMESPACE}"
+groups_csv="${group_ids_csv}"
+IFS=, read -r -a groups <<< "\$groups_csv"
+
+k3s kubectl -n "\$namespace" get configmap digitafrica-workshop-state >/dev/null
+
+for group_id in "\${groups[@]}"; do
+  active_pods="\$(k3s kubectl -n "\$namespace" get pods \
+    -l "hub.jupyter.org/username=\$group_id" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+
+  if [[ -n "\$active_pods" ]]; then
+    printf 'Refusing reset: participant server still running for %s: %s\n' \
+      "\$group_id" "\$active_pods" >&2
+    exit 1
+  fi
+
+  mapfile -t pvc_names < <(
+    k3s kubectl -n "\$namespace" get pvc \
+      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+  )
+
+  if (( \${#pvc_names[@]} > 1 )); then
+    printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
+      "\$group_id" "\${pvc_names[*]}" >&2
+    exit 1
+  fi
+
+  if (( \${#pvc_names[@]} == 1 )); then
+    printf 'Would delete participant PVC: %s (identity: %s)\n' \
+      "\${pvc_names[0]}" "\$group_id"
+  else
+    printf 'No participant PVC exists yet for: %s\n' "\$group_id"
+  fi
+done
+REMOTE
+)"
+
+  if ! confirm "Delete the listed participant workspaces and initialise the new cohort"; then
+    log "No change made."
+    return 0
+  fi
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+
+namespace="${DIGITAFRICA_NAMESPACE}"
+mode="${mode}"
+groups_csv="${group_ids_csv}"
+IFS=, read -r -a groups <<< "\$groups_csv"
+
+k3s kubectl -n "\$namespace" get configmap digitafrica-workshop-state >/dev/null
+
+for group_id in "\${groups[@]}"; do
+  active_pods="\$(k3s kubectl -n "\$namespace" get pods \
+    -l "hub.jupyter.org/username=\$group_id" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+
+  if [[ -n "\$active_pods" ]]; then
+    printf 'Refusing reset: participant server still running for %s: %s\n' \
+      "\$group_id" "\$active_pods" >&2
+    exit 1
+  fi
+
+  mapfile -t pvc_names < <(
+    k3s kubectl -n "\$namespace" get pvc \
+      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+  )
+
+  if (( \${#pvc_names[@]} > 1 )); then
+    printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
+      "\$group_id" "\${pvc_names[*]}" >&2
+    exit 1
+  fi
+
+  if (( \${#pvc_names[@]} == 1 )); then
+    k3s kubectl -n "\$namespace" delete pvc "\${pvc_names[0]}" --wait=true
+    printf 'Deleted participant PVC: %s (identity: %s)\n' \
+      "\${pvc_names[0]}" "\$group_id"
+  fi
+done
+
+k3s kubectl -n "\$namespace" patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p "{\"data\":{\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
+
+printf 'Fresh cohort state applied: mode=%s, solutions_released=false\n' "\$mode"
+REMOTE
+)"
+
+  show_tutorial_state
+}
+
 print_checklist() {
   cat <<'EOF'
 
@@ -336,6 +594,10 @@ Choose an action:
   3) Inspect all assigned participant workspaces
   4) Show workshop readiness checklist
   5) Show experiment record template
+  6) Show tutorial mode and solution-release state
+  7) Set tutorial mode for subsequent participant spawns
+  8) Release reference solutions for subsequent participant spawns
+  9) Start a fresh beginner or advanced workshop cohort
   0) Exit
 EOF
     read -r -p "Selection: " choice
@@ -346,8 +608,24 @@ EOF
       3) inspect_all_participant_sources ;;
       4) print_checklist ;;
       5) print_record_template ;;
+      6) show_tutorial_state ;;
+      7)
+        read -r -p "Tutorial mode (beginner/advanced): " choice
+        case "$choice" in
+          beginner|advanced) set_tutorial_mode "$choice" ;;
+          *) warn "Choose beginner or advanced." ;;
+        esac
+        ;;
+      8) release_reference_solutions ;;
+      9)
+        read -r -p "New cohort mode (beginner/advanced): " choice
+        case "$choice" in
+          beginner|advanced) start_new_cohort "$choice" ;;
+          *) warn "Choose beginner or advanced." ;;
+        esac
+        ;;
       0) log "Exiting."; return 0 ;;
-      *) warn "Choose a number from 0 to 6." ;;
+      *) warn "Choose a number from 0 to 9." ;;
     esac
   done
 }
@@ -373,6 +651,18 @@ main() {
       ;;
     record-template)
       print_record_template
+      ;;
+    tutorial-state)
+      show_tutorial_state
+      ;;
+    set-tutorial-mode)
+      set_tutorial_mode "$TUTORIAL_MODE"
+      ;;
+    release-solutions)
+      release_reference_solutions
+      ;;
+    new-cohort)
+      start_new_cohort "$COHORT_MODE"
       ;;
     help|--help|-h)
       usage
