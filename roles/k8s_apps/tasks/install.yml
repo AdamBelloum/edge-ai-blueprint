@@ -144,7 +144,7 @@
 
 - name: Stage seed notebooks on Tier-1 node
   ansible.builtin.copy:
-    src: notebooks/
+    src: notebooks/beginner/
     dest: /opt/digitafrica/k8s-notebooks/
     mode: "0644"
   tags:
