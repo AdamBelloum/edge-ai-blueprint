@@ -268,6 +268,7 @@ for index in "${!workers[@]}"; do
     password="$(random_password)"
     api PUT "/users/${user_id}/reset-password" \
       --data "$(jq -cn --arg value "${password}" '{type: "password", value: $value, temporary: true}')" >/dev/null
+ api POST "/users/${user_id}/logout" >/dev/null
     api PUT "/users/${user_id}/groups/${group_id}" >/dev/null
 
     printf '%s\t%s\t%s\n' "${username}" "${password}" "${workers[index]}" >> "${credentials_output}"

@@ -304,6 +304,32 @@
   args:
     executable: /bin/bash
 
+- name: Verify protected JupyterHub OIDC client secret record
+  ansible.builtin.assert:
+    that:
+      - oidc.oidc_client_secret_file is defined
+      - oidc.oidc_client_secret_file | length > 0
+      - lookup('ansible.builtin.file', oidc.oidc_client_secret_file) | trim | length > 0
+    fail_msg: >-
+      Managed OIDC requires the protected local JupyterHub client-secret record.
+      Run keycloak-bootstrap.sh before deploying the applications phase.
+  no_log: true
+  when: oidc.oidc_enabled | default(false) | bool
+
+- name: Create or update JupyterHub OIDC Kubernetes Secret
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create secret generic jupyterhub-oidc \
+      --from-literal=client-id={{ oidc.oidc_client_id | quote }} \
+      --from-literal=client-secret={{ lookup('ansible.builtin.file', oidc.oidc_client_secret_file) | trim | quote }} \
+      --dry-run=client -o yaml | \
+      k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  no_log: true
+  when: oidc.oidc_enabled | default(false) | bool
+
 - name: Create/update tutorial asset ConfigMaps
   ansible.builtin.shell: |
     set -euo pipefail

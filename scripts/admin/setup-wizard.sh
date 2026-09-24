@@ -1,87 +1,76 @@
 #!/usr/bin/env bash
-# Configure a local DIGITAfrica federated-learning workshop deployment.
+# Configure and deploy an independent DIGITAfrica Tier-1 or Tier-2 workshop.
 #
-# Tier-1 and Tier-2 each create an independent local workshop deployment.
-# Neither mode modifies repository example or production configuration.
+# Profiles:
+#   basic                  Dummy-login workshop deployment.
+#   managed-keycloak-oidc  Trusted TLS, managed Keycloak, and JupyterHub OIDC.
 #
-# Usage:
-#   ./scripts/admin/setup-wizard.sh
+# The generated inventory and variables are local-only and excluded from Git.
 
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKSHOP_ROOT="${REPO_ROOT}/inventories/workshop"
+DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-infrastructure.sh"
+HEALTH_SCRIPT="${SCRIPT_DIR}/health-check.sh"
+KEYCLOAK_BOOTSTRAP="${SCRIPT_DIR}/keycloak-bootstrap.sh"
+KEYCLOAK_READINESS="${SCRIPT_DIR}/keycloak-readiness.sh"
+
 WORKSHOP_DIR=""
 INVENTORY=""
 VARS_DIR=""
 VARS_FILE=""
-DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-infrastructure.sh"
-HEALTH_SCRIPT="${SCRIPT_DIR}/health-check.sh"
-
+DEPLOYMENT_TIER=""
+PROFILE=""
 CENTRAL_HOST=""
 PUBLIC_HOST=""
-WORKSHOP_TIMEZONE="${WORKSHOP_TIMEZONE:-Europe/Amsterdam}"
 SSH_USER="adam"
 ADMIN_USER="admin"
 WORKER_HOSTS=()
-PROFILE=""
-DEPLOYMENT_TIER=""
+WORKSHOP_TIMEZONE="${WORKSHOP_TIMEZONE:-Europe/Amsterdam}"
 TLS_MODE="selfsigned"
 TLS_CERT_DIR=""
 TLS_ACME_EMAIL=""
-OIDC_ENABLED="false"
-OIDC_ISSUER_URL=""
-OIDC_CLIENT_ID=""
-OIDC_CLIENT_SECRET=""
 STORAGE_CLASS="local-path"
+IDENTITY_ENABLED="false"
+KEYCLOAK_REALM="digitafrica"
+KEYCLOAK_ADMIN_USER="admin"
+KEYCLOAK_NAMESPACE="digitafrica-identity"
+KEYCLOAK_ADMIN_PASSWORD_FILE=""
+RUN_DEPLOYMENT="false"
 
-colour() {
-  local code="$1"
-  shift
-  if [ -t 1 ]; then
-    printf '\033[%sm%s\033[0m\n' "${code}" "$*"
-  else
-    printf '%s\n' "$*"
-  fi
-}
-
-heading() { colour '1;36' "$*"; }
-info() { colour '0;32' "[OK] $*"; }
-warn() { colour '0;33' "[WARNING] $*" >&2; }
-error() { colour '0;31' "[ERROR] $*" >&2; }
-die() { error "$*"; exit 1; }
-
-on_error() {
-  local line="$1"
-  error "The wizard stopped at line ${line}. No deployment was started."
-}
-trap 'on_error "$LINENO"' ERR
+info() { printf '[INFO] %s\n' "$*"; }
+warn() { printf '[WARNING] %s\n' "$*" >&2; }
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  cat <<'EOF'
-Usage: scripts/admin/setup-wizard.sh
+  cat <<'USAGE'
+Usage:
+  scripts/admin/setup-wizard.sh
+  scripts/admin/setup-wizard.sh --deploy
 
-Creates or replaces an independent local workshop inventory and configuration in:
-  inventories/workshop/<tier>/hosts.ini
-  inventories/workshop/<tier>/group_vars/all.yml
+Creates/replaces a local ignored Tier-1 or Tier-2 inventory and configuration.
 
-Choose Tier-1 or Tier-2 to create or replace that tier's independent
-workshop inventory and configuration. Each tier is written below
-inventories/workshop/<tier>/ and is locally excluded from Git. The wizard can
-optionally run the corresponding deployment and health-check workflows afterwards.
-EOF
+--deploy
+  After configuration confirmation, offer to run the selected deployment
+  workflow immediately.
+USAGE
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+  command -v "$1" >/dev/null 2>&1 ||
+    die "Required command not found: $1"
+}
+
+require_executable() {
+  [[ -x "$1" ]] || die "Required executable is missing: $1"
 }
 
 confirm() {
-  local prompt="$1"
   local answer
-  read -r -p "${prompt} [y/N]: " answer
-  [[ "${answer}" =~ ^[Yy]([Ee][Ss])?$ ]]
+  read -r -p "$1 [y/N]: " answer
+  [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
 }
 
 prompt_required() {
@@ -91,18 +80,20 @@ prompt_required() {
   local value
 
   while true; do
-    if [ -n "${default_value}" ]; then
+    if [[ -n "$default_value" ]]; then
       read -r -p "${prompt} [${default_value}]: " value
-      value="${value:-${default_value}}"
+      value="${value:-$default_value}"
     else
       read -r -p "${prompt}: " value
     fi
 
-    if [ -n "${value}" ]; then
-      printf -v "${variable_name}" '%s' "${value}"
-      return 0
-    fi
-    warn "A value is required."
+    [[ -n "$value" ]] || {
+      warn "A value is required."
+      continue
+    }
+
+    printf -v "$variable_name" '%s' "$value"
+    return 0
   done
 }
 
@@ -111,24 +102,26 @@ prompt_choice() {
   local prompt="$2"
   local default_value="$3"
   shift 3
+
+  local value candidate
   local -a allowed=("$@")
-  local value
 
   while true; do
     read -r -p "${prompt} [${default_value}]: " value
-    value="${value:-${default_value}}"
+    value="${value:-$default_value}"
+
     for candidate in "${allowed[@]}"; do
-      if [ "${value}" = "${candidate}" ]; then
-        printf -v "${variable_name}" '%s' "${value}"
+      if [[ "$value" == "$candidate" ]]; then
+        printf -v "$variable_name" '%s' "$value"
         return 0
       fi
     done
+
     warn "Choose one of: ${allowed[*]}"
   done
 }
 
 validate_host() {
-  # Supports ordinary hostnames, IPv4 addresses and simple IPv6 literals.
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]]
 }
 
@@ -136,73 +129,63 @@ validate_identifier() {
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]
 }
 
-validate_host_or_die() {
-  validate_host "$1" || die "Invalid host value: $1"
-}
-
 yaml_dq() {
   local value="$1"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   value="${value//$'\n'/}"
-  printf '"%s"' "${value}"
+  printf '"%s"' "$value"
 }
 
 ensure_local_git_exclude() {
   local exclude_file
   local pattern='inventories/workshop/'
 
-  if ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn "Repository is not a Git working tree; local workshop files are not automatically ignored."
+  git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
     return 0
-  fi
 
   exclude_file="$(git -C "${REPO_ROOT}" rev-parse --git-path info/exclude)"
-  case "${exclude_file}" in
-    /*) ;;
-    *) exclude_file="${REPO_ROOT}/${exclude_file}" ;;
-  esac
-  mkdir -p "$(dirname "${exclude_file}")"
-  touch "${exclude_file}"
+  [[ "$exclude_file" = /* ]] ||
+    exclude_file="${REPO_ROOT}/${exclude_file}"
 
-  if ! grep -Fqx "${pattern}" "${exclude_file}"; then
-    printf '\n# Local configuration generated by scripts/admin/setup-wizard.sh\n%s\n' \
-      "${pattern}" >> "${exclude_file}"
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+
+  if ! grep -Fqx "$pattern" "$exclude_file"; then
+    printf '\n# Local configuration generated by setup-wizard.sh\n%s\n' \
+      "$pattern" >> "$exclude_file"
   fi
 }
 
 check_prerequisites() {
-  heading "Checking control-machine prerequisites"
-  require_command ssh
   require_command ansible
   require_command ansible-playbook
   require_command git
-  [ -f "${REPO_ROOT}/playbooks/tier1.yml" ] || die "Tier-1 playbook not found. Run the wizard from a complete repository checkout."
-  [ -f "${REPO_ROOT}/playbooks/tier2.yml" ] || die "Tier-2 playbook not found. Run the wizard from a complete repository checkout."
-  [ -x "${DEPLOY_SCRIPT}" ] || die "Deployment helper is missing or not executable: ${DEPLOY_SCRIPT}"
-  [ -x "${HEALTH_SCRIPT}" ] || die "Health-check helper is missing or not executable: ${HEALTH_SCRIPT}"
-  info "ssh, Ansible and repository deployment helpers are available."
+  require_command ssh
+  require_command stat
+  require_executable "${DEPLOY_SCRIPT}"
+  require_executable "${HEALTH_SCRIPT}"
+  require_executable "${KEYCLOAK_BOOTSTRAP}"
+  require_executable "${KEYCLOAK_READINESS}"
 }
 
 choose_deployment_tier() {
-  heading "Choose deployment tier"
-  cat <<'EOF'
+  cat <<'MENU'
 
-  1) Tier-1 deployment
-     Creates or replaces an independent Tier-1 workshop inventory and configuration.
+Choose deployment tier:
+  1) Tier-1
+  2) Tier-2
+MENU
 
-  2) Tier-2 deployment
-     Creates or replaces an independent Tier-2 workshop inventory and configuration.
-EOF
-  prompt_choice DEPLOYMENT_TIER "Deployment tier" "1" 1 2
-  if [ "${DEPLOYMENT_TIER}" = "1" ]; then
+  local choice
+  prompt_choice choice "Deployment tier" "1" 1 2
+
+  if [[ "$choice" == "1" ]]; then
     DEPLOYMENT_TIER="tier1"
   else
     DEPLOYMENT_TIER="tier2"
   fi
-}
 
-set_deployment_paths() {
   WORKSHOP_DIR="${WORKSHOP_ROOT}/${DEPLOYMENT_TIER}"
   INVENTORY="${WORKSHOP_DIR}/hosts.ini"
   VARS_DIR="${WORKSHOP_DIR}/group_vars"
@@ -210,170 +193,213 @@ set_deployment_paths() {
 }
 
 choose_profile() {
-  heading "Choose deployment profile"
-  cat <<'EOF'
+  cat <<'MENU'
 
-  1) Basic workshop (recommended)
-     Direct IP/hostname access, self-signed TLS, JupyterHub dummy login,
-     and local-path storage. No DNS, external identity provider or shared
-     storage is required.
+Choose deployment profile:
+  1) Basic workshop
+     Self-signed TLS and JupyterHub dummy login.
 
-  2) Advanced deployment
-     Lets you choose TLS, optional OIDC authentication and storage class.
-EOF
-  prompt_choice PROFILE "Profile" "1" 1 2
+  2) Managed-Keycloak OIDC
+     Trusted TLS, PostgreSQL, Keycloak, and JupyterHub OIDC.
+MENU
 
-  if [ "${PROFILE}" = "1" ]; then
+  local choice
+  prompt_choice choice "Deployment profile" "1" 1 2
+
+  if [[ "$choice" == "1" ]]; then
+    PROFILE="basic"
     TLS_MODE="selfsigned"
-    OIDC_ENABLED="false"
-    STORAGE_CLASS="local-path"
+    IDENTITY_ENABLED="false"
     return 0
   fi
 
-  heading "Advanced options"
-  echo "TLS mode: 1) self-signed  2) Let's Encrypt  3) provided certificate  4) none"
-  local tls_choice
-  prompt_choice tls_choice "TLS mode" "1" 1 2 3 4
-  case "${tls_choice}" in
-    1) TLS_MODE="selfsigned" ;;
-    2)
+  PROFILE="managed-keycloak-oidc"
+  IDENTITY_ENABLED="true"
+
+  cat <<'MENU'
+
+Managed-Keycloak OIDC requires trusted HTTPS:
+  1) Let's Encrypt
+  2) Provided TLS certificate
+MENU
+
+  prompt_choice choice "Trusted TLS mode" "1" 1 2
+  case "$choice" in
+    1)
       TLS_MODE="letsencrypt"
       prompt_required TLS_ACME_EMAIL "ACME registration email"
       ;;
-    3)
+    2)
       TLS_MODE="provided"
-      prompt_required TLS_CERT_DIR "Control-machine directory containing tls.crt and tls.key"
-      [ -f "${TLS_CERT_DIR}/tls.crt" ] || die "Missing ${TLS_CERT_DIR}/tls.crt"
-      [ -f "${TLS_CERT_DIR}/tls.key" ] || die "Missing ${TLS_CERT_DIR}/tls.key"
+      prompt_required TLS_CERT_DIR \
+        "Control-machine directory containing tls.crt and tls.key"
+      [[ -f "${TLS_CERT_DIR}/tls.crt" ]] ||
+        die "Missing ${TLS_CERT_DIR}/tls.crt"
+      [[ -f "${TLS_CERT_DIR}/tls.key" ]] ||
+        die "Missing ${TLS_CERT_DIR}/tls.key"
       ;;
-    4) TLS_MODE="none" ;;
   esac
-
-  if confirm "Enable Keycloak/OpenID Connect authentication?"; then
-    OIDC_ENABLED="true"
-    prompt_required OIDC_ISSUER_URL "OIDC issuer URL"
-    prompt_required OIDC_CLIENT_ID "OIDC client ID"
-    read -r -s -p "OIDC client secret: " OIDC_CLIENT_SECRET
-    printf '\n'
-    [ -n "${OIDC_CLIENT_SECRET}" ] || die "An OIDC client secret is required when OIDC is enabled."
-  fi
 
   prompt_required STORAGE_CLASS "Kubernetes StorageClass" "local-path"
 }
 
 collect_topology() {
-  heading "${DEPLOYMENT_TIER^} workshop topology"
-  echo "Enter the address used by Ansible to reach each VM."
+  prompt_required CENTRAL_HOST \
+    "Central ${DEPLOYMENT_TIER^} server hostname or IP"
 
-  prompt_required CENTRAL_HOST "Central ${DEPLOYMENT_TIER^} server hostname or IP"
-  validate_host_or_die "${CENTRAL_HOST}"
+  validate_host "$CENTRAL_HOST" ||
+    die "Invalid central host: ${CENTRAL_HOST}"
 
   prompt_required SSH_USER "SSH username" "adam"
-  validate_identifier "${SSH_USER}" || die "Invalid SSH username: ${SSH_USER}"
+  validate_identifier "$SSH_USER" ||
+    die "Invalid SSH username: ${SSH_USER}"
 
-  # The bundled Flower bootstrap uses /home/adam and owner/group adam.
-  if [ "${SSH_USER}" != "adam" ]; then
-    die "This repository's Flower bootstrap is tied to the Linux account 'adam' (/home/adam). Use adam, or generalise the workshop roles first."
-  fi
+  [[ "$SSH_USER" == "adam" ]] ||
+    die "The current workshop roles require the Linux account adam."
 
   prompt_required ADMIN_USER "JupyterHub administrator username" "admin"
-  validate_identifier "${ADMIN_USER}" || die "Invalid JupyterHub administrator username: ${ADMIN_USER}"
+  validate_identifier "$ADMIN_USER" ||
+    die "Invalid JupyterHub administrator username: ${ADMIN_USER}"
 
   local workers_line worker
   while true; do
-    read -r -p "Worker VM hostnames or IPs (space-separated; at least two): " workers_line
-    read -r -a WORKER_HOSTS <<< "${workers_line}"
-    [ "${#WORKER_HOSTS[@]}" -ge 2 ] || {
-      warn "At least two workers are required for the Flower workflow demonstration."
+    read -r -p \
+      "Worker VM hostnames or IPs (space-separated; at least two): " \
+      workers_line
+    read -r -a WORKER_HOSTS <<< "$workers_line"
+
+    [[ "${#WORKER_HOSTS[@]}" -ge 2 ]] || {
+      warn "At least two worker VMs are required."
       continue
     }
 
     for worker in "${WORKER_HOSTS[@]}"; do
-      validate_host "${worker}" || die "Invalid worker host value: ${worker}"
-      [ "${worker}" != "${CENTRAL_HOST}" ] || die "A worker cannot be the same as the central server."
+      validate_host "$worker" || die "Invalid worker host: ${worker}"
+      [[ "$worker" != "$CENTRAL_HOST" ]] ||
+        die "A worker cannot equal the central host."
     done
 
-    if [ "$(printf '%s\n' "${WORKER_HOSTS[@]}" | sort -u | wc -l)" \
-      -ne "${#WORKER_HOSTS[@]}" ]; then
+    [[ "$(printf '%s\n' "${WORKER_HOSTS[@]}" | sort -u | wc -l)" \
+      -eq "${#WORKER_HOSTS[@]}" ]] || {
       warn "Each worker must be listed only once."
       continue
-    fi
+    }
+
     break
   done
 
-  prompt_required PUBLIC_HOST "Public JupyterHub hostname or IP" "${CENTRAL_HOST}"
-  validate_host_or_die "${PUBLIC_HOST}"
+  prompt_required PUBLIC_HOST \
+    "Public hostname or IP for JupyterHub and Keycloak" "${CENTRAL_HOST}"
 
-  prompt_required WORKSHOP_TIMEZONE "Timezone for the workshop VMs" "${WORKSHOP_TIMEZONE}"
+  validate_host "$PUBLIC_HOST" ||
+    die "Invalid public host: ${PUBLIC_HOST}"
+
+  if [[ "$IDENTITY_ENABLED" == "true" &&
+        "$TLS_MODE" == "letsencrypt" &&
+        "$PUBLIC_HOST" =~ ^[0-9.]+$ ]]; then
+    die "Let's Encrypt requires a DNS hostname, not an IPv4 address."
+  fi
+
+  prompt_required WORKSHOP_TIMEZONE \
+    "Timezone for workshop VMs" "${WORKSHOP_TIMEZONE}"
 }
 
 check_ssh_access() {
-  heading "Checking SSH access"
   local host
-  local -a hosts=("${CENTRAL_HOST}" "${WORKER_HOSTS[@]}")
 
-  for host in "${hosts[@]}"; do
-    printf 'Checking %s@%s ... ' "${SSH_USER}" "${host}"
-    if ssh \
-      -o BatchMode=yes \
-      -o ConnectTimeout=10 \
+  for host in "$CENTRAL_HOST" "${WORKER_HOSTS[@]}"; do
+    printf 'Checking %s@%s ... ' "$SSH_USER" "$host"
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 \
       -o StrictHostKeyChecking=accept-new \
       "${SSH_USER}@${host}" true; then
       printf 'OK\n'
     else
       printf 'FAILED\n'
-      cat >&2 <<EOF
-SSH key authentication failed for ${SSH_USER}@${host}.
-
-Add the public key of this Ansible control machine to that VM's:
-  /home/${SSH_USER}/.ssh/authorized_keys
-
-Do not copy a private key to the VM. Fix SSH access and run the wizard again.
-EOF
-      exit 1
+      die "SSH key authentication failed for ${SSH_USER}@${host}"
     fi
   done
-  info "SSH key authentication works for the central server and all workers."
+}
+
+prepare_keycloak_admin_password() {
+  [[ "$IDENTITY_ENABLED" == "true" ]] || return 0
+
+  KEYCLOAK_ADMIN_PASSWORD_FILE="${REPO_ROOT}/secrets/keycloak/${PUBLIC_HOST}/${KEYCLOAK_REALM}/master-admin.password"
+
+  if [[ -f "$KEYCLOAK_ADMIN_PASSWORD_FILE" ]]; then
+    [[ "$(stat -c '%a' "$KEYCLOAK_ADMIN_PASSWORD_FILE")" == "600" ]] ||
+      die "Existing Keycloak password file must have mode 0600: ${KEYCLOAK_ADMIN_PASSWORD_FILE}"
+    info "Retaining existing protected Keycloak administrator password record."
+    return 0
+  fi
+
+  local password confirmation
+  read -r -s -p \
+    "Initial Keycloak master administrator password: " password
+  printf '\n'
+  read -r -s -p "Repeat Keycloak master administrator password: " confirmation
+  printf '\n'
+
+  [[ -n "$password" ]] || die "Keycloak administrator password must not be empty."
+  [[ "$password" == "$confirmation" ]] ||
+    die "Keycloak administrator passwords do not match."
+
+  umask 077
+  mkdir -p "$(dirname "$KEYCLOAK_ADMIN_PASSWORD_FILE")"
+  chmod 700 "$(dirname "$KEYCLOAK_ADMIN_PASSWORD_FILE")"
+  printf '%s\n' "$password" > "$KEYCLOAK_ADMIN_PASSWORD_FILE"
+  chmod 600 "$KEYCLOAK_ADMIN_PASSWORD_FILE"
+  unset password confirmation
 }
 
 write_inventory() {
-  mkdir -p "${VARS_DIR}"
-  cat > "${INVENTORY}" <<EOF
+  mkdir -p "$VARS_DIR"
+
+  cat > "$INVENTORY" <<EOF_INVENTORY
 # Generated by scripts/admin/setup-wizard.sh. Do not commit this local file.
 [${DEPLOYMENT_TIER}_server]
 ${DEPLOYMENT_TIER}-server ansible_host=${CENTRAL_HOST}
 
 [${DEPLOYMENT_TIER}_agents]
-EOF
+EOF_INVENTORY
 
-  local index=1
-  local worker
+  local index=1 worker
   for worker in "${WORKER_HOSTS[@]}"; do
     printf '%s-worker-%s ansible_host=%s\n' \
-      "${DEPLOYMENT_TIER}" "${index}" "${worker}" >> "${INVENTORY}"
+      "$DEPLOYMENT_TIER" "$index" "$worker" >> "$INVENTORY"
     index=$((index + 1))
   done
 
-  cat >> "${INVENTORY}" <<EOF
+  cat >> "$INVENTORY" <<EOF_INVENTORY
 
 [all:vars]
 ansible_user=${SSH_USER}
 ansible_become=true
-EOF
+EOF_INVENTORY
 }
 
 write_variables() {
   local scheme="https"
-  [ "${TLS_MODE}" = "none" ] && scheme="http"
+  local oidc_issuer_url=""
+  local oidc_client_id=""
+  local oidc_client_secret_file=""
+  local oidc_identity_namespace=""
 
-  cat > "${VARS_FILE}" <<EOF
+  if [[ "$IDENTITY_ENABLED" == "true" ]]; then
+    oidc_issuer_url="${scheme}://${PUBLIC_HOST}/keycloak/realms/${KEYCLOAK_REALM}"
+    oidc_client_id="jupyterhub"
+    oidc_client_secret_file="${REPO_ROOT}/secrets/keycloak/${PUBLIC_HOST}/${KEYCLOAK_REALM}/jupyterhub-client.secret"
+    oidc_identity_namespace="${KEYCLOAK_NAMESPACE}"
+  fi
+
+  cat > "$VARS_FILE" <<EOF_VARIABLES
 # Generated by scripts/admin/setup-wizard.sh. Do not commit this local file.
-# Profile: $([ "${PROFILE}" = "1" ] && printf 'basic workshop' || printf 'advanced')
-timezone: "${WORKSHOP_TIMEZONE}"
+# Profile: ${PROFILE}
+timezone: $(yaml_dq "${WORKSHOP_TIMEZONE}")
 
 ${DEPLOYMENT_TIER}:
+  profile: $(yaml_dq "${PROFILE}")
   expose_mode: "ingress"
-  tls_mode: "${TLS_MODE}"
+  tls_mode: $(yaml_dq "${TLS_MODE}")
   k3s_version: "v1.30.4+k3s1"
   k3s_server_host: "${DEPLOYMENT_TIER}-server"
   k3s_cluster_cidr: "10.42.0.0/16"
@@ -393,101 +419,127 @@ ${DEPLOYMENT_TIER}:
     mlflow_artifact_root: "/opt/digitafrica/mlflow/artifacts"
     mlflow_auth: false
   grafana_enabled: false
-EOF
+EOF_VARIABLES
 
-  case "${TLS_MODE}" in
+  case "$TLS_MODE" in
     letsencrypt)
-      printf '  tls_acme_email: %s\n' "$(yaml_dq "${TLS_ACME_EMAIL}")" >> "${VARS_FILE}"
+      printf '  tls_acme_email: %s\n' \
+        "$(yaml_dq "${TLS_ACME_EMAIL}")" >> "$VARS_FILE"
       ;;
     provided)
-      printf '  tls_cert_dir: %s\n' "$(yaml_dq "${TLS_CERT_DIR}")" >> "${VARS_FILE}"
+      printf '  tls_cert_dir: %s\n' \
+        "$(yaml_dq "${TLS_CERT_DIR}")" >> "$VARS_FILE"
       ;;
   esac
 
-  cat >> "${VARS_FILE}" <<EOF
+  if [[ "$IDENTITY_ENABLED" == "true" ]]; then
+    cat >> "$VARS_FILE" <<EOF_IDENTITY
+
+  identity:
+    enabled: true
+    namespace: $(yaml_dq "${KEYCLOAK_NAMESPACE}")
+    realm: $(yaml_dq "${KEYCLOAK_REALM}")
+    admin_user: $(yaml_dq "${KEYCLOAK_ADMIN_USER}")
+    bootstrap_admin_password_file: $(yaml_dq "${KEYCLOAK_ADMIN_PASSWORD_FILE}")
+    keycloak_public_url: $(yaml_dq "${scheme}://${PUBLIC_HOST}/keycloak")
+    postgres_storage_class: $(yaml_dq "${STORAGE_CLASS}")
+    postgres_storage_size: "10Gi"
+EOF_IDENTITY
+  fi
+
+  cat >> "$VARS_FILE" <<EOF_OIDC
 
 oidc:
-  oidc_enabled: ${OIDC_ENABLED}
-EOF
+  oidc_enabled: ${IDENTITY_ENABLED}
+  oidc_issuer_url: $(yaml_dq "${oidc_issuer_url}")
+  oidc_client_id: $(yaml_dq "${oidc_client_id}")
+  oidc_client_secret_file: $(yaml_dq "${oidc_client_secret_file}")
+  oidc_identity_namespace: $(yaml_dq "${oidc_identity_namespace}")
+  oidc_scope:
+    - "openid"
+    - "profile"
+    - "email"
+  oidc_username_claim: "preferred_username"
+  oidc_groups_claim: "groups"
+  oidc_tls_verify: ${IDENTITY_ENABLED}
+EOF_OIDC
 
-  if [ "${OIDC_ENABLED}" = "true" ]; then
-    cat >> "${VARS_FILE}" <<EOF
-  oidc_issuer_url: $(yaml_dq "${OIDC_ISSUER_URL}")
-  oidc_client_id: $(yaml_dq "${OIDC_CLIENT_ID}")
-  oidc_client_secret: $(yaml_dq "${OIDC_CLIENT_SECRET}")
-  oidc_scope:
-    - "openid"
-    - "profile"
-    - "email"
-  oidc_username_claim: "preferred_username"
-  oidc_tls_verify: true
-EOF
-    chmod 600 "${VARS_FILE}"
+  chmod 600 "$VARS_FILE"
+}
+
+run_managed_oidc_deployment() {
+  local keycloak_url jupyterhub_url secret_root
+
+  keycloak_url="https://${PUBLIC_HOST}/keycloak"
+  jupyterhub_url="https://${PUBLIC_HOST}/jupyter"
+  secret_root="${REPO_ROOT}/secrets/keycloak/${PUBLIC_HOST}/${KEYCLOAK_REALM}"
+
+  DIGITAFRICA_INVENTORY="$INVENTORY" \
+    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" identity
+
+  "$KEYCLOAK_READINESS" \
+    --server-url "$keycloak_url" \
+    --realm master \
+    --timeout-seconds 600
+
+  KEYCLOAK_ADMIN_PASSWORD_FILE="$KEYCLOAK_ADMIN_PASSWORD_FILE" \
+    "$KEYCLOAK_BOOTSTRAP" \
+      --server-url "$keycloak_url" \
+      --realm "$KEYCLOAK_REALM" \
+      --admin-user "$KEYCLOAK_ADMIN_USER" \
+      --realm-manager-secret-output \
+        "${secret_root}/realm-manager-client.secret" \
+      --jupyterhub-client-id "jupyterhub" \
+      --jupyterhub-secret-output \
+        "${secret_root}/jupyterhub-client.secret" \
+      --jupyterhub-redirect-uri \
+        "${jupyterhub_url}/hub/oauth_callback" \
+      --jupyterhub-web-origin "https://${PUBLIC_HOST}"
+
+  DIGITAFRICA_INVENTORY="$INVENTORY" \
+    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" applications
+}
+
+run_deployment() {
+  if [[ "$IDENTITY_ENABLED" == "true" ]]; then
+    run_managed_oidc_deployment
   else
-    cat >> "${VARS_FILE}" <<'EOF'
-  oidc_issuer_url: ""
-  oidc_client_id: ""
-  oidc_client_secret: ""
-  oidc_scope:
-    - "openid"
-    - "profile"
-    - "email"
-  oidc_username_claim: "preferred_username"
-  oidc_tls_verify: false
-EOF
+    DIGITAFRICA_INVENTORY="$INVENTORY" \
+      "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" full
+  fi
+
+  if confirm "Run the read-only health check now?"; then
+    DIGITAFRICA_INVENTORY="$INVENTORY" \
+    DIGITAFRICA_DEPLOYMENT_GROUP="${DEPLOYMENT_TIER}_server" \
+      "$HEALTH_SCRIPT" all
   fi
 }
 
 show_summary() {
-  heading "Workshop deployment summary"
-  printf 'Deployment tier     : %s\n' "${DEPLOYMENT_TIER}"
-  printf 'Central k3s server  : %s\n' "${CENTRAL_HOST}"
-  printf 'New worker nodes    : %s\n' "${#WORKER_HOSTS[@]}"
-  printf 'SSH user            : %s\n' "${SSH_USER}"
-  printf 'Inventory           : %s\n' "${INVENTORY}"
+  printf '\nDeployment tier : %s\n' "$DEPLOYMENT_TIER"
+  printf 'Profile         : %s\n' "$PROFILE"
+  printf 'Central server  : %s\n' "$CENTRAL_HOST"
+  printf 'Public host     : %s\n' "$PUBLIC_HOST"
+  printf 'TLS mode        : %s\n' "$TLS_MODE"
+  printf 'Inventory       : %s\n' "$INVENTORY"
+  printf 'Variables       : %s\n' "$VARS_FILE"
 
-  printf 'JupyterHub URL      : %s://%s/jupyter/\n' \
-    "$([ "${TLS_MODE}" = "none" ] && printf http || printf https)" "${PUBLIC_HOST}"
-  printf 'TLS                 : %s\n' "${TLS_MODE}"
-  printf 'Authentication      : %s\n' \
-    "$([ "${OIDC_ENABLED}" = true ] && printf OIDC || printf 'workshop dummy login')"
-  printf 'Storage class       : %s\n' "${STORAGE_CLASS}"
-  printf 'Variables           : %s\n' "${VARS_FILE}"
-
-  if [ "${TLS_MODE}" = "selfsigned" ]; then
-    warn "Participants will see a browser certificate warning. Verify the URL with them before they continue."
-  fi
-  if [ "${OIDC_ENABLED}" = "false" ]; then
-    warn "Dummy login is suitable only for a controlled workshop, not for sensitive data or open access."
-  fi
-}
-
-run_optional_actions() {
-  if ! confirm "Run the ${DEPLOYMENT_TIER} deployment now?"; then
-    echo
-    echo "Configuration is ready. Deploy later with:"
-    printf '  DIGITAFRICA_INVENTORY=%q %q %s\n' \
-      "${INVENTORY}" "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
-    return 0
-  fi
-
-  DIGITAFRICA_INVENTORY="${INVENTORY}" \
-    "${DEPLOY_SCRIPT}" "${DEPLOYMENT_TIER}"
-
-  if confirm "Run the read-only health check now?"; then
-    DIGITAFRICA_INVENTORY="${INVENTORY}" \
-      DIGITAFRICA_DEPLOYMENT_GROUP="${DEPLOYMENT_TIER}_server" \
-      "${HEALTH_SCRIPT}" all
+  if [[ "$IDENTITY_ENABLED" == "true" ]]; then
+    printf 'Keycloak URL    : https://%s/keycloak\n' "$PUBLIC_HOST"
+    printf 'JupyterHub URL  : https://%s/jupyter\n' "$PUBLIC_HOST"
   fi
 }
 
 main() {
   case "${1:-}" in
-    help|--help|-h)
-      usage
-      return 0
+    --deploy)
+      RUN_DEPLOYMENT="true"
       ;;
-    "")
+    ""|--configure)
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
       ;;
     *)
       usage >&2
@@ -495,30 +547,28 @@ main() {
       ;;
   esac
 
-  cd "${REPO_ROOT}"
-  heading "DIGITAfrica Edge-AI workshop setup wizard"
-  echo "This wizard configures an independent Tier-1 or Tier-2 workshop deployment."
-  echo
-
+  cd "$REPO_ROOT"
   check_prerequisites
   choose_deployment_tier
-  set_deployment_paths
   choose_profile
   collect_topology
   check_ssh_access
+  prepare_keycloak_admin_password
 
-  if ! confirm "Write the local workshop configuration?"; then
-    echo "No files were written."
-    return 0
+  if ! confirm "Write the local ${DEPLOYMENT_TIER} configuration?"; then
+    info "No files were written."
+    exit 0
   fi
 
   ensure_local_git_exclude
   write_inventory
   write_variables
-  info "Generated independent local ${DEPLOYMENT_TIER^} workshop inventory and variables."
-
   show_summary
-  run_optional_actions
+
+  if [[ "$RUN_DEPLOYMENT" == "true" ]] &&
+     confirm "Start the selected deployment now?"; then
+    run_deployment
+  fi
 }
 
 main "$@"

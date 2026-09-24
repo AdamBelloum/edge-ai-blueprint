@@ -1,4 +1,24 @@
-- name: Decide install vs uninstall
-  ansible.builtin.include_tasks: "{{ 'uninstall.yml' if (digitafrica_uninstall | default(false) | bool) else 'install.yml' }}"
+---
+# Identity is deliberately separate from workshop applications:
+#   identity     = Keycloak, PostgreSQL, TLS, ingress, readiness
+#   applications = JupyterHub, workshop assets, OIDC Secret, Helm release
+#
+# Full deployments execute both includes in this order.
+
+- name: Reconcile managed Keycloak identity infrastructure
+  ansible.builtin.include_tasks:
+    file: identity.yml
+    apply:
+      tags:
+        - identity
   tags:
-    - always
+    - identity
+
+- name: Reconcile workshop applications
+  ansible.builtin.include_tasks:
+    file: install.yml
+    apply:
+      tags:
+        - applications
+  tags:
+    - applications

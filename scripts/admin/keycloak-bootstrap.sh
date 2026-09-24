@@ -1,385 +1,456 @@
 #!/usr/bin/env bash
-# Reconcile the DIGITAfrica Keycloak realm integration for JupyterHub.
+# Reconcile a DIGITAfrica Keycloak realm and JupyterHub OIDC client.
 #
-# This script uses Keycloak's Admin REST API. It never prints an administrator
-# password, bearer token, or JupyterHub client secret. The client secret is
-# written only to the requested output file with mode 0600.
-#
-# version: 0.3.0
-#
+# This command is standalone. It may be invoked directly or by setup-wizard.sh.
+# It never prints passwords, access tokens, or client secrets.
+
 set -Eeuo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 
-SCRIPT_VERSION="0.3.0"
 SERVER_URL=""
+CA_CERT=""
 REALM="digitafrica"
-CLIENT_ID="jupyterhub"
-REDIRECT_URI=""
-WEB_ORIGIN=""
 ADMIN_REALM="master"
-ADMIN_USER=""
-ADMIN_CLIENT_ID=""
-ADMIN_CLIENT_SECRET_FILE=""
-ADMIN_CLIENT_SECRET=""
-CLIENT_SECRET_OUTPUT=""
-GROUP_SCOPE_NAME="jupyterhub-groups"
+ADMIN_USER="admin"
+REALM_MANAGER_CLIENT_ID="realm-manager"
+REALM_MANAGER_SECRET_OUTPUT=""
+JUPYTERHUB_CLIENT_ID="jupyterhub"
+JUPYTERHUB_SECRET_OUTPUT=""
+JUPYTERHUB_REDIRECT_URI=""
+JUPYTERHUB_WEB_ORIGIN=""
+ROTATE_REALM_MANAGER_SECRET="false"
+ROTATE_JUPYTERHUB_SECRET="false"
 
+MASTER_TOKEN=""
+MANAGER_TOKEN=""
 ADMIN_PASSWORD=""
-ACCESS_TOKEN=""
 
-info() { printf '[INFO] %s\n' "$*"; }
+info() { printf '[INFO] %s\n' "$*" >&2; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  cat <<EOF
+  cat <<USAGE
 Usage:
-  ${SCRIPT_NAME} --server-url URL --realm NAME --client-id ID \\
-    --redirect-uri URL --web-origin URL --client-secret-output FILE \
-    [authentication options] [options]
+  ${SCRIPT_NAME} --server-url URL --realm NAME [OPTIONS]
 
 Required:
-  --server-url URL             Keycloak public base URL, e.g. https://host/keycloak
-  --redirect-uri URL           Exact JupyterHub OAuth callback URL
-  --web-origin URL             Public browser origin, e.g. https://host
-  --client-secret-output FILE  Destination for the JupyterHub client secret
+  --server-url URL                    Trusted public Keycloak base URL.
+  --jupyterhub-redirect-uri URL       JupyterHub OAuth callback URL.
+  --jupyterhub-web-origin URL         Public JupyterHub web origin.
 
-Optional:
-  --realm NAME                 Target realm (default: digitafrica)
-  --client-id ID               JupyterHub confidential client ID (default: jupyterhub)
-  --admin-client-id ID         Service-account client ID in the target realm
-  --admin-client-secret-file FILE
-                               Readable mode-0600 file containing its secret
-  --admin-realm NAME           Realm containing the administrator (default: master)
-  --group-scope-name NAME      Default groups scope name (default: jupyterhub-groups)
-  --version                    Print the script version
-  -h, --help                   Show this help
+Options:
+  --ca-cert FILE                      Additional trusted CA certificate.
+  --realm NAME                        Target realm; default: digitafrica.
+  --admin-realm NAME                  Initial administrator realm; default: master.
+  --admin-user NAME                   Initial administrator user; default: admin.
+  --realm-manager-client-id ID        Default: realm-manager.
+  --realm-manager-secret-output FILE  Protected local output path.
+  --jupyterhub-client-id ID           Default: jupyterhub.
+  --jupyterhub-secret-output FILE     Protected local output path.
+  --rotate-realm-manager-secret       Deliberately rotate that secret.
+  --rotate-jupyterhub-secret          Deliberately rotate that secret.
+  -h, --help                          Show this help.
 
-Authentication — choose one method:
-
-  Service account (recommended):
-  Supply both --admin-client-id and --admin-client-secret-file.
-
-  Administrator fallback:
-  Supply --admin-user. The script prompts for its password without echoing it.
-  Alternatively, set KEYCLOAK_ADMIN_PASSWORD_FILE to a readable mode-0600 file.
-  Passwords and client secrets are never logged or stored by this script.
-EOF
+Authentication:
+  Set KEYCLOAK_ADMIN_PASSWORD_FILE to an existing mode-0600 password file,
+  or enter the initial master-administrator password interactively.
+USAGE
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+  command -v "$1" >/dev/null 2>&1 ||
+    die "Required command not found: $1"
 }
 
-require_nonempty() {
-  local option="$1" value="$2"
-  [[ -n "$value" ]] || die "Missing required option: ${option}"
+urlencode() {
+  jq -rn --arg value "$1" '$value | @uri'
 }
 
-require_https_url() {
-  local option="$1" value="$2"
-  [[ "$value" =~ ^https://[^[:space:]]+$ ]] || die "${option} must be an https URL."
+curl_args() {
+  local -a args=(--fail-with-body --silent --show-error)
+  [[ -n "$CA_CERT" ]] && args+=(--cacert "$CA_CERT")
+  printf '%s\0' "${args[@]}"
 }
 
-json_error_message() {
-  local body_file="$1"
-  jq -r '.error_description // .errorMessage // .error // "no error message returned"' "$body_file" 2>/dev/null ||
-    printf 'no parseable error message returned'
+curl_request() {
+  local -a args=()
+  while IFS= read -r -d '' arg; do args+=("$arg"); done < <(curl_args)
+  curl "${args[@]}" "$@"
 }
 
-# Writes successful response bodies to stdout. It intentionally does not print
-# request payloads, credentials, access tokens, or client secrets.
-api() {
-  local method="$1" path="$2" payload="${3:-}"
-  local body_file http_status curl_args=()
+validate_inputs() {
+  [[ "$SERVER_URL" =~ ^https://[^[:space:]]+$ ]] ||
+    die "--server-url must be an HTTPS URL."
+  [[ "$REALM" =~ ^[A-Za-z0-9._-]+$ ]] ||
+    die "Invalid realm name."
+  [[ "$ADMIN_REALM" =~ ^[A-Za-z0-9._-]+$ ]] ||
+    die "Invalid administrator realm."
+  [[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]+$ ]] ||
+    die "Invalid administrator username."
+  [[ -n "$JUPYTERHUB_REDIRECT_URI" ]] ||
+    die "--jupyterhub-redirect-uri is required."
+  [[ -n "$JUPYTERHUB_WEB_ORIGIN" ]] ||
+    die "--jupyterhub-web-origin is required."
+  [[ "$JUPYTERHUB_REDIRECT_URI" =~ ^https:// ]] ||
+    die "JupyterHub redirect URI must use HTTPS."
+  [[ "$JUPYTERHUB_WEB_ORIGIN" =~ ^https:// ]] ||
+    die "JupyterHub web origin must use HTTPS."
+  [[ -z "$CA_CERT" || -r "$CA_CERT" ]] ||
+    die "CA certificate is not readable: ${CA_CERT}"
 
-  body_file="$(mktemp)"
-  curl_args=(
-    --silent --show-error --output "$body_file" --write-out '%{http_code}'
-    --request "$method"
-    --header "Authorization: Bearer ${ACCESS_TOKEN}"
-    --header 'Accept: application/json'
-  )
-  if [[ -n "$payload" ]]; then
-    curl_args+=(--header 'Content-Type: application/json' --data "$payload")
-  fi
-
-  if ! http_status="$(curl "${curl_args[@]}" "${SERVER_URL}/${path}")"; then
-    rm -f "$body_file"
-    die "Keycloak request failed: ${method} /${path}"
-  fi
-  if [[ "$http_status" != 2* ]]; then
-    local message
-    message="$(json_error_message "$body_file")"
-    rm -f "$body_file"
-    die "Keycloak returned HTTP ${http_status} for ${method} /${path}: ${message}"
-  fi
-  cat "$body_file"
-  rm -f "$body_file"
+  SERVER_URL="${SERVER_URL%/}"
+  [[ -n "$REALM_MANAGER_SECRET_OUTPUT" ]] ||
+    REALM_MANAGER_SECRET_OUTPUT="secrets/keycloak/${REALM}/realm-manager-client.secret"
+  [[ -n "$JUPYTERHUB_SECRET_OUTPUT" ]] ||
+    JUPYTERHUB_SECRET_OUTPUT="secrets/keycloak/${REALM}/jupyterhub-client.secret"
 }
 
-resource_exists() {
-  local path="$1" body_file http_status
-  body_file="$(mktemp)"
-  if ! http_status="$(curl --silent --show-error --output "$body_file" --write-out '%{http_code}' \
-    --header "Authorization: Bearer ${ACCESS_TOKEN}" \
-    --header 'Accept: application/json' \
-    "${SERVER_URL}/${path}")"; then
-    rm -f "$body_file"
-    die "Keycloak request failed: GET /${path}"
-  fi
-  case "$http_status" in
-    2*) cat "$body_file"; rm -f "$body_file"; return 0 ;;
-    404) rm -f "$body_file"; return 1 ;;
-    *)
-      local message
-      message="$(json_error_message "$body_file")"
-      rm -f "$body_file"
-      die "Keycloak returned HTTP ${http_status} for GET /${path}: ${message}"
-      ;;
-  esac
-}
-
-urlencode() { jq -rn --arg value "$1" '$value | @uri'; }
-
-obtain_access_token() {
-  local token_response token_endpoint token_body http_status message
-
-  token_endpoint="${SERVER_URL}/realms/${ADMIN_REALM}/protocol/openid-connect/token"
-  token_body="$(mktemp)"
-
-  if ! http_status="$(curl --silent --show-error \
-    --output "$token_body" --write-out '%{http_code}' \
-    --request POST "$token_endpoint" \
-    --header 'Content-Type: application/x-www-form-urlencoded' \
-    --data 'grant_type=password' \
-    --data 'client_id=admin-cli' \
-    --data-urlencode "username=${ADMIN_USER}" \
-    --data-urlencode "password=${ADMIN_PASSWORD}")"; then
-    rm -f "$token_body"
-    die "Could not reach the Keycloak token endpoint."
-  fi
-
-  if [[ "$http_status" != 2* ]]; then
-    message="$(json_error_message "$token_body")"
-    rm -f "$token_body"
-    die "Keycloak administrator token request returned HTTP ${http_status}: ${message}"
-  fi
-
-  token_response="$(<"$token_body")"
-  rm -f "$token_body"
-
-  ACCESS_TOKEN="$(jq -er '.access_token' <<<"$token_response")" \
-    || die "Keycloak token response did not contain an access token."
+verify_discovery() {
+  local endpoint="${SERVER_URL}/realms/master/.well-known/openid-configuration"
+  info "Verifying trusted Keycloak HTTPS endpoint."
+  curl_request "$endpoint" | jq -e '.issuer and .token_endpoint' >/dev/null ||
+    die "Keycloak discovery is unavailable or does not present trusted TLS: ${endpoint}"
 }
 
 read_admin_password() {
   if [[ -n "${KEYCLOAK_ADMIN_PASSWORD_FILE:-}" ]]; then
-    [[ -r "${KEYCLOAK_ADMIN_PASSWORD_FILE}" ]] || die "KEYCLOAK_ADMIN_PASSWORD_FILE is not readable."
-    [[ "$(stat -c '%a' "${KEYCLOAK_ADMIN_PASSWORD_FILE}")" == "600" ]] ||
+    [[ -r "$KEYCLOAK_ADMIN_PASSWORD_FILE" ]] ||
+      die "KEYCLOAK_ADMIN_PASSWORD_FILE is not readable."
+    [[ "$(stat -c '%a' "$KEYCLOAK_ADMIN_PASSWORD_FILE")" == "600" ]] ||
       die "KEYCLOAK_ADMIN_PASSWORD_FILE must have mode 0600."
-    ADMIN_PASSWORD="$(<"${KEYCLOAK_ADMIN_PASSWORD_FILE}")"
+    ADMIN_PASSWORD="$(<"$KEYCLOAK_ADMIN_PASSWORD_FILE")"
   else
-    read -r -s -p "Keycloak administrator password for ${ADMIN_USER} in realm ${ADMIN_REALM}: " ADMIN_PASSWORD
+    read -r -s -p \
+      "Keycloak administrator password for ${ADMIN_USER} in ${ADMIN_REALM}: " \
+      ADMIN_PASSWORD
     printf '\n'
   fi
-  [[ -n "$ADMIN_PASSWORD" ]] || die "A Keycloak administrator password is required."
+
+  [[ -n "$ADMIN_PASSWORD" ]] ||
+    die "Keycloak administrator password must not be empty."
 }
 
+obtain_master_token() {
+  local response
+  response="$(
+    curl_request \
+      --request POST \
+      "${SERVER_URL}/realms/$(urlencode "$ADMIN_REALM")/protocol/openid-connect/token" \
+      --header 'Content-Type: application/x-www-form-urlencoded' \
+      --data 'grant_type=password' \
+      --data 'client_id=admin-cli' \
+      --data-urlencode "username=${ADMIN_USER}" \
+      --data-urlencode "password=${ADMIN_PASSWORD}"
+  )" || die "Initial administrator authentication failed."
 
-read_admin_client_secret() {
-  [[ -r "$ADMIN_CLIENT_SECRET_FILE" ]] ||
-    die "--admin-client-secret-file is not readable."
-  [[ "$(stat -c '%a' "$ADMIN_CLIENT_SECRET_FILE")" == "600" ]] ||
-    die "--admin-client-secret-file must have mode 0600."
-
-  ADMIN_CLIENT_SECRET="$(<"$ADMIN_CLIENT_SECRET_FILE")"
-  [[ -n "$ADMIN_CLIENT_SECRET" ]] ||
-    die "--admin-client-secret-file must not be empty."
+  MASTER_TOKEN="$(jq -er '.access_token' <<<"$response")" ||
+    die "Token response did not contain an access token."
+  unset ADMIN_PASSWORD
 }
 
-obtain_client_access_token() {
-  local token_response token_endpoint token_body http_status message
+api() {
+  local token="$1"
+  local method="$2"
+  local path="$3"
+  local payload="${4:-}"
+  local -a options=(
+    --request "$method"
+    --header "Authorization: Bearer ${token}"
+    --header 'Accept: application/json'
+  )
 
-  token_endpoint="${SERVER_URL}/realms/${REALM}/protocol/openid-connect/token"
-  token_body="$(mktemp)"
+  [[ -n "$payload" ]] &&
+    options+=(--header 'Content-Type: application/json' --data "$payload")
 
-  if ! http_status="$(curl --silent --show-error \
-    --output "$token_body" --write-out '%{http_code}' \
-    --request POST "$token_endpoint" \
-    --header 'Content-Type: application/x-www-form-urlencoded' \
-    --data 'grant_type=client_credentials' \
-    --data-urlencode "client_id=${ADMIN_CLIENT_ID}" \
-    --data-urlencode "client_secret=${ADMIN_CLIENT_SECRET}")"; then
-    rm -f "$token_body"
-    die "Could not reach the Keycloak token endpoint."
-  fi
+  curl_request "${options[@]}" "${SERVER_URL}/${path}"
+}
 
-  if [[ "$http_status" != 2* ]]; then
-    message="$(json_error_message "$token_body")"
-    rm -f "$token_body"
-    die "Keycloak service-account token request returned HTTP ${http_status}: ${message}"
-  fi
+api_exists() {
+  local token="$1"
+  local path="$2"
+  local status body
 
-  token_response="$(<"$token_body")"
-  rm -f "$token_body"
+  body="$(mktemp)"
+  status="$(
+    curl_request --output "$body" --write-out '%{http_code}' \
+      --header "Authorization: Bearer ${token}" \
+      --header 'Accept: application/json' \
+      "${SERVER_URL}/${path}" || true
+  )"
 
-  ACCESS_TOKEN="$(jq -er '.access_token' <<<"$token_response")" ||
-    die "Keycloak token response did not contain an access token."
+  case "$status" in
+    2*) cat "$body"; rm -f "$body"; return 0 ;;
+    404) rm -f "$body"; return 1 ;;
+    *) rm -f "$body"; die "Keycloak returned HTTP ${status} for GET /${path}" ;;
+  esac
+}
+
+client_uuid() {
+  local token="$1"
+  local client_id="$2"
+
+  api "$token" GET \
+    "admin/realms/$(urlencode "$REALM")/clients?clientId=$(urlencode "$client_id")" |
+    jq -er --arg id "$client_id" \
+      '.[] | select(.clientId == $id) | .id' | head -n 1
 }
 
 ensure_realm() {
-  if resource_exists "admin/realms/${REALM}" >/dev/null; then
+  if api_exists "$MASTER_TOKEN" \
+    "admin/realms/$(urlencode "$REALM")" >/dev/null; then
     info "Realm exists: ${REALM}"
-    return
+  else
+    info "Creating realm: ${REALM}"
+    api "$MASTER_TOKEN" POST admin/realms \
+      "$(jq -cn --arg realm "$REALM" '{realm:$realm,enabled:true}')" \
+      >/dev/null
   fi
-  info "Creating realm: ${REALM}"
-  api POST 'admin/realms' "$(jq -cn --arg realm "$REALM" '{realm: $realm, enabled: true}')" >/dev/null
-}
-
-find_client_uuid() {
-  local clients client_uuid
-  clients="$(api GET "admin/realms/${REALM}/clients?clientId=$(urlencode "$CLIENT_ID")")"
-  client_uuid="$(jq -er --arg client_id "$CLIENT_ID" '.[] | select(.clientId == $client_id) | .id' <<<"$clients" | head -n 1)" || return 1
-  printf '%s\n' "$client_uuid"
 }
 
 ensure_client() {
-  local client_uuid current desired
-  if client_uuid="$(find_client_uuid)"; then
-    info "Reconciling confidential OIDC client: ${CLIENT_ID}"
-    current="$(api GET "admin/realms/${REALM}/clients/${client_uuid}")"
-    desired="$(jq --arg redirect_uri "$REDIRECT_URI" --arg web_origin "$WEB_ORIGIN" --arg client_id "$CLIENT_ID" \
-      '.clientId = $client_id |
-       .name = "JupyterHub" |
-       .enabled = true |
-       .protocol = "openid-connect" |
-       .publicClient = false |
-       .standardFlowEnabled = true |
-       .directAccessGrantsEnabled = false |
-       .serviceAccountsEnabled = false |
-       .redirectUris = [$redirect_uri] |
-       .webOrigins = [$web_origin] |
-       .attributes = ((.attributes // {}) + {"pkce.code.challenge.method": "S256"})' <<<"$current")"
-    api PUT "admin/realms/${REALM}/clients/${client_uuid}" "$desired" >/dev/null
-  else
-    info "Creating confidential OIDC client: ${CLIENT_ID}"
-    desired="$(jq -cn --arg client_id "$CLIENT_ID" --arg redirect_uri "$REDIRECT_URI" --arg web_origin "$WEB_ORIGIN" \
-      '{clientId: $client_id, name: "JupyterHub", enabled: true, protocol: "openid-connect",
-        publicClient: false, standardFlowEnabled: true, directAccessGrantsEnabled: false,
-        serviceAccountsEnabled: false, redirectUris: [$redirect_uri], webOrigins: [$web_origin],
-        attributes: {"pkce.code.challenge.method": "S256"}}')"
-    api POST "admin/realms/${REALM}/clients" "$desired" >/dev/null
-    client_uuid="$(find_client_uuid)" || die "Created client ${CLIENT_ID}, but could not retrieve its internal ID."
-  fi
-  JUPYTERHUB_CLIENT_UUID="$client_uuid"
-}
+  local token="$1"
+  local client_id="$2"
+  local desired="$3"
+  local uuid current
 
-find_scope_uuid() {
-  local scopes scope_uuid
-  scopes="$(api GET "admin/realms/${REALM}/client-scopes")"
-  scope_uuid="$(jq -er --arg scope_name "$GROUP_SCOPE_NAME" '.[] | select(.name == $scope_name) | .id' <<<"$scopes" | head -n 1)" || return 1
-  printf '%s\n' "$scope_uuid"
-}
-
-ensure_groups_scope_and_mapper() {
-  local scope_uuid mapper_id mappers mapper
-  if scope_uuid="$(find_scope_uuid)"; then
-    info "Client scope exists: ${GROUP_SCOPE_NAME}"
+  if uuid="$(client_uuid "$token" "$client_id" 2>/dev/null)"; then
+    info "Reconciling client: ${client_id}"
+    current="$(api "$token" GET \
+      "admin/realms/$(urlencode "$REALM")/clients/${uuid}")"
+    api "$token" PUT \
+      "admin/realms/$(urlencode "$REALM")/clients/${uuid}" \
+      "$(jq --argjson desired "$desired" '. * $desired' <<<"$current")" \
+      >/dev/null
   else
-    info "Creating client scope: ${GROUP_SCOPE_NAME}"
-    api POST "admin/realms/${REALM}/client-scopes" "$(jq -cn --arg scope_name "$GROUP_SCOPE_NAME" \
-      '{name: $scope_name, protocol: "openid-connect", attributes: {"include.in.token.scope": "true", "display.on.consent.screen": "false"}}')" >/dev/null
-    scope_uuid="$(find_scope_uuid)" || die "Created scope ${GROUP_SCOPE_NAME}, but could not retrieve its internal ID."
+    info "Creating client: ${client_id}"
+    api "$token" POST \
+      "admin/realms/$(urlencode "$REALM")/clients" "$desired" >/dev/null
+    uuid="$(client_uuid "$token" "$client_id")" ||
+      die "Created ${client_id}, but could not retrieve its internal ID."
   fi
 
-  mappers="$(api GET "admin/realms/${REALM}/client-scopes/${scope_uuid}/protocol-mappers/models")"
-  mapper_id="$(jq -r '.[] | select(.name == "groups") | .id' <<<"$mappers" | head -n 1)"
-  mapper="$(jq -cn '{name: "groups", protocol: "openid-connect", protocolMapper: "oidc-group-membership-mapper", consentRequired: false, config: {"full.path": "false", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true", "claim.name": "groups"}}')"
+  printf '%s\n' "$uuid"
+}
 
-  if [[ -n "$mapper_id" && "$mapper_id" != "null" ]]; then
-    info "Reconciling groups protocol mapper."
-    mapper="$(jq --arg id "$mapper_id" '. + {id: $id}' <<<"$mapper")"
-    api PUT "admin/realms/${REALM}/client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_id}" "$mapper" >/dev/null
-  else
-    info "Creating groups protocol mapper."
-    api POST "admin/realms/${REALM}/client-scopes/${scope_uuid}/protocol-mappers/models" "$mapper" >/dev/null
+write_secret_if_needed() {
+  local token="$1"
+  local uuid="$2"
+  local output="$3"
+  local rotate="$4"
+  local secret temporary
+
+  if [[ -f "$output" && "$rotate" != "true" ]]; then
+    [[ "$(stat -c '%a' "$output")" == "600" ]] ||
+      die "Existing secret file must have mode 0600: ${output}"
+    info "Retaining existing protected secret record: ${output}"
+    return 0
   fi
 
-  if api GET "admin/realms/${REALM}/clients/${JUPYTERHUB_CLIENT_UUID}/default-client-scopes" |
-      jq -e --arg scope_id "$scope_uuid" '.[] | select(.id == $scope_id)' >/dev/null; then
-    info "Client scope is already assigned by default: ${GROUP_SCOPE_NAME}"
+  secret="$(
+    api "$token" POST \
+      "admin/realms/$(urlencode "$REALM")/clients/${uuid}/client-secret" |
+      jq -er '.value'
+  )" || die "Could not obtain client secret."
+
+  umask 077
+  mkdir -p "$(dirname "$output")"
+  chmod 700 "$(dirname "$output")"
+  temporary="$(mktemp "${output}.tmp.XXXXXX")"
+  printf '%s\n' "$secret" > "$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$output"
+  unset secret
+  info "Saved protected secret record: ${output}"
+}
+
+ensure_realm_manager_roles() {
+  local uuid="$1"
+  local service_account management_client mapping role
+
+  service_account="$(
+    api "$MASTER_TOKEN" GET \
+      "admin/realms/$(urlencode "$REALM")/clients/${uuid}/service-account-user" |
+      jq -er '.id'
+  )"
+
+  management_client="$(
+    api "$MASTER_TOKEN" GET \
+      "admin/realms/$(urlencode "$REALM")/clients?clientId=realm-management" |
+      jq -er '.[] | select(.clientId == "realm-management") | .id'
+  )"
+
+  mapping="$(
+    api "$MASTER_TOKEN" GET \
+      "admin/realms/$(urlencode "$REALM")/users/${service_account}/role-mappings/clients/${management_client}"
+  )"
+
+  for role in view-realm manage-users query-users view-users manage-clients query-clients; do
+    if jq -e --arg role "$role" \
+      '.[] | select(.name == $role)' <<<"$mapping" >/dev/null; then
+      continue
+    fi
+
+    info "Assigning realm-manager role: ${role}"
+    api "$MASTER_TOKEN" POST \
+      "admin/realms/$(urlencode "$REALM")/users/${service_account}/role-mappings/clients/${management_client}" \
+      "$(
+        api "$MASTER_TOKEN" GET \
+          "admin/realms/$(urlencode "$REALM")/clients/${management_client}/roles/$(urlencode "$role")" |
+          jq -c '[.]'
+      )" >/dev/null
+  done
+}
+
+obtain_manager_token() {
+  local secret response
+  secret="$(<"$REALM_MANAGER_SECRET_OUTPUT")"
+
+  response="$(
+    curl_request \
+      --request POST \
+      "${SERVER_URL}/realms/$(urlencode "$REALM")/protocol/openid-connect/token" \
+      --header 'Content-Type: application/x-www-form-urlencoded' \
+      --data 'grant_type=client_credentials' \
+      --data-urlencode "client_id=${REALM_MANAGER_CLIENT_ID}" \
+      --data-urlencode "client_secret=${secret}"
+  )" || die "realm-manager client-credentials authentication failed."
+
+  MANAGER_TOKEN="$(jq -er '.access_token' <<<"$response")" ||
+    die "realm-manager token response did not contain an access token."
+  unset secret
+}
+
+ensure_groups_mapper() {
+  local client_uuid="$1"
+  local mappers mapper_uuid desired
+
+  desired="$(
+    jq -cn '{
+      name:"groups",
+      protocol:"openid-connect",
+      protocolMapper:"oidc-group-membership-mapper",
+      config:{
+        "claim.name":"groups",
+        "full.path":"false",
+        "id.token.claim":"true",
+        "access.token.claim":"true",
+        "userinfo.token.claim":"true"
+      }
+    }'
+  )"
+
+  mappers="$(
+    api "$MANAGER_TOKEN" GET \
+      "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models"
+  )"
+
+  mapper_uuid="$(
+    jq -r '.[] | select(.name == "groups" and .protocolMapper == "oidc-group-membership-mapper") | .id' \
+      <<<"$mappers" | head -n 1
+  )"
+
+  if [[ -n "$mapper_uuid" && "$mapper_uuid" != "null" ]]; then
+    api "$MANAGER_TOKEN" PUT \
+      "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models/${mapper_uuid}" \
+      "$desired" >/dev/null
   else
-    info "Assigning default client scope: ${GROUP_SCOPE_NAME}"
-    api PUT "admin/realms/${REALM}/clients/${JUPYTERHUB_CLIENT_UUID}/default-client-scopes/${scope_uuid}" >/dev/null
+    api "$MANAGER_TOKEN" POST \
+      "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models" \
+      "$desired" >/dev/null
   fi
 }
 
-write_client_secret() {
-  local secret output_dir temp_file
-  secret="$(api GET "admin/realms/${REALM}/clients/${JUPYTERHUB_CLIENT_UUID}/client-secret" | jq -er '.value')" ||
-    die "Keycloak did not return a client secret for ${CLIENT_ID}."
-  output_dir="$(dirname "$CLIENT_SECRET_OUTPUT")"
-  mkdir -p "$output_dir"
-  temp_file="$(mktemp "${output_dir}/.${CLIENT_ID}.secret.XXXXXX")"
-  chmod 600 "$temp_file"
-  printf '%s\n' "$secret" >"$temp_file"
-  mv -f "$temp_file" "$CLIENT_SECRET_OUTPUT"
-  chmod 600 "$CLIENT_SECRET_OUTPUT"
-  info "Wrote JupyterHub client secret to ${CLIENT_SECRET_OUTPUT} (mode 0600)."
-}
+main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --server-url) SERVER_URL="${2:?missing URL}"; shift 2 ;;
+      --ca-cert) CA_CERT="${2:?missing certificate path}"; shift 2 ;;
+      --realm) REALM="${2:?missing realm}"; shift 2 ;;
+      --admin-realm) ADMIN_REALM="${2:?missing realm}"; shift 2 ;;
+      --admin-user) ADMIN_USER="${2:?missing user}"; shift 2 ;;
+      --realm-manager-client-id) REALM_MANAGER_CLIENT_ID="${2:?missing ID}"; shift 2 ;;
+      --realm-manager-secret-output) REALM_MANAGER_SECRET_OUTPUT="${2:?missing path}"; shift 2 ;;
+      --jupyterhub-client-id) JUPYTERHUB_CLIENT_ID="${2:?missing ID}"; shift 2 ;;
+      --jupyterhub-secret-output) JUPYTERHUB_SECRET_OUTPUT="${2:?missing path}"; shift 2 ;;
+      --jupyterhub-redirect-uri) JUPYTERHUB_REDIRECT_URI="${2:?missing URI}"; shift 2 ;;
+      --jupyterhub-web-origin) JUPYTERHUB_WEB_ORIGIN="${2:?missing origin}"; shift 2 ;;
+      --rotate-realm-manager-secret) ROTATE_REALM_MANAGER_SECRET="true"; shift ;;
+      --rotate-jupyterhub-secret) ROTATE_JUPYTERHUB_SECRET="true"; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown argument: $1" ;;
+    esac
+  done
 
-while (($#)); do
-  case "$1" in
-    --server-url) SERVER_URL="${2:-}"; shift 2 ;;
-    --realm) REALM="${2:-}"; shift 2 ;;
-    --client-id) CLIENT_ID="${2:-}"; shift 2 ;;
-    --redirect-uri) REDIRECT_URI="${2:-}"; shift 2 ;;
-    --web-origin) WEB_ORIGIN="${2:-}"; shift 2 ;;
-    --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
-    --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
-    --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
-    --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    --client-secret-output) CLIENT_SECRET_OUTPUT="${2:-}"; shift 2 ;;
-    --group-scope-name) GROUP_SCOPE_NAME="${2:-}"; shift 2 ;;
-    --version) printf '%s\n' "${SCRIPT_VERSION}"; exit 0 ;;
-    -h|--help) usage; exit 0 ;;
-    *) usage >&2; die "Unknown option: $1" ;;
-  esac
-done
-
-require_command curl
-require_command jq
-require_command stat
-require_nonempty --server-url "$SERVER_URL"
-require_nonempty --redirect-uri "$REDIRECT_URI"
-require_nonempty --web-origin "$WEB_ORIGIN"
-require_nonempty --client-secret-output "$CLIENT_SECRET_OUTPUT"
-if [[ -n "$ADMIN_CLIENT_ID" || -n "$ADMIN_CLIENT_SECRET_FILE" ]]; then
-  require_nonempty --admin-client-id "$ADMIN_CLIENT_ID"
-  require_nonempty --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE"
-  [[ -z "$ADMIN_USER" ]] ||
-    die "Use either --admin-user or --admin-client-id, not both."
-else
-  require_nonempty --admin-user "$ADMIN_USER"
-fi
-require_https_url --server-url "$SERVER_URL"
-require_https_url --redirect-uri "$REDIRECT_URI"
-require_https_url --web-origin "$WEB_ORIGIN"
-
-SERVER_URL="${SERVER_URL%/}"
-if [[ -n "$ADMIN_CLIENT_ID" ]]; then
-  read_admin_client_secret
-  obtain_client_access_token
-else
+  require_command curl
+  require_command jq
+  require_command stat
+  validate_inputs
+  verify_discovery
   read_admin_password
-  obtain_access_token
-fi
-ensure_realm
-ensure_client
-ensure_groups_scope_and_mapper
-write_client_secret
-ADMIN_PASSWORD=""
-ADMIN_CLIENT_SECRET=""
-ACCESS_TOKEN=""
-info "Keycloak bootstrap completed for realm ${REALM} and client ${CLIENT_ID}."
+  obtain_master_token
+  ensure_realm
+
+  realm_manager_definition="$(
+    jq -cn --arg id "$REALM_MANAGER_CLIENT_ID" '{
+      clientId:$id,
+      name:"DIGITAfrica realm manager",
+      enabled:true,
+      protocol:"openid-connect",
+      publicClient:false,
+      standardFlowEnabled:false,
+      directAccessGrantsEnabled:false,
+      serviceAccountsEnabled:true,
+      bearerOnly:false,
+      redirectUris:[],
+      webOrigins:[]
+    }'
+  )"
+
+  realm_manager_uuid="$(
+    ensure_client "$MASTER_TOKEN" "$REALM_MANAGER_CLIENT_ID" \
+      "$realm_manager_definition"
+  )"
+
+  ensure_realm_manager_roles "$realm_manager_uuid"
+
+  write_secret_if_needed \
+    "$MASTER_TOKEN" "$realm_manager_uuid" \
+    "$REALM_MANAGER_SECRET_OUTPUT" "$ROTATE_REALM_MANAGER_SECRET"
+
+  obtain_manager_token
+
+  jupyterhub_definition="$(
+    jq -cn \
+      --arg id "$JUPYTERHUB_CLIENT_ID" \
+      --arg redirect "$JUPYTERHUB_REDIRECT_URI" \
+      --arg origin "$JUPYTERHUB_WEB_ORIGIN" '{
+        clientId:$id,
+        name:"DIGITAfrica JupyterHub",
+        enabled:true,
+        protocol:"openid-connect",
+        publicClient:false,
+        standardFlowEnabled:true,
+        directAccessGrantsEnabled:false,
+        serviceAccountsEnabled:false,
+        bearerOnly:false,
+        redirectUris:[$redirect],
+        webOrigins:[$origin]
+      }'
+  )"
+
+  jupyterhub_uuid="$(
+    ensure_client "$MANAGER_TOKEN" "$JUPYTERHUB_CLIENT_ID" \
+      "$jupyterhub_definition"
+  )"
+
+  ensure_groups_mapper "$jupyterhub_uuid"
+
+  write_secret_if_needed \
+    "$MANAGER_TOKEN" "$jupyterhub_uuid" \
+    "$JUPYTERHUB_SECRET_OUTPUT" "$ROTATE_JUPYTERHUB_SECRET"
+
+  info "Keycloak realm and JupyterHub OIDC client bootstrap completed."
+}
+
+main "$@"

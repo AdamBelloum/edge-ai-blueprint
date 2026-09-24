@@ -3,24 +3,33 @@
 
 - name: Base setup on Tier-1 nodes
   hosts: tier1_server:tier1_agents
+  vars: &tier1_deployment_vars
+    digitafrica_deployment: "{{ tier1 }}"
+    fl_workshop_server_group: "tier1_server"
+    fl_workshop_client_group: "tier1_agents"
+    workshop_notebook_runtime:
+      enabled: false
   roles:
     - role: common
       when: not (digitafrica_uninstall | default(false) | bool)
 
 - name: Tier-1 k3s server (install)
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   roles:
     - role: k3s_server
       when: not (digitafrica_uninstall | default(false) | bool)
 
 - name: Tier-1 k3s agents (install)
   hosts: tier1_agents
+  vars: *tier1_deployment_vars
   roles:
     - role: k3s_agent
       when: not (digitafrica_uninstall | default(false) | bool)
 
 - name: Deploy DIGITAfrica apps on Tier-1 (install)
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   roles:
     - role: fl_workshop_topology
       when: not (digitafrica_uninstall | default(false) | bool)
@@ -29,18 +38,21 @@
 
 - name: Deploy DIGITAfrica apps on Tier-1 (uninstall)
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   roles:
     - role: k8s_apps
       when: digitafrica_uninstall | default(false) | bool
 
 - name: Tier-1 k3s agents (uninstall)
   hosts: tier1_agents
+  vars: *tier1_deployment_vars
   roles:
     - role: k3s_agent
       when: digitafrica_uninstall | default(false) | bool
 
 - name: Tier-1 k3s server (uninstall)
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   roles:
     - role: k3s_server
       when: digitafrica_uninstall | default(false) | bool
@@ -50,6 +62,7 @@
 # ====================================================================
 - name: Stage repository-owned Flower server source on the control plane
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   become: false
   pre_tasks:
     - name: Skip Flower server source staging during uninstall
@@ -60,6 +73,7 @@
 
 - name: Stage isolated Flower client assets on Tier-1 worker nodes
   hosts: tier1_agents
+  vars: *tier1_deployment_vars
   become: true
   pre_tasks:
     - name: Skip Flower client asset staging during uninstall
@@ -70,6 +84,7 @@
 
 - name: Deploy Federated Learning Client Workspaces
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   become: false  # Use adam's existing kubectl configuration
 
   roles:
@@ -83,6 +98,7 @@
 # ====================================================================
 - name: Prepare Flower server virtual environment on Control Plane
   hosts: tier1_server
+  vars: *tier1_deployment_vars
   become: false
   pre_tasks:
     - name: Skip Flower venv setup during uninstall

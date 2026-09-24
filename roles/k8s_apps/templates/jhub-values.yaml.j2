@@ -56,12 +56,43 @@ ingress:
 {% endif %}
 
 hub:
+{% if oidc.oidc_enabled %}
+  # The confidential client secret is never rendered into Helm values.
+  # It is mounted from the applications-phase Kubernetes Secret instead.
+  extraVolumes:
+    - name: digitafrica-jupyterhub-oidc
+      secret:
+        secretName: jupyterhub-oidc
+        items:
+          - key: client-secret
+            path: client-secret
+
+  extraVolumeMounts:
+    - name: digitafrica-jupyterhub-oidc
+      mountPath: /etc/digitafrica/oidc
+      readOnly: true
+{% endif %}
+
   # Hub retains Kubernetes' existing placement because its SQLite database uses
   # a node-local PVC. Group notebook kernels are placed separately on their
   # assigned client VMs by the pre-spawn hook below.
   baseUrl: /jupyter
 
   extraConfig:
+{% if oidc.oidc_enabled %}
+    05-digitafrica-oidc-secret: |
+      from pathlib import Path
+
+      oidc_secret_file = Path("/etc/digitafrica/oidc/client-secret")
+      if not oidc_secret_file.is_file():
+          raise RuntimeError(
+              "The required jupyterhub-oidc Kubernetes Secret is not mounted."
+          )
+
+      c.GenericOAuthenticator.client_secret = (
+          oidc_secret_file.read_text(encoding="utf-8").strip()
+      )
+{% endif %}
     10-digitafrica-group-workspace: |
       # This mapping is generated from the ordered worker inventory.
       # Keycloak group membership, rather than the account username, selects
@@ -156,7 +187,6 @@ hub:
 {% if oidc.oidc_enabled %}
     GenericOAuthenticator:
       client_id: "{{ oidc.oidc_client_id }}"
-      client_secret: "{{ oidc.oidc_client_secret }}"
       authorize_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/auth"
       token_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/token"
       userdata_url: "{{ oidc.oidc_issuer_url.rstrip('/') }}/protocol/openid-connect/userinfo"
@@ -303,7 +333,7 @@ singleuser:
               ;;
           esac
 
-          copy_seed_file() {
+          copy_seed_file() {{ '{{' }}
             source_file="$1"
             destination_file="$2"
             overwrite="$3"
@@ -322,9 +352,9 @@ singleuser:
             cp -L "$source_file" "$destination_file"
             chown 1000:100 "$destination_file"
             chmod 0644 "$destination_file"
-          }
+          }}
 
-          write_receipt_if_absent() {
+          write_receipt_if_absent() {{ '{{' }}
             receipt="$1"
             provenance_file="$2"
 
@@ -338,7 +368,7 @@ singleuser:
             ) > "$receipt"
             chown 1000:100 "$receipt"
             chmod 0644 "$receipt"
-          }
+          }}
 
           mkdir -p "$workspace"
 

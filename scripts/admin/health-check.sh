@@ -27,6 +27,7 @@ Scopes:
   all             Run deployment checks and explicit participant worker-runtime checks.
   infrastructure  Check k3s nodes, namespace deployments, pods, and events.
   jupyterhub      Check the JupyterHub Helm release, ingress, and public login path.
+  identity        Check managed Keycloak, PostgreSQL, ingress, and trusted discovery.
   silos           Check every inventory-derived participant worker runtime.
   help            Show this help text.
 
@@ -43,8 +44,10 @@ load_jupyterhub_health_configuration() {
 
   if [[ "${OIDC_ENABLED}" == "true" ]]; then
     OIDC_ISSUER_URL="$(deployment_public_setting oidc_issuer_url)"
+    OIDC_IDENTITY_NAMESPACE="$(deployment_public_setting oidc_identity_namespace)"
   else
     OIDC_ISSUER_URL=""
+    OIDC_IDENTITY_NAMESPACE=""
   fi
 }
 
@@ -65,7 +68,9 @@ check_jupyterhub_public_endpoint() {
     --write-out '%{http_code} %{url_effective}'
   )
   case "${DEPLOYMENT_TLS_MODE}" in
-    letsencrypt)
+    letsencrypt|provided)
+      # Both modes require a certificate trusted by this administrator host.
+      # A provided private CA must therefore be installed in its trust store.
       ;;
     selfsigned|none)
       # These modes can use a certificate that is not trusted by this host.
@@ -146,6 +151,92 @@ REMOTE_SCRIPT
 
   remote_script="${remote_script//__DIGITAFRICA_NAMESPACE__/${DIGITAFRICA_NAMESPACE}}"
   run_deployment_remote "${remote_script}"
+}
+
+check_identity() {
+  local keycloak_base_url
+  local discovery_url
+  local realm
+  local discovery
+
+  load_jupyterhub_health_configuration
+
+  if [[ "${OIDC_ENABLED}" != "true" ]]; then
+    print_heading "Managed Keycloak identity health"
+    log "OIDC is disabled; managed Keycloak identity checks are not applicable."
+    return 0
+  fi
+
+  [[ -n "${OIDC_IDENTITY_NAMESPACE}" ]] ||
+    die "Managed OIDC is enabled but oidc_identity_namespace is not configured."
+
+  keycloak_base_url="${OIDC_ISSUER_URL%/realms/*}"
+  [[ "${keycloak_base_url}" =~ ^https://[^[:space:]]+$ ]] ||
+    die "Could not derive a trusted Keycloak base URL from OIDC issuer configuration."
+
+  print_heading "Managed Keycloak in-cluster health"
+
+  run_deployment_remote "$(cat <<EOF
+set -euo pipefail
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+namespace=${OIDC_IDENTITY_NAMESPACE@Q}
+
+printf '%s\n' '===== Identity resources ====='
+k3s kubectl -n "\$namespace" get deployment,statefulset,service,ingress -o wide
+
+printf '%s\n' '===== Keycloak rollout ====='
+k3s kubectl -n "\$namespace" rollout status deployment/keycloak --timeout=60s
+
+printf '%s\n' '===== PostgreSQL rollout ====='
+k3s kubectl -n "\$namespace" rollout status statefulset/keycloak-postgresql --timeout=60s
+
+printf '%s\n' '===== Keycloak TLS Secret ====='
+k3s kubectl -n "\$namespace" get secret keycloak-tls \
+  --output=jsonpath='{.type}{"\n"}' |
+  grep -Fx 'kubernetes.io/tls'
+
+if k3s kubectl -n "\$namespace" get certificate keycloak-tls >/dev/null 2>&1; then
+  printf '%s\n' '===== cert-manager Certificate ====='
+  k3s kubectl -n "\$namespace" get certificate keycloak-tls -o wide
+  k3s kubectl -n "\$namespace" get certificate keycloak-tls \
+    -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}{"\n"}{end}' |
+    grep -Fx 'True'
+fi
+
+echo 'Managed Keycloak in-cluster health check passed.'
+EOF
+)"
+
+  require_command curl
+  require_command jq
+
+  print_heading "Managed Keycloak trusted public discovery"
+
+  for realm in master digitafrica; do
+    discovery_url="${keycloak_base_url}/realms/${realm}/.well-known/openid-configuration"
+
+    if ! discovery="$(curl \
+      --fail \
+      --silent \
+      --show-error \
+      --connect-timeout 10 \
+      --max-time 30 \
+      "${discovery_url}")"; then
+      die "Could not reach trusted Keycloak discovery for realm ${realm}."
+    fi
+
+    jq -e \
+      --arg expected_issuer "${keycloak_base_url}/realms/${realm}" \
+      '.issuer == $expected_issuer and
+       (.authorization_endpoint | type == "string") and
+       (.token_endpoint | type == "string") and
+       (.userinfo_endpoint | type == "string")' \
+      <<<"${discovery}" >/dev/null ||
+      die "Keycloak discovery response is invalid for realm ${realm}."
+
+    log "Trusted Keycloak discovery is healthy for realm ${realm}."
+  done
 }
 
 check_jupyterhub() {
@@ -302,15 +393,20 @@ run_scope() {
   case "${scope}" in
     deployment)
       check_infrastructure
+      check_identity
       check_jupyterhub
       ;;
     all)
       check_infrastructure
+      check_identity
       check_jupyterhub
       check_silos
       ;;
     infrastructure)
       check_infrastructure
+      ;;
+    identity)
+      check_identity
       ;;
     jupyterhub)
       check_jupyterhub
@@ -332,7 +428,7 @@ main() {
     help|--help|-h)
       usage
       ;;
-    deployment|all|infrastructure|jupyterhub|silos)
+    deployment|all|infrastructure|identity|jupyterhub|silos)
       show_context
       run_scope "${scope}"
       print_heading "Health-check result"

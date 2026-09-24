@@ -1,0 +1,234 @@
+---
+# Managed Keycloak identity phase.
+#
+# This file is a no-op for the Basic profile. It is invoked only through:
+#   ansible-playbook ... --tags identity
+# or a complete untagged deployment.
+
+- name: Check whether managed identity is enabled
+  ansible.builtin.set_fact:
+    digitafrica_identity_enabled: >-
+      {{ ((digitafrica_deployment.identity | default({})).enabled | default(false)) | bool }}
+  tags:
+    - identity
+
+- name: Ensure identity namespace exists
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl get namespace {{ digitafrica_deployment.identity.namespace }} \
+      >/dev/null 2>&1 ||
+      k3s kubectl create namespace {{ digitafrica_deployment.identity.namespace }}
+  args:
+    executable: /bin/bash
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+# When servicelb is disabled, Traefik requires the central host address as an
+# external IP to serve the public Keycloak ingress before JupyterHub is deployed.
+- name: Wait for Traefik service before Keycloak ingress configuration
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for _attempt in $(seq 1 60); do
+      k3s kubectl -n kube-system get service traefik >/dev/null 2>&1 && exit 0
+      sleep 5
+    done
+    echo "Timed out waiting for Traefik service." >&2
+    exit 1
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.expose_mode == 'ingress'
+  tags:
+    - identity
+
+- name: Assign central node address as Traefik external IP
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n kube-system patch service traefik --type=merge \
+      -p '{"spec":{"externalIPs":["{{ ansible_host | default(inventory_hostname) }}"]}}'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.expose_mode == 'ingress'
+  tags:
+    - identity
+
+- name: Install cert-manager for managed Let's Encrypt identity TLS
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+    helm repo update >/dev/null
+    helm upgrade --install cert-manager jetstack/cert-manager \
+      --namespace cert-manager \
+      --create-namespace \
+      --set installCRDs=true \
+      --wait \
+      --timeout 5m
+  args:
+    executable: /bin/bash
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.tls_mode | default('none') == 'letsencrypt'
+  tags:
+    - identity
+
+- name: Apply Let's Encrypt ClusterIssuer for managed identity
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cat <<'YAML' | k3s kubectl apply -f -
+    apiVersion: cert-manager.io/v1
+    kind: ClusterIssuer
+    metadata:
+      name: letsencrypt-prod
+    spec:
+      acme:
+        server: https://acme-v02.api.letsencrypt.org/directory
+        email: {{ digitafrica_deployment.tls_acme_email }}
+        privateKeySecretRef:
+          name: letsencrypt-prod-key
+        solvers:
+          - http01:
+              ingress:
+                class: traefik
+    YAML
+  args:
+    executable: /bin/bash
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.tls_mode | default('none') == 'letsencrypt'
+  tags:
+    - identity
+
+- name: Create central staging directory for provided Keycloak TLS files
+  ansible.builtin.file:
+    path: /opt/digitafrica/keycloak-tls
+    state: directory
+    mode: "0700"
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.tls_mode | default('none') == 'provided'
+  tags:
+    - identity
+
+- name: Stage provided Keycloak TLS certificate files on the central server
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/opt/digitafrica/keycloak-tls/{{ item | basename }}"
+    mode: "0600"
+  loop:
+    - "{{ digitafrica_deployment.tls_cert_dir }}/tls.crt"
+    - "{{ digitafrica_deployment.tls_cert_dir }}/tls.key"
+  no_log: true
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.tls_mode | default('none') == 'provided'
+  tags:
+    - identity
+
+- name: Install provided Keycloak TLS Secret
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.identity.namespace }} \
+      create secret tls keycloak-tls \
+      --cert=/opt/digitafrica/keycloak-tls/tls.crt \
+      --key=/opt/digitafrica/keycloak-tls/tls.key \
+      --dry-run=client -o yaml |
+      k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - digitafrica_identity_enabled
+    - digitafrica_deployment.tls_mode | default('none') == 'provided'
+  tags:
+    - identity
+
+- name: Create Keycloak PostgreSQL password only when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    namespace={{ digitafrica_deployment.identity.namespace | quote }}
+
+    if k3s kubectl -n "$namespace" get secret keycloak-postgresql \
+      >/dev/null 2>&1; then
+      echo preserved
+    else
+      password="$(openssl rand -base64 36 | tr -d '\n')"
+      k3s kubectl -n "$namespace" create secret generic keycloak-postgresql \
+        --from-literal=username=keycloak \
+        --from-literal=password="$password"
+      echo created
+    fi
+  args:
+    executable: /bin/bash
+  register: keycloak_postgresql_secret
+  changed_when: "'created' in keycloak_postgresql_secret.stdout"
+  no_log: true
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+- name: Create or reconcile Keycloak bootstrap administrator Secret
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.identity.namespace }} \
+      create secret generic keycloak-bootstrap-admin \
+      --from-literal=username={{ digitafrica_deployment.identity.admin_user | quote }} \
+      --from-literal=password={{ lookup('ansible.builtin.file', digitafrica_deployment.identity.bootstrap_admin_password_file) | trim | quote }} \
+      --dry-run=client -o yaml |
+      k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  no_log: true
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+- name: Render managed Keycloak and PostgreSQL resources
+  ansible.builtin.template:
+    src: keycloak.yaml.j2
+    dest: /opt/digitafrica/k8s/keycloak.yaml
+    mode: "0600"
+  no_log: true
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+- name: Apply managed Keycloak and PostgreSQL resources
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl apply -f /opt/digitafrica/k8s/keycloak.yaml
+  args:
+    executable: /bin/bash
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+- name: Wait for PostgreSQL rollout
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.identity.namespace }} \
+      rollout status statefulset/keycloak-postgresql --timeout=10m
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
+- name: Wait for Keycloak rollout
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.identity.namespace }} \
+      rollout status deployment/keycloak --timeout=10m
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
