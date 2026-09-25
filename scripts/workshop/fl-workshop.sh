@@ -29,8 +29,9 @@ Actions:
   set-tutorial-mode beginner|advanced
                     Set the tutorial mode for subsequently spawned servers.
   release-solutions Mark reference solutions as released for subsequent spawns.
-  new-cohort beginner|advanced
+  new-cohort beginner|advanced [--yes]
                     Delete participant workspaces and initialise a fresh cohort.
+                    --yes confirms the destructive workspace reset explicitly.
   help              Show this help text.
 
 This helper does not launch training. Start a Flower server and clients only
@@ -42,9 +43,14 @@ EOF
 SELECTED_ACTION="menu"
 TUTORIAL_MODE=""
 COHORT_MODE=""
+ASSUME_COHORT_RESET=false
 
 while (($#)); do
   case "$1" in
+    --yes)
+      ASSUME_COHORT_RESET=true
+      shift
+      ;;
     menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
@@ -105,6 +111,11 @@ while (($#)); do
       ;;
   esac
 done
+
+if "$ASSUME_COHORT_RESET" && [[ "$SELECTED_ACTION" != "new-cohort" ]]; then
+  printf '%s\n' '--yes is valid only with new-cohort beginner|advanced.' >&2
+  exit 2
+fi
 
 [[ -r "$WORKSHOP_CONTEXT" ]] || {
   printf 'Missing workshop context helper: %s\n' "$WORKSHOP_CONTEXT" >&2
@@ -407,7 +418,9 @@ done
 REMOTE
 )"
 
-  if ! confirm "Delete the listed participant workspaces and initialise the new cohort"; then
+  if "$ASSUME_COHORT_RESET"; then
+    log "Proceeding with the explicitly confirmed participant-workspace reset."
+  elif ! confirm "Delete the listed participant workspaces and initialise the new cohort"; then
     log "No change made."
     return 0
   fi

@@ -6,10 +6,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PREPARE_HELPER="$SCRIPT_DIR/organizer_wizard.sh"
+COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 RESET_HELPER="$SCRIPT_DIR/reset-new-workshop.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
 NON_INTERACTIVE=false
+CONFIRM_COHORT_RESET=false
 ACTION="menu"
 MODE=""
 SERVER_URL="${KEYCLOAK_SERVER_URL:-}"
@@ -25,10 +27,18 @@ usage() {
 Usage:
   organizer-main.sh [OPTIONS] [menu|prepare|reset beginner|advanced]
 
-The single organiser entry point for preparation and fresh-cohort reset.
+The single organiser entry point for workshop preparation and fresh-cohort reset.
 
-Shared options:
-  --non-interactive        Do not offer to start the Flower server during prepare.
+Preparation options:
+  --mode beginner|advanced  Workshop level. Prompted for interactive preparation;
+                            required with --non-interactive prepare.
+  --non-interactive         Run preparation without prompts. Requires --mode and
+                            --confirm-cohort-reset.
+  --confirm-cohort-reset    Explicitly authorise deletion of participant JupyterHub
+                            workspaces during non-interactive preparation.
+
+Prepare validates readiness first, then initialises the selected tutorial mode and
+fresh participant workspaces. It never starts Flower before cohort initialisation.
 
 Reset options (needed only for reset):
   --server-url URL         Public Keycloak base URL (or KEYCLOAK_SERVER_URL).
@@ -42,7 +52,7 @@ Reset options (needed only for reset):
 
 Actions:
   menu                     Show the organiser menu. Default.
-  prepare                  Run the existing workshop readiness/preparation wizard.
+  prepare                  Validate readiness and initialise a beginner or advanced cohort.
   reset beginner|advanced  Reset participant credentials and initialise a fresh cohort.
 
 For administrator-password authentication, the reset helper prompts privately,
@@ -55,6 +65,13 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
 while (($#)); do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=true; shift ;;
+    --confirm-cohort-reset) CONFIRM_COHORT_RESET=true; shift ;;
+    --mode)
+      MODE="${2:-}"
+      [[ "$MODE" == beginner || "$MODE" == advanced ]] ||
+        fail '--mode must be beginner or advanced.'
+      shift 2
+      ;;
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --realm) REALM="${2:-}"; shift 2 ;;
     --credentials-output) CREDENTIALS_OUTPUT="${2:-}"; shift 2 ;;
@@ -77,20 +94,59 @@ while (($#)); do
   esac
 done
 
+case "$ACTION" in
+  prepare)
+    if "$NON_INTERACTIVE"; then
+      [[ -n "$MODE" ]] || fail '--non-interactive prepare requires --mode beginner|advanced.'
+      "$CONFIRM_COHORT_RESET" || \
+        fail '--non-interactive prepare requires --confirm-cohort-reset before participant workspaces may be deleted.'
+    elif "$CONFIRM_COHORT_RESET"; then
+      fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
+    fi
+    ;;
+  reset)
+    "$CONFIRM_COHORT_RESET" && fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
+    ;;
+  menu)
+    [[ -z "$MODE" ]] || fail '--mode requires the prepare action.'
+    "$CONFIRM_COHORT_RESET" && fail '--confirm-cohort-reset requires --non-interactive prepare.'
+    ;;
+esac
+
 [[ -r "$WORKSHOP_CONTEXT" ]] || fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
 # shellcheck source=workshop-context.sh
 source "$WORKSHOP_CONTEXT"
 load_workshop_context
 
 [[ -x "$PREPARE_HELPER" ]] || fail "Missing prepare helper: $PREPARE_HELPER"
+[[ -x "$COHORT_HELPER" ]] || fail "Missing cohort helper: $COHORT_HELPER"
 [[ -x "$RESET_HELPER" ]] || fail "Missing reset helper: $RESET_HELPER"
 
 common_args=()
 
+select_prepare_mode() {
+  if [[ -z "$MODE" ]]; then
+    [[ -t 0 ]] || fail 'Non-interactive prepare requires --mode beginner|advanced.'
+    printf 'Workshop type (beginner/advanced): '
+    read -r MODE
+  fi
+  [[ "$MODE" == beginner || "$MODE" == advanced ]] ||
+    fail 'Choose beginner or advanced.'
+}
+
 run_prepare() {
-  local -a args=("${common_args[@]}")
-  "$NON_INTERACTIVE" && args+=(--non-interactive)
-  exec "$PREPARE_HELPER" "${args[@]}"
+  local -a readiness_args=("${common_args[@]}" --non-interactive)
+  local -a cohort_args=(new-cohort)
+
+  select_prepare_mode
+
+  # A participant server started before cohort initialisation would make the
+  # workspace-reset safety check refuse preparation. Flower is started later.
+  "$PREPARE_HELPER" "${readiness_args[@]}"
+
+  cohort_args+=("$MODE")
+  "$NON_INTERACTIVE" && cohort_args+=(--yes)
+  "$COHORT_HELPER" "${cohort_args[@]}"
 }
 
 run_reset() {
@@ -117,13 +173,15 @@ run_reset() {
 
 if [[ "$ACTION" == prepare ]]; then
   run_prepare
+  exit 0
 elif [[ "$ACTION" == reset ]]; then
   run_reset
+  exit 0
 fi
 
 [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare or reset beginner|advanced.'
 printf '\nDIGITAfrica workshop organiser\n\n'
-printf '  1) Prepare new workshop\n'
+printf '  1) Prepare and initialise a beginner or advanced workshop\n'
 printf '  2) Reset for new workshop\n'
 printf '  0) Exit\n\n'
 printf 'Selection: '
