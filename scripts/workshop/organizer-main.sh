@@ -161,7 +161,7 @@ run_reset() {
     args+=(--admin-user "$ADMIN_USER")
   fi
 
-  exec "$RESET_HELPER" "${args[@]}"
+  "$RESET_HELPER" "${args[@]}"
 }
 
 if [[ "$ACTION" == prepare ]]; then
@@ -188,6 +188,7 @@ case "$choice" in
       read -r SERVER_URL
     fi
     run_reset
+    exec "$0"
     ;;
   0) exit 0 ;;
   *) fail 'Choose 0, 1, or 2.' ;;
