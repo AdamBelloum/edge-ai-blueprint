@@ -11,18 +11,16 @@ set -o nounset
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/workshop/fl-workshop.sh [--tier tier1|tier2] [--inventory PATH] [ACTION]
-
-Options:
-  --tier tier1|tier2  Select the deployment tier. Default: tier1.
-  --inventory PATH   Override the Ansible inventory for this invocation.
+Usage: scripts/workshop/fl-workshop.sh [ACTION]
 
 Actions:
   menu              Show the interactive workshop-organiser menu. Default.
-  preflight         Run platform and participant worker-runtime readiness checks.
+  preflight         Run organiser-owned workshop readiness checks.
   revisions         Record deployed source, dependency, and data evidence.
   inspect-workspaces  List application files in all assigned participant workspaces.
   checklist         Print the workshop readiness checklist.
@@ -41,24 +39,12 @@ application source and approved data-handling arrangements.
 EOF
 }
 
-SELECTED_TIER="tier1"
-INVENTORY_OVERRIDE=""
 SELECTED_ACTION="menu"
 TUTORIAL_MODE=""
 COHORT_MODE=""
 
 while (($#)); do
   case "$1" in
-    --tier)
-      (($# >= 2)) || { printf '%s\n' "Missing value for --tier." >&2; usage >&2; exit 2; }
-      SELECTED_TIER="$2"
-      shift 2
-      ;;
-    --inventory)
-      (($# >= 2)) || { printf '%s\n' "Missing value for --inventory." >&2; usage >&2; exit 2; }
-      INVENTORY_OVERRIDE="$2"
-      shift 2
-      ;;
     menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
@@ -120,40 +106,26 @@ while (($#)); do
   esac
 done
 
-case "$SELECTED_TIER" in
-  tier1|tier2)
-    ;;
-  *)
-    printf 'Invalid tier: %s (expected tier1 or tier2).\n' "$SELECTED_TIER" >&2
-    exit 2
-    ;;
-esac
-
-if [[ -n "$INVENTORY_OVERRIDE" && ! -r "$INVENTORY_OVERRIDE" ]]; then
-  printf 'Inventory is not readable: %s\n' "$INVENTORY_OVERRIDE" >&2
+[[ -r "$WORKSHOP_CONTEXT" ]] || {
+  printf 'Missing workshop context helper: %s\n' "$WORKSHOP_CONTEXT" >&2
   exit 2
-fi
-
-export DIGITAFRICA_DEPLOYMENT_TIER="$SELECTED_TIER"
-export DIGITAFRICA_DEPLOYMENT_GROUP="${SELECTED_TIER}_server"
-if [[ -n "$INVENTORY_OVERRIDE" ]]; then
-  export DIGITAFRICA_INVENTORY="$INVENTORY_OVERRIDE"
+}
+# shellcheck source=workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+if ! load_workshop_context; then
+  exit 2
 fi
 
 # shellcheck source=../lib/common.sh
 source "${SCRIPT_DIR}/../lib/common.sh"
-readonly HEALTH_SCRIPT="${DIGITAFRICA_SCRIPTS_DIR}/admin/health-check.sh"
-
-require_workshop_scripts() {
-  require_file "${HEALTH_SCRIPT}"
-}
 
 run_preflight() {
   print_heading "Workshop platform preflight"
-  require_workshop_scripts
+  [[ -x "$ORGANIZER_WIZARD" ]] ||
+    die "Workshop readiness wizard is missing or not executable: $ORGANIZER_WIZARD"
 
-  log "Running infrastructure, JupyterHub static, and participant worker-runtime checks."
-  bash "${HEALTH_SCRIPT}" all
+  log "Running organiser-owned workshop readiness checks."
+  bash "$ORGANIZER_WIZARD" --non-interactive
 
   cat <<'EOF'
 

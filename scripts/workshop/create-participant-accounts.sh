@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Create/reconcile one Keycloak participant identity and group per Tier-2 worker.
+# Create/reconcile one Keycloak participant identity and group per active workshop worker.
 # New passwords are written only to the requested mode-0600 credentials file.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
-DEFAULT_INVENTORY="${REPO_ROOT}/inventories/workshop/tier2/hosts.ini"
-DEFAULT_WORKER_GROUP="tier2_agents"
 DEFAULT_REALM="digitafrica"
 DEFAULT_GROUP_PREFIX="group_"
 
-inventory="${DEFAULT_INVENTORY}"
-worker_group="${DEFAULT_WORKER_GROUP}"
+inventory=""
+worker_group=""
 server_url=""
 realm="${DEFAULT_REALM}"
 group_prefix="${DEFAULT_GROUP_PREFIX}"
@@ -30,19 +29,17 @@ usage() {
   cat <<'EOF'
 Usage:
   create-participant-accounts.sh --server-url URL --credentials-output FILE \
-    [--inventory FILE] [--worker-group NAME] [--realm NAME] [options]
+    [--realm NAME] [options]
 
-Creates or reconciles one Keycloak user and group per worker in the Ansible
-inventory. With the defaults, workers yield identities group_01, group_02, ... .
+Creates or reconciles one Keycloak user and group per worker in the active
+workshop release record. Workers yield identities group_01, group_02, ... .
 Each identity is added to the matching Keycloak group of the same name.
 
 Required:
   --server-url URL             Public Keycloak base URL, e.g. https://host/keycloak
   --credentials-output FILE    New mode-0600 TSV file for newly created accounts
 
-Inventory and identity options:
-  --inventory FILE             Ansible inventory (default: inventories/workshop/tier2/hosts.ini)
-  --worker-group NAME          Inventory group containing worker hosts (default: tier2_workers)
+Workshop identity options:
   --realm NAME                 Keycloak participant realm (default: digitafrica)
   --group-prefix PREFIX        Account/group prefix (default: group_)
 
@@ -84,8 +81,6 @@ urlencode() { jq -rn --arg value "$1" '$value|@uri'; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-url) server_url="${2:-}"; shift 2 ;;
-    --inventory) inventory="${2:-}"; shift 2 ;;
-    --worker-group) worker_group="${2:-}"; shift 2 ;;
     --realm) realm="${2:-}"; shift 2 ;;
     --group-prefix) group_prefix="${2:-}"; shift 2 ;;
     --credentials-output) credentials_output="${2:-}"; shift 2 ;;
@@ -100,6 +95,15 @@ while [[ $# -gt 0 ]]; do
     *) fail "Unknown argument: $1" ;;
   esac
 done
+
+[[ -r "$WORKSHOP_CONTEXT" ]] ||
+  fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
+# shellcheck source=workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+load_workshop_context || exit 1
+
+inventory="$DIGITAFRICA_INVENTORY"
+worker_group="$DIGITAFRICA_DEPLOYMENT_WORKER_GROUP"
 
 # Service-account clients belong to the workshop realm.  Human Keycloak
 # administrators normally authenticate in the master realm.

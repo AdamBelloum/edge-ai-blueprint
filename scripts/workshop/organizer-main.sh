@@ -7,9 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PREPARE_HELPER="$SCRIPT_DIR/organizer_wizard.sh"
 RESET_HELPER="$SCRIPT_DIR/reset-new-workshop.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
-TIER="tier1"
-INVENTORY=""
 NON_INTERACTIVE=false
 ACTION="menu"
 MODE=""
@@ -29,8 +28,6 @@ Usage:
 The single organiser entry point for preparation and fresh-cohort reset.
 
 Shared options:
-  --tier tier1|tier2       Deployment tier. Default: tier1.
-  --inventory PATH         Ansible inventory override.
   --non-interactive        Do not offer to start the Flower server during prepare.
 
 Reset options (needed only for reset):
@@ -57,8 +54,6 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
 
 while (($#)); do
   case "$1" in
-    --tier) TIER="${2:-}"; shift 2 ;;
-    --inventory) INVENTORY="${2:-}"; shift 2 ;;
     --non-interactive) NON_INTERACTIVE=true; shift ;;
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --realm) REALM="${2:-}"; shift 2 ;;
@@ -82,13 +77,15 @@ while (($#)); do
   esac
 done
 
-case "$TIER" in tier1|tier2) ;; *) fail '--tier must be tier1 or tier2.' ;; esac
-[[ -z "$INVENTORY" || -r "$INVENTORY" ]] || fail "Inventory is not readable: $INVENTORY"
+[[ -r "$WORKSHOP_CONTEXT" ]] || fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
+# shellcheck source=workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+load_workshop_context
+
 [[ -x "$PREPARE_HELPER" ]] || fail "Missing prepare helper: $PREPARE_HELPER"
 [[ -x "$RESET_HELPER" ]] || fail "Missing reset helper: $RESET_HELPER"
 
-common_args=(--tier "$TIER")
-[[ -n "$INVENTORY" ]] && common_args+=(--inventory "$INVENTORY")
+common_args=()
 
 run_prepare() {
   local -a args=("${common_args[@]}")
@@ -101,7 +98,7 @@ run_reset() {
 
   [[ "$SERVER_URL" =~ ^https:// ]] || fail 'reset requires --server-url HTTPS_URL or KEYCLOAK_SERVER_URL.'
   [[ -n "$CREDENTIALS_OUTPUT" ]] || \
-    CREDENTIALS_OUTPUT="$HOME/.local/share/digitafrica/${TIER}-reset-$(date +%Y%m%dT%H%M%S).tsv"
+    CREDENTIALS_OUTPUT="$HOME/.local/share/digitafrica/workshop-reset-$(date +%Y%m%dT%H%M%S).tsv"
 
   args+=(--server-url "$SERVER_URL" --realm "$REALM" --credentials-output "$CREDENTIALS_OUTPUT")
   [[ -n "$ADMIN_REALM" ]] && args+=(--admin-realm "$ADMIN_REALM")

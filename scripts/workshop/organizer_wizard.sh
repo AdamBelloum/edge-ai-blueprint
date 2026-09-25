@@ -14,7 +14,7 @@ set -euo pipefail
 WIZARD_VERSION="5.4.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-RELEASE_RECORD="$SCRIPT_DIR/workshop-release.env"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 HELPER="$SCRIPT_DIR/fl-workshop.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
@@ -30,13 +30,11 @@ fail() { printf 'FAIL  %s\n' "$1"; FAILURES=$((FAILURES + 1)); FAILURE_MESSAGES+
 heading() { printf '\n============================================================\n%s\n============================================================\n' "$1"; }
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--tier tier1|tier2] [--inventory PATH] [--non-interactive] [--version]
+Usage: $(basename "$0") [--non-interactive] [--version]
 
 Validates participant-driven federated-learning workshop platform readiness.
 
 Options:
-  --tier tier1|tier2  Select the deployment tier. Default: tier1.
-  --inventory PATH   Override the Ansible inventory for this invocation.
   --non-interactive  Never offer to start the organiser-controlled Flower server.
   --version          Print the Wizard version and exit.
 
@@ -48,21 +46,9 @@ EOF
 }
 
 NON_INTERACTIVE=false
-SELECTED_TIER="tier1"
-INVENTORY_OVERRIDE=""
 
 while (($#)); do
   case "$1" in
-    --tier)
-      (($# >= 2)) || { printf '%s\n' "Missing value for --tier." >&2; usage >&2; exit 2; }
-      SELECTED_TIER="$2"
-      shift 2
-      ;;
-    --inventory)
-      (($# >= 2)) || { printf '%s\n' "Missing value for --inventory." >&2; usage >&2; exit 2; }
-      INVENTORY_OVERRIDE="$2"
-      shift 2
-      ;;
     --non-interactive)
       NON_INTERACTIVE=true
       shift
@@ -83,26 +69,14 @@ while (($#)); do
   esac
 done
 
-case "$SELECTED_TIER" in
-  tier1|tier2)
-    ;;
-  *)
-    printf 'Invalid tier: %s (expected tier1 or tier2).\n' "$SELECTED_TIER" >&2
-    exit 2
-    ;;
-esac
-
-if [[ -n "$INVENTORY_OVERRIDE" && ! -r "$INVENTORY_OVERRIDE" ]]; then
-  printf 'Inventory is not readable: %s\n' "$INVENTORY_OVERRIDE" >&2
+[[ -r "$WORKSHOP_CONTEXT" ]] || {
+  printf 'Missing workshop context helper: %s\n' "$WORKSHOP_CONTEXT" >&2
   exit 2
-fi
-
-# These must be set before common.sh is sourced, because it derives its
-# selected deployment context during initialisation.
-export DIGITAFRICA_DEPLOYMENT_TIER="$SELECTED_TIER"
-export DIGITAFRICA_DEPLOYMENT_GROUP="${SELECTED_TIER}_server"
-if [[ -n "$INVENTORY_OVERRIDE" ]]; then
-  export DIGITAFRICA_INVENTORY="$INVENTORY_OVERRIDE"
+}
+# shellcheck source=workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+if ! load_workshop_context; then
+  exit 2
 fi
 
 LOG_FILE="${TMPDIR:-/tmp}/edge-ai-workshop-wizard-$(date +%Y%m%dT%H%M%S).log"
@@ -129,13 +103,7 @@ if [[ -r "$COMMON" ]]; then
 else
   fail "Common helper is not readable: $COMMON"
 fi
-if [[ -r "$RELEASE_RECORD" ]]; then
-  # shellcheck source=/dev/null
-  source "$RELEASE_RECORD"
-  pass "Loaded release record: $RELEASE_RECORD"
-else
-  fail "Release record is not readable: $RELEASE_RECORD"
-fi
+pass "Loaded active workshop topology from release record: $WORKSHOP_RELEASE_RECORD"
 
 WORKSHOP_RUNTIME_ROOT_FROM_RELEASE="${WORKSHOP_RUNTIME_ROOT:-}"
 WORKSHOP_RUNTIME_ROOT="${WORKSHOP_RUNTIME_ROOT:-/opt/digitafrica/fl-workshop}"
@@ -292,8 +260,7 @@ if declare -F run_deployment_remote >/dev/null &&
   GROUP_IDS=()
   WORKER_GROUP="$(deployment_worker_group)"
 
-  printf 'Selected tier          : %s\n' "$SELECTED_TIER"
-  printf 'Inventory              : %s\n' "${DIGITAFRICA_INVENTORY}"
+  printf 'Workshop inventory     : %s\n' "${DIGITAFRICA_INVENTORY}"
   printf 'Control-plane group    : %s\n' "${DIGITAFRICA_DEPLOYMENT_GROUP}"
   printf 'Worker group           : %s\n' "$WORKER_GROUP"
   printf 'Namespace              : %s\n' "${DIGITAFRICA_NAMESPACE}"

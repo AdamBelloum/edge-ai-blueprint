@@ -15,9 +15,8 @@ REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
-SELECTED_TIER="tier1"
-INVENTORY_OVERRIDE=""
 MODE=""
 SERVER_URL=""
 REALM="digitafrica"
@@ -30,15 +29,14 @@ ADMIN_CLIENT_SECRET_FILE=""
 usage() {
   cat <<'EOF'
 Usage:
-  reset-new-workshop.sh [--tier tier1|tier2] [--inventory PATH] \
-    --server-url URL --credentials-output FILE \
+  reset-new-workshop.sh --server-url URL --credentials-output FILE \
     (--admin-user USER | --admin-client-id ID --admin-client-secret-file FILE) \
     [--realm NAME] [--admin-realm NAME] beginner|advanced
 
 Resets stable participant identities for a fresh workshop cohort. It derives
-participant accounts from the selected tier's worker inventory, revokes active
-Keycloak sessions while resetting temporary passwords, then delegates safe
-participant-PVC cleanup and tutorial initialisation to fl-workshop.sh.
+participant accounts from the active workshop release record's worker inventory,
+revokes active Keycloak sessions while resetting temporary passwords, then
+delegates safe participant-PVC cleanup and tutorial initialisation to fl-workshop.sh.
 
 The Keycloak administrator password is read privately by
 create-participant-accounts.sh, or from KEYCLOAK_ADMIN_PASSWORD_FILE when set.
@@ -49,8 +47,6 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 while (($#)); do
   case "$1" in
-    --tier) SELECTED_TIER="${2:-}"; shift 2 ;;
-    --inventory) INVENTORY_OVERRIDE="${2:-}"; shift 2 ;;
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --realm) REALM="${2:-}"; shift 2 ;;
     --credentials-output) CREDENTIALS_OUTPUT="${2:-}"; shift 2 ;;
@@ -68,7 +64,6 @@ while (($#)); do
   esac
 done
 
-case "$SELECTED_TIER" in tier1|tier2) ;; *) fail '--tier must be tier1 or tier2.' ;; esac
 [[ -n "$MODE" ]] || fail 'Specify the new workshop mode: beginner or advanced.'
 [[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
 [[ -n "$CREDENTIALS_OUTPUT" ]] || fail '--credentials-output is required.'
@@ -84,18 +79,17 @@ else
   [[ -n "$ADMIN_USER" ]] || fail 'Supply --admin-user or service-account authentication.'
 fi
 
-export DIGITAFRICA_DEPLOYMENT_TIER="$SELECTED_TIER"
-export DIGITAFRICA_DEPLOYMENT_GROUP="${SELECTED_TIER}_server"
-if [[ -n "$INVENTORY_OVERRIDE" ]]; then
-  [[ -r "$INVENTORY_OVERRIDE" ]] || fail "Inventory is not readable: $INVENTORY_OVERRIDE"
-  export DIGITAFRICA_INVENTORY="$INVENTORY_OVERRIDE"
-fi
+[[ -r "$WORKSHOP_CONTEXT" ]] ||
+  fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
+# shellcheck source=workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+load_workshop_context || exit 1
 
 # shellcheck source=/dev/null
 source "$COMMON"
 command -v ansible-inventory >/dev/null 2>&1 || fail 'Required command not found: ansible-inventory'
 
-deployment_worker_group >/dev/null || fail 'Could not determine the selected tier worker group.'
+deployment_worker_group >/dev/null || fail 'Could not determine the active workshop worker group.'
 WORKER_GROUP="$(deployment_worker_group)"
 INVENTORY_PATH="${DIGITAFRICA_INVENTORY}"
 
@@ -113,7 +107,7 @@ for index, host in enumerate(hosts, 1):
     print(f"group_{index:02d}")
 ' "$WORKER_GROUP"
 )
-((${#GROUP_IDS[@]} > 0)) || fail 'No participant identities were derived from the selected inventory.'
+((${#GROUP_IDS[@]} > 0)) || fail 'No participant identities were derived from the active workshop inventory.'
 GROUP_IDS_CSV="$(IFS=,; printf '%s' "${GROUP_IDS[*]}")"
 
 # Do this before credentials are changed. A running participant server means the
@@ -145,8 +139,6 @@ case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
 account_args=(
   --server-url "$SERVER_URL"
   --realm "$REALM"
-  --inventory "$INVENTORY_PATH"
-  --worker-group "$WORKER_GROUP"
   --credentials-output "$CREDENTIALS_OUTPUT"
   --reset-all-passwords
 )
@@ -160,8 +152,6 @@ fi
 "$ACCOUNT_HELPER" "${account_args[@]}"
 
 printf '%s\n' 'Passwords and sessions have been reset. The next confirmation is for participant workspace deletion only.'
-cohort_args=(--tier "$SELECTED_TIER")
-[[ -n "$INVENTORY_OVERRIDE" ]] && cohort_args+=(--inventory "$INVENTORY_OVERRIDE")
-"$COHORT_HELPER" "${cohort_args[@]}" new-cohort "$MODE"
+"$COHORT_HELPER" new-cohort "$MODE"
 
 printf 'New workshop reset completed. Deliver the mode-0600 credential file securely: %s\n' "$CREDENTIALS_OUTPUT"

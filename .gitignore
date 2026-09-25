@@ -25,3 +25,9 @@ data/partitions/
 
 # Locally generated workshop inventories, topology, and organiser-supplied OIDC settings.
 /inventories/workshop/
+
+# Local workshop-script recovery copies; never commit.
+scripts/workshop/*.bak
+
+# Local credentials and generated secrets; never commit.
+/secrets/
