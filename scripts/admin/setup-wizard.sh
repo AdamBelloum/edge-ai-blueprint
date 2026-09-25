@@ -408,6 +408,16 @@ ${DEPLOYMENT_TIER}:
   grafana_enabled: false
 EOF_VARIABLES
 
+  # Derive one workshop client identity per configured worker VM.  The names
+  # match the inventory aliases written by write_inventory().
+  printf '\nfl_workshop_client_hosts:\n' >> "$VARS_FILE"
+
+  local worker_index
+  for worker_index in "${!WORKER_HOSTS[@]}"; do
+    printf '  - %s-worker-%s\n' \
+      "$DEPLOYMENT_TIER" "$((worker_index + 1))" >> "$VARS_FILE"
+  done
+
   case "$TLS_MODE" in
     letsencrypt)
       printf '  tls_acme_email: %s\n' \

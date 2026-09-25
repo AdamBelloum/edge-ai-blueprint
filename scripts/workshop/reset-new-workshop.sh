@@ -2,7 +2,7 @@
 # Reset stable DIGITAfrica participant identities for a new workshop cohort.
 #
 # Order:
-#   1. Verify that no participant Jupyter servers are running.
+#   1. After organiser confirmation, stop only selected participant Jupyter servers.
 #   2. Reset passwords and revoke participant Keycloak sessions.
 #   3. Initialise the selected beginner or advanced cohort baseline.
 #
@@ -110,31 +110,50 @@ for index, host in enumerate(hosts, 1):
 ((${#GROUP_IDS[@]} > 0)) || fail 'No participant identities were derived from the active workshop inventory.'
 GROUP_IDS_CSV="$(IFS=,; printf '%s' "${GROUP_IDS[*]}")"
 
-# Do this before credentials are changed. A running participant server means the
-# reset is refused without modifying Keycloak or persistent workspaces.
-run_deployment_remote "$(cat <<REMOTE
+stop_selected_participant_servers() {
+  printf '%s\n' 'Stopping selected participant Jupyter servers and waiting for termination...'
+
+  run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
 namespace="${DIGITAFRICA_NAMESPACE}"
 IFS=, read -r -a groups <<< "${GROUP_IDS_CSV}"
+
 for group_id in "\${groups[@]}"; do
-  pods="\$(k3s kubectl -n "\$namespace" get pods -l "hub.jupyter.org/username=\$group_id" -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"
-  if [[ -n "\$pods" ]]; then
-    printf 'Participant server is still running for %s: %s\\n' "\$group_id" "\$pods" >&2
+  if ! pods="\$(k3s kubectl -n "\$namespace" get pods \
+    -l "hub.jupyter.org/username=\$group_id" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"; then
+    printf 'Could not list participant server pods for %s.\\n' "\$group_id" >&2
     exit 1
+  fi
+
+  if [[ -n "\$pods" ]]; then
+    mapfile -t pod_names < <(printf '%s\\n' "\$pods")
+    printf 'Stopping participant server pod(s) for %s: %s\\n' \
+      "\$group_id" "\${pod_names[*]}"
+    k3s kubectl -n "\$namespace" delete pod "\${pod_names[@]}" \
+      --wait=true --timeout=180s
+    printf 'Participant server pod(s) terminated for %s.\\n' "\$group_id"
+  else
+    printf 'No running participant server pod exists for %s.\\n' "\$group_id"
   fi
 done
 REMOTE
-)" >/dev/null
+)"
+}
 
 printf '%s\n' \
   "New workshop mode     : $MODE" \
   "Participant identities: ${GROUP_IDS[*]}" \
   "Credential record     : $CREDENTIALS_OUTPUT" \
   '' \
-  'This will reset participant passwords, revoke their Keycloak sessions, and then request confirmation before deleting only their JupyterHub PVCs.'
+  'This will stop active selected participant Jupyter servers, reset participant passwords, and revoke their Keycloak sessions.' \
+  'Ensure participants have first had time to copy any needed data from their running servers.' \
+  'A separate confirmation will be requested before deleting only their JupyterHub PVCs.'
 printf 'Continue with the new-workshop reset? [y/N]: '
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
+
+stop_selected_participant_servers
 
 account_args=(
   --server-url "$SERVER_URL"

@@ -367,8 +367,10 @@ start_new_cohort() {
   cat <<'EOF'
 
 This action deletes only the persistent JupyterHub home workspaces of the
-inventory-derived participant identities. Participant servers must first be
-stopped through JupyterHub.
+inventory-derived participant identities. Active participant servers must not
+be running. When invoked through reset-new-workshop.sh, selected participant
+servers are stopped automatically after its first reset confirmation; when
+using this helper directly, stop them through JupyterHub first.
 
 It does not reset Keycloak passwords. Reset those separately with:
   create-participant-accounts.sh --reset-all-passwords ...
@@ -396,11 +398,25 @@ for group_id in "\${groups[@]}"; do
     exit 1
   fi
 
-  mapfile -t pvc_names < <(
-    k3s kubectl -n "\$namespace" get pvc \
-      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
-      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
-  )
+  # This deployment configures KubeSpawner with pvc_name_template =
+  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
+  # Participant labels exist on server pods but not on their PVCs, so use the
+  # strict selected-identity claim prefix rather than a PVC label selector.
+  escaped_group_id="\${group_id//_/-}"
+  pvc_prefix="claim-\${escaped_group_id}---"
+
+  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
+    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
+      "\$group_id" >&2
+    exit 1
+  fi
+
+  pvc_names=()
+  while IFS= read -r pvc_name; do
+    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
+      pvc_names+=("\$pvc_name")
+  done <<< "\$all_pvc_names"
 
   if (( \${#pvc_names[@]} > 1 )); then
     printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
@@ -446,11 +462,25 @@ for group_id in "\${groups[@]}"; do
     exit 1
   fi
 
-  mapfile -t pvc_names < <(
-    k3s kubectl -n "\$namespace" get pvc \
-      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
-      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
-  )
+  # This deployment configures KubeSpawner with pvc_name_template =
+  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
+  # Participant labels exist on server pods but not on their PVCs, so use the
+  # strict selected-identity claim prefix rather than a PVC label selector.
+  escaped_group_id="\${group_id//_/-}"
+  pvc_prefix="claim-\${escaped_group_id}---"
+
+  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
+    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
+      "\$group_id" >&2
+    exit 1
+  fi
+
+  pvc_names=()
+  while IFS= read -r pvc_name; do
+    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
+      pvc_names+=("\$pvc_name")
+  done <<< "\$all_pvc_names"
 
   if (( \${#pvc_names[@]} > 1 )); then
     printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
