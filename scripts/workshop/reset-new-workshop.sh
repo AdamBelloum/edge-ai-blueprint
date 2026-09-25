@@ -141,6 +141,7 @@ account_args=(
   --realm "$REALM"
   --credentials-output "$CREDENTIALS_OUTPUT"
   --reset-all-passwords
+  --create-missing
 )
 [[ -n "$ADMIN_REALM" ]] && account_args+=(--admin-realm "$ADMIN_REALM")
 if [[ -n "$ADMIN_USER" ]]; then
