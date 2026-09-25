@@ -68,7 +68,7 @@ urlencode() {
 }
 
 curl_args() {
-  local -a args=(--fail-with-body --silent --show-error)
+  local -a args=(--fail --silent --show-error)
   [[ -n "$CA_CERT" ]] && args+=(--cacert "$CA_CERT")
   printf '%s\0' "${args[@]}"
 }
@@ -163,7 +163,9 @@ api() {
   [[ -n "$payload" ]] &&
     options+=(--header 'Content-Type: application/json' --data "$payload")
 
-  curl_request "${options[@]}" "${SERVER_URL}/${path}"
+  if ! curl_request "${options[@]}" "${SERVER_URL}/${path}"; then
+    die "Keycloak API request failed: ${method} /${path}"
+  fi
 }
 
 api_exists() {
@@ -220,7 +222,7 @@ ensure_client() {
       "admin/realms/$(urlencode "$REALM")/clients/${uuid}")"
     api "$token" PUT \
       "admin/realms/$(urlencode "$REALM")/clients/${uuid}" \
-      "$(jq --argjson desired "$desired" '. * $desired' <<<"$current")" \
+      "$(jq --argjson desired "$desired"         'del(.protocolMappers) | . * $desired' <<<"$current")" \
       >/dev/null
   else
     info "Creating client: ${client_id}"
@@ -346,19 +348,24 @@ ensure_groups_mapper() {
   )"
 
   mapper_uuid="$(
-    jq -r '.[] | select(.name == "groups" and .protocolMapper == "oidc-group-membership-mapper") | .id' \
-      <<<"$mappers" | head -n 1
+    jq -r '.[] | select(
+      .name == "groups" and
+      .protocolMapper == "oidc-group-membership-mapper"
+    ) | .id' <<<"$mappers" | head -n 1
   )"
 
+  # Keycloak 26 can return HTTP 500 for protocol-mapper PUT requests.
+  # This bootstrapper owns only this named mapper, so replace it instead.
   if [[ -n "$mapper_uuid" && "$mapper_uuid" != "null" ]]; then
-    api "$MANAGER_TOKEN" PUT \
+    info "Replacing managed groups protocol mapper."
+    api "$MANAGER_TOKEN" DELETE \
       "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models/${mapper_uuid}" \
-      "$desired" >/dev/null
-  else
-    api "$MANAGER_TOKEN" POST \
-      "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models" \
-      "$desired" >/dev/null
+      >/dev/null
   fi
+
+  api "$MANAGER_TOKEN" POST \
+    "admin/realms/$(urlencode "$REALM")/clients/${client_uuid}/protocol-mappers/models" \
+    "$desired" >/dev/null
 }
 
 main() {
