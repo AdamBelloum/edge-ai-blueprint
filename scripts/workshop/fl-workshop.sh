@@ -32,6 +32,8 @@ Actions:
   new-cohort beginner|advanced [--yes]
                     Delete participant workspaces and initialise a fresh cohort.
                     --yes confirms the destructive workspace reset explicitly.
+  delete-workspaces [--yes]
+                    Delete participant workspaces without changing tutorial state.
   help              Show this help text.
 
 This helper does not launch training. Start a Flower server and clients only
@@ -51,7 +53,7 @@ while (($#)); do
       ASSUME_COHORT_RESET=true
       shift
       ;;
-    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|help|--help|-h)
+    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|delete-workspaces|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
         usage >&2
@@ -112,9 +114,14 @@ while (($#)); do
   esac
 done
 
-if "$ASSUME_COHORT_RESET" && [[ "$SELECTED_ACTION" != "new-cohort" ]]; then
-  printf '%s\n' '--yes is valid only with new-cohort beginner|advanced.' >&2
-  exit 2
+if "$ASSUME_COHORT_RESET"; then
+  case "$SELECTED_ACTION" in
+    new-cohort|delete-workspaces) ;;
+    *)
+      printf '%s\n' '--yes is valid only with new-cohort or delete-workspaces.' >&2
+      exit 2
+      ;;
+  esac
 fi
 
 [[ -r "$WORKSHOP_CONTEXT" ]] || {
@@ -352,26 +359,30 @@ REMOTE
 start_new_cohort() {
   local mode="$1"
   local group_ids_csv
+  local confirmation
 
   case "$mode" in
-    beginner|advanced) ;;
+    ""|beginner|advanced) ;;
     *) die "Invalid cohort mode: ${mode}" ;;
   esac
 
   resolve_participant_workers
   group_ids_csv="$(IFS=,; printf '%s' "${WORKSHOP_GROUP_IDS[*]}")"
 
-  print_heading "Start a fresh workshop cohort"
-  printf 'Selected mode: %s\n' "$mode"
+  if [[ -n "$mode" ]]; then
+    print_heading "Start a fresh workshop cohort"
+    printf 'Selected mode: %s\n' "$mode"
+  else
+    print_heading "Delete participant workspaces"
+  fi
   printf 'Participant identities: %s\n' "${WORKSHOP_GROUP_IDS[*]}"
   cat <<'EOF'
 
 This action deletes only the persistent JupyterHub home workspaces of the
-inventory-derived participant identities. Participant servers must first be
-stopped through JupyterHub.
-
-It does not reset Keycloak passwords. Reset those separately with:
-  create-participant-accounts.sh --reset-all-passwords ...
+inventory-derived participant identities. Active participant servers must not
+be running. When invoked through reset-new-workshop.sh, selected participant
+servers are stopped automatically after its first reset confirmation; when
+using this helper directly, stop them through JupyterHub first.
 
 Administrator, hub, PostgreSQL, Redis, and non-participant storage are excluded.
 EOF
@@ -396,11 +407,25 @@ for group_id in "\${groups[@]}"; do
     exit 1
   fi
 
-  mapfile -t pvc_names < <(
-    k3s kubectl -n "\$namespace" get pvc \
-      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
-      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
-  )
+  # This deployment configures KubeSpawner with pvc_name_template =
+  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
+  # Participant labels exist on server pods but not on their PVCs, so use the
+  # strict selected-identity claim prefix rather than a PVC label selector.
+  escaped_group_id="\${group_id//_/-}"
+  pvc_prefix="claim-\${escaped_group_id}---"
+
+  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
+    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
+      "\$group_id" >&2
+    exit 1
+  fi
+
+  pvc_names=()
+  while IFS= read -r pvc_name; do
+    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
+      pvc_names+=("\$pvc_name")
+  done <<< "\$all_pvc_names"
 
   if (( \${#pvc_names[@]} > 1 )); then
     printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
@@ -418,9 +443,12 @@ done
 REMOTE
 )"
 
+  confirmation="Delete the listed participant workspaces"
+  [[ -n "$mode" ]] && confirmation+=" and initialise the new cohort"
+
   if "$ASSUME_COHORT_RESET"; then
     log "Proceeding with the explicitly confirmed participant-workspace reset."
-  elif ! confirm "Delete the listed participant workspaces and initialise the new cohort"; then
+  elif ! confirm "$confirmation"; then
     log "No change made."
     return 0
   fi
@@ -446,11 +474,25 @@ for group_id in "\${groups[@]}"; do
     exit 1
   fi
 
-  mapfile -t pvc_names < <(
-    k3s kubectl -n "\$namespace" get pvc \
-      -l "app.kubernetes.io/managed-by=kubespawner,hub.jupyter.org/username=\$group_id" \
-      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
-  )
+  # This deployment configures KubeSpawner with pvc_name_template =
+  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
+  # Participant labels exist on server pods but not on their PVCs, so use the
+  # strict selected-identity claim prefix rather than a PVC label selector.
+  escaped_group_id="\${group_id//_/-}"
+  pvc_prefix="claim-\${escaped_group_id}---"
+
+  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
+    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
+      "\$group_id" >&2
+    exit 1
+  fi
+
+  pvc_names=()
+  while IFS= read -r pvc_name; do
+    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
+      pvc_names+=("\$pvc_name")
+  done <<< "\$all_pvc_names"
 
   if (( \${#pvc_names[@]} > 1 )); then
     printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
@@ -465,15 +507,19 @@ for group_id in "\${groups[@]}"; do
   fi
 done
 
-k3s kubectl -n "\$namespace" patch configmap digitafrica-workshop-state \
-  --type merge \
-  -p "{\"data\":{\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
+if [[ -n "\$mode" ]]; then
+  k3s kubectl -n "\$namespace" patch configmap digitafrica-workshop-state \
+    --type merge \
+    -p "{\"data\":{\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
 
-printf 'Fresh cohort state applied: mode=%s, solutions_released=false\n' "\$mode"
+  printf 'Fresh cohort state applied: mode=%s, solutions_released=false\n' "\$mode"
+fi
 REMOTE
 )"
 
-  show_tutorial_state
+  if [[ -n "$mode" ]]; then
+    show_tutorial_state
+  fi
 }
 
 print_checklist() {
@@ -648,6 +694,9 @@ main() {
       ;;
     new-cohort)
       start_new_cohort "$COHORT_MODE"
+      ;;
+    delete-workspaces)
+      start_new_cohort ""
       ;;
     help|--help|-h)
       usage
