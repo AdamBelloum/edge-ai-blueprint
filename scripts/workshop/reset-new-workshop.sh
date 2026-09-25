@@ -3,10 +3,10 @@
 #
 # Order:
 #   1. After organiser confirmation, stop only selected participant Jupyter servers.
-#   2. Reset passwords and revoke participant Keycloak sessions.
-#   3. Initialise the selected beginner or advanced cohort baseline.
+#   2. Delete only their persistent JupyterHub workspaces.
+#   3. Delete only their inventory-derived Keycloak users and matching groups.
 #
-# The account identities and inventory-derived group mapping are preserved.
+# Tutorial state, administrators, service accounts, and unrelated realm records are preserved.
 
 set -euo pipefail
 
@@ -17,10 +17,8 @@ COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
-MODE=""
 SERVER_URL=""
 REALM="digitafrica"
-CREDENTIALS_OUTPUT=""
 ADMIN_REALM=""
 ADMIN_USER=""
 ADMIN_CLIENT_ID=""
@@ -29,14 +27,13 @@ ADMIN_CLIENT_SECRET_FILE=""
 usage() {
   cat <<'EOF'
 Usage:
-  reset-new-workshop.sh --server-url URL --credentials-output FILE \
+  reset-new-workshop.sh --server-url URL \
     (--admin-user USER | --admin-client-id ID --admin-client-secret-file FILE) \
-    [--realm NAME] [--admin-realm NAME] beginner|advanced
+    [--realm NAME] [--admin-realm NAME]
 
-Resets stable participant identities for a fresh workshop cohort. It derives
-participant accounts from the active workshop release record's worker inventory,
-revokes active Keycloak sessions while resetting temporary passwords, then
-delegates safe participant-PVC cleanup and tutorial initialisation to fl-workshop.sh.
+Deletes the active workshop inventory's participant workspaces, Keycloak users,
+and same-named Keycloak groups. It does not change tutorial mode, release
+reference solutions, or recreate participant accounts.
 
 The Keycloak administrator password is read privately by
 create-participant-accounts.sh, or from KEYCLOAK_ADMIN_PASSWORD_FILE when set.
@@ -49,24 +46,16 @@ while (($#)); do
   case "$1" in
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --realm) REALM="${2:-}"; shift 2 ;;
-    --credentials-output) CREDENTIALS_OUTPUT="${2:-}"; shift 2 ;;
     --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
     --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
     --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
     --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    beginner|advanced)
-      [[ -z "$MODE" ]] || fail 'Specify exactly one workshop mode.'
-      MODE="$1"
-      shift
-      ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
 
-[[ -n "$MODE" ]] || fail 'Specify the new workshop mode: beginner or advanced.'
 [[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
-[[ -n "$CREDENTIALS_OUTPUT" ]] || fail '--credentials-output is required.'
 [[ -x "$ACCOUNT_HELPER" ]] || fail "Missing executable account helper: $ACCOUNT_HELPER"
 [[ -x "$COHORT_HELPER" ]] || fail "Missing executable cohort helper: $COHORT_HELPER"
 [[ -r "$COMMON" ]] || fail "Missing common helper: $COMMON"
@@ -142,25 +131,25 @@ REMOTE
 }
 
 printf '%s\n' \
-  "New workshop mode     : $MODE" \
   "Participant identities: ${GROUP_IDS[*]}" \
-  "Credential record     : $CREDENTIALS_OUTPUT" \
   '' \
-  'This will stop active selected participant Jupyter servers, reset participant passwords, and revoke their Keycloak sessions.' \
+  'This permanently deletes only the selected participant JupyterHub workspaces,
+   inventory-derived Keycloak users, and matching Keycloak groups.' \
   'Ensure participants have first had time to copy any needed data from their running servers.' \
-  'A separate confirmation will be requested before deleting only their JupyterHub PVCs.'
-printf 'Continue with the new-workshop reset? [y/N]: '
+  'Tutorial state, administrators, service accounts, and unrelated records are not changed.'
+printf 'Delete these participant workspaces and Keycloak identities? [y/N]: '
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
 
 stop_selected_participant_servers
 
+workspace_args=(delete-workspaces --yes)
+"$COHORT_HELPER" "${workspace_args[@]}"
+
 account_args=(
   --server-url "$SERVER_URL"
   --realm "$REALM"
-  --credentials-output "$CREDENTIALS_OUTPUT"
-  --reset-all-passwords
-  --create-missing
+  --delete-all-participants
 )
 [[ -n "$ADMIN_REALM" ]] && account_args+=(--admin-realm "$ADMIN_REALM")
 if [[ -n "$ADMIN_USER" ]]; then
@@ -171,7 +160,4 @@ fi
 
 "$ACCOUNT_HELPER" "${account_args[@]}"
 
-printf '%s\n' 'Passwords and sessions have been reset. The next confirmation is for participant workspace deletion only.'
-"$COHORT_HELPER" new-cohort "$MODE"
-
-printf 'New workshop reset completed. Deliver the mode-0600 credential file securely: %s\n' "$CREDENTIALS_OUTPUT"
+printf 'New workshop cleanup completed: selected participant workspaces and Keycloak identities were deleted.\n'
