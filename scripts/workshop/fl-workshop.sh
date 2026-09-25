@@ -517,7 +517,9 @@ fi
 REMOTE
 )"
 
-  [[ -n "$mode" ]] && show_tutorial_state
+  if [[ -n "$mode" ]]; then
+    show_tutorial_state
+  fi
 }
 
 print_checklist() {
