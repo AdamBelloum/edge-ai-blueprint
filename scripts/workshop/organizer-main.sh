@@ -52,6 +52,10 @@ Actions:
   prepare                  Validate readiness and initialise a beginner or advanced cohort.
   reset                    Delete participant workspaces, Keycloak users, and groups.
 
+Interactive menu reset also offers to remove the local participant credential
+export after remote participant cleanup. The explicit reset action does not
+offer this local-file prompt.
+
 Reset does not change tutorial mode or create participant accounts. For
 administrator-password authentication, the reset helper prompts privately,
 or reads KEYCLOAK_ADMIN_PASSWORD_FILE when that protected file is configured.

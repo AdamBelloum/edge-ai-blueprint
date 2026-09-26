@@ -178,16 +178,21 @@ MLflow and Grafana flags are reserved for future service implementation where ap
 | `oidc.oidc_username_claim` | `preferred_username` | JWT claim used as the JupyterHub username |
 | `oidc.oidc_tls_verify` | `true` | Keep certificate verification enabled; set to `false` only for a controlled self-signed test deployment |
 
-### Workshop-organiser OIDC preparation
+### Administrator OIDC provisioning
 
-The platform deploys JupyterHub and may provide Keycloak, but the workshop organiser creates the JupyterHub OIDC client during workshop preparation.
+When OIDC authentication is enabled, the platform administrator provisions or verifies the long-lived Keycloak and JupyterHub integration during infrastructure deployment.
 
-- Enable the Authorization Code / Standard Flow.
-- Register `https://<jupyterhub-public-host>/jupyter/hub/oauth_callback` as the redirect URI.
-- Record the realm issuer URL, client ID, and, for a confidential client, client secret.
-- In the setup wizard, choose Advanced deployment, enable OIDC, and enter these values.
+Before a workshop organiser prepares a cohort, the administrator must ensure that:
 
-The generated inventory is under `inventories/workshop/`, which is ignored by Git. Do not commit organiser-supplied OIDC settings or client secrets. Keep `oidc_tls_verify: true` when the JupyterHub environment trusts the Keycloak certificate chain.
+- the Keycloak realm is available;
+- the confidential JupyterHub OIDC client exists;
+- the client uses the Authorization Code / Standard Flow;
+- `https://<jupyterhub-public-host>/jupyter/hub/oauth_callback` is registered as a redirect URI; and
+- the realm issuer URL, client ID, and client secret are configured for the JupyterHub deployment.
+
+The workshop organiser does not create or reconfigure the JupyterHub OIDC client. The organiser uses the deployed identity service to create and later remove participant-level workshop accounts and groups. See the [workshop organiser guide](workshop-organiser.md) for that lifecycle.
+
+Do not commit OIDC client secrets or administrator credentials. Keep `oidc_tls_verify: true` when the JupyterHub environment trusts the Keycloak certificate chain.
 
 ---
 

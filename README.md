@@ -16,6 +16,7 @@ The Ansible playbooks deploy and configure the platform. They prepare the federa
 | Platform administrator | [Infrastructure deployment](docs/infrastructure-deployment.md) | Deploy and maintain Tier-0 or Tier-1 safely |
 | Researcher or application developer | [Federated-learning application](docs/federated-learning-application.md) | Configure and run a reproducible federated-learning experiment |
 | Operator or tester | [Operations and validation](docs/operations-and-validation.md) | Validate deployment status, diagnose failures, and record acceptance evidence |
+| Workshop organiser | [Workshop organiser guide](docs/workshop-organiser.md) | Prepare, reset, and repeat participant workshop cohorts safely |
 | Architect or new project contributor | [Architecture](docs/architecture.md) | Understand component boundaries, responsibilities, and system interactions |
 
 ## What the blueprint provides
@@ -121,6 +122,7 @@ README.md
 │   ├── infrastructure-deployment.md
 │   ├── federated-learning-application.md
 │   ├── operations-and-validation.md
+│   ├── workshop-organiser.md
 │   └── architecture.md
 ├── inventories/
 ├── playbooks/
