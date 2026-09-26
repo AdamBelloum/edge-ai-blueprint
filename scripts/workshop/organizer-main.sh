@@ -188,6 +188,18 @@ case "$choice" in
       read -r SERVER_URL
     fi
     run_reset
+
+    credential_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/secrets/workshops/ab-01.lab.uvalight.net-beginner-credentials.tsv"
+    if [[ -f "$credential_file" ]]; then
+      read -r -p "Remove local participant credentials (${credential_file})? [y/N]: " remove_credentials
+      if [[ "$remove_credentials" == [Yy] ]]; then
+        rm -f -- "$credential_file"
+        printf 'Removed local participant credential file.\n'
+      else
+        printf 'Retained local participant credential file.\n'
+      fi
+    fi
+
     exec "$0"
     ;;
   0) exit 0 ;;
