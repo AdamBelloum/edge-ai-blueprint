@@ -5,6 +5,7 @@
 
 - name: Base setup on Tier-2 nodes
   hosts: tier2_server:tier2_agents
+  tags: [platform]
   vars: &tier2_deployment_vars
     digitafrica_deployment: "{{ tier2 }}"
     fl_workshop_server_group: "tier2_server"
@@ -19,6 +20,7 @@
 
 - name: Tier-2 k3s server (install)
   hosts: tier2_server
+  tags: [platform]
   vars: *tier2_deployment_vars
   roles:
     - role: k3s_server
@@ -26,6 +28,7 @@
 
 - name: Tier-2 k3s agents (install)
   hosts: tier2_agents
+  tags: [platform]
   vars: *tier2_deployment_vars
   roles:
     - role: k3s_agent

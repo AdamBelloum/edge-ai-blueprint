@@ -28,7 +28,7 @@ choose_tier() {
   local choice
 
   while true; do
-    cat <<'MENU'
+    cat >&2 <<'MENU'
 
 Select deployment tier:
   1) Tier-1

@@ -189,6 +189,15 @@
   tags:
     - identity
 
+- name: Ensure managed Keycloak manifest directory exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s
+    state: directory
+    mode: "0755"
+  when: digitafrica_identity_enabled
+  tags:
+    - identity
+
 - name: Render managed Keycloak and PostgreSQL resources
   ansible.builtin.template:
     src: keycloak.yaml.j2

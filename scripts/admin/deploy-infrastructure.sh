@@ -21,10 +21,12 @@ Usage:
   scripts/admin/deploy-infrastructure.sh [ACTION] [PHASE]
 
 Tier-specific actions:
+  tier1 platform       Deploy base setup and k3s server/agent prerequisites.
   tier1 identity       Deploy Keycloak/PostgreSQL/TLS identity resources.
   tier1 applications   Deploy OIDC secret, JupyterHub, and workshop applications.
   tier1 full           Deploy the complete Tier-1 workshop profile.
 
+  tier2 platform       Deploy base setup and k3s server/agent prerequisites.
   tier2 identity       Deploy Keycloak/PostgreSQL/TLS identity resources.
   tier2 applications   Deploy OIDC secret, JupyterHub, and workshop applications.
   tier2 full           Deploy the complete Tier-2 workshop profile.
@@ -92,7 +94,7 @@ run_tier_deployment() {
   esac
 
   case "$phase" in
-    identity|applications|full) ;;
+    platform|identity|applications|full) ;;
     *) die "Unsupported ${tier} phase: ${phase}" ;;
   esac
 
@@ -103,6 +105,15 @@ run_tier_deployment() {
   require_file "$playbook"
 
   case "$phase" in
+    platform)
+      description="Deploy ${tier^} base setup and k3s prerequisites"
+      command=(
+        ansible-playbook
+        -i "${DIGITAFRICA_INVENTORY}"
+        "${playbook}"
+        --tags platform
+      )
+      ;;
     identity)
       description="Deploy ${tier^} Keycloak identity infrastructure"
       command=(

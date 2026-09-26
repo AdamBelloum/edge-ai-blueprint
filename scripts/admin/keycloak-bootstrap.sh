@@ -396,6 +396,14 @@ main() {
   verify_discovery
   read_admin_password
   obtain_master_token
+
+  if ! api_exists "$MASTER_TOKEN" \
+    "admin/realms/$(urlencode "$REALM")" >/dev/null; then
+    info "Target realm is absent; regenerating managed client-secret records."
+    ROTATE_REALM_MANAGER_SECRET="true"
+    ROTATE_JUPYTERHUB_SECRET="true"
+  fi
+
   ensure_realm
 
   realm_manager_definition="$(
