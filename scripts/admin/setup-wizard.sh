@@ -39,6 +39,8 @@ KEYCLOAK_NAMESPACE="digitafrica-identity"
 KEYCLOAK_ADMIN_PASSWORD_FILE=""
 MANAGED_DEPLOYMENT_PAUSED="false"
 RUN_DEPLOYMENT="false"
+KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER=""
+KEYCLOAK_CERT_MANAGER_BACKOFF_RETRY_AFTER=""
 
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARNING] %s\n' "$*" >&2; }
@@ -490,6 +492,77 @@ trusted_keycloak_tls_ready() {
     "$endpoint" >/dev/null 2>&1
 }
 
+keycloak_acme_rate_limited() {
+  local output
+
+  # Read-only inspection of cert-manager's existing ACME Order resources.
+  # The default Ansible callback is selected explicitly because the repository
+  # callback suppresses ad-hoc command stdout.
+  KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER=""
+  output="$(
+    ANSIBLE_NOCOLOR=1 ANSIBLE_STDOUT_CALLBACK=default \
+      ansible -o -i "$INVENTORY" "${DEPLOYMENT_TIER}_server" -b \
+        -m command -a \
+        "k3s kubectl -n ${KEYCLOAK_NAMESPACE} get order -o json" 2>&1
+  )" || return 1
+
+  [[ "$output" == *"acme:error:rateLimited"* ]] || return 1
+
+  if [[ "$output" =~ retry[[:space:]]after[[:space:]]([0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]]UTC) ]]; then
+    KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER="${BASH_REMATCH[1]}"
+
+    # ISO-8601 UTC timestamps sort chronologically as strings. Do not report
+    # a historical failed Order as an active rate limit.
+    [[ "$KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER" > "$(TZ=UTC date '+%Y-%m-%d %H:%M:%S UTC')" ]] ||
+      return 1
+  else
+    KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER="a time reported by cert-manager"
+  fi
+
+  return 0
+}
+
+
+keycloak_cert_manager_backoff_active() {
+  local output failed_attempts failure_time retry_after
+
+  # cert-manager records failed issuance attempts on the Certificate. It retries
+  # automatically with exponential backoff: 1h, 2h, 4h, 8h, capped at 32h.
+  KEYCLOAK_CERT_MANAGER_BACKOFF_RETRY_AFTER=""
+  output="$(
+    ANSIBLE_NOCOLOR=1 ANSIBLE_STDOUT_CALLBACK=default \
+      ansible -o -i "$INVENTORY" "${DEPLOYMENT_TIER}_server" -b \
+        -m command -a \
+        "k3s kubectl -n ${KEYCLOAK_NAMESPACE} get certificate keycloak-tls -o jsonpath='{.status.failedIssuanceAttempts}{\"|\"}{.status.lastFailureTime}'" \
+        2>&1
+  )" || return 1
+
+  [[ "$output" =~ ([0-9]+)\|([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ]] ||
+    return 1
+
+  failed_attempts="${BASH_REMATCH[1]}"
+  failure_time="${BASH_REMATCH[2]}"
+
+  retry_after="$(
+    python3 - "$failure_time" "$failed_attempts" <<'PYTHON'
+from datetime import datetime, timedelta, timezone
+import sys
+
+failure_time = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+failed_attempts = int(sys.argv[2])
+backoff_hours = min(2 ** (failed_attempts - 1), 32)
+retry_after = failure_time + timedelta(hours=backoff_hours)
+
+if retry_after > datetime.now(timezone.utc):
+    print(retry_after.strftime("%Y-%m-%d %H:%M:%S UTC"))
+PYTHON
+  )" || return 1
+
+  [[ -n "$retry_after" ]] || return 1
+  KEYCLOAK_CERT_MANAGER_BACKOFF_RETRY_AFTER="$retry_after"
+  return 0
+}
+
 show_keycloak_tls_status() {
   local endpoint
   endpoint="$(keycloak_discovery_url)"
@@ -504,6 +577,24 @@ show_keycloak_tls_status() {
     printf 'Public TLS:    TRUSTED\n'
     printf 'Next action:   Select "Resume managed OIDC deployment".\n'
     return 0
+  fi
+
+  if keycloak_acme_rate_limited; then
+    printf "Status:        RATE LIMITED BY LET'S ENCRYPT\n"
+    printf 'Public TLS:    NOT YET TRUSTED\n'
+    printf 'Retry after:   %s\n' "$KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER"
+    printf 'Next action:   Do not rerun deployment before the retry time.\n'
+    printf '               cert-manager will retry certificate issuance automatically.\n'
+    return 1
+  fi
+
+  if keycloak_cert_manager_backoff_active; then
+    printf 'Status:        CERT-MANAGER RETRY BACKOFF\n'
+    printf 'Public TLS:    NOT YET TRUSTED\n'
+    printf 'Retry after:   %s\n' "$KEYCLOAK_CERT_MANAGER_BACKOFF_RETRY_AFTER"
+    printf 'Next action:   Do not recreate certificate resources.\n'
+    printf '               cert-manager will retry issuance automatically after this time.\n'
+    return 1
   fi
 
   printf 'Status:        NOT YET READY\n'
@@ -525,6 +616,20 @@ wait_for_trusted_keycloak_tls() {
     if trusted_keycloak_tls_ready; then
       info "Trusted TLS certificate verified. Continuing with Keycloak bootstrap and JupyterHub deployment."
       return 0
+    fi
+
+    if keycloak_acme_rate_limited; then
+      warn "Let's Encrypt certificate issuance is rate-limited."
+      warn "No new certificate can be issued before ${KEYCLOAK_ACME_RATE_LIMIT_RETRY_AFTER}."
+      warn "Managed OIDC deployment will remain paused; cert-manager will retry automatically."
+      return 1
+    fi
+
+    if keycloak_cert_manager_backoff_active; then
+      warn "cert-manager is waiting before its next certificate issuance attempt."
+      warn "Automatic retry is scheduled after ${KEYCLOAK_CERT_MANAGER_BACKOFF_RETRY_AFTER}."
+      warn "Managed OIDC deployment will remain paused; do not recreate certificate resources."
+      return 1
     fi
 
     printf '[INFO] Certificate not yet trusted; waiting... (%sm/%sm)\n' \
@@ -578,6 +683,8 @@ run_managed_oidc_deployment() {
   local keycloak_url jupyterhub_url secret_root
 
   require_command curl
+  require_command ansible
+  require_command python3
 
   keycloak_url="https://${PUBLIC_HOST}/keycloak"
   jupyterhub_url="https://${PUBLIC_HOST}/jupyter"
