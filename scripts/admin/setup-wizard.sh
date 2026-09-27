@@ -37,6 +37,7 @@ KEYCLOAK_REALM="digitafrica"
 KEYCLOAK_ADMIN_USER="admin"
 KEYCLOAK_NAMESPACE="digitafrica-identity"
 KEYCLOAK_ADMIN_PASSWORD_FILE=""
+MANAGED_DEPLOYMENT_PAUSED="false"
 RUN_DEPLOYMENT="false"
 
 info() { printf '[INFO] %s\n' "$*"; }
@@ -474,8 +475,109 @@ EOF_OIDC
   chmod 600 "$VARS_FILE"
 }
 
+
+keycloak_discovery_url() {
+  printf 'https://%s/keycloak/realms/master/.well-known/openid-configuration' \
+    "$PUBLIC_HOST"
+}
+
+trusted_keycloak_tls_ready() {
+  local endpoint
+  endpoint="$(keycloak_discovery_url)"
+
+  curl --fail --silent --show-error \
+    --connect-timeout 10 --max-time 20 \
+    "$endpoint" >/dev/null 2>&1
+}
+
+show_keycloak_tls_status() {
+  local endpoint
+  endpoint="$(keycloak_discovery_url)"
+
+  printf '\nKeycloak TLS certificate status\n'
+  printf '%s\n' '--------------------------------'
+  printf 'Hostname:      %s\n' "$PUBLIC_HOST"
+  printf 'Endpoint:      %s\n' "$endpoint"
+
+  if trusted_keycloak_tls_ready; then
+    printf 'Status:        READY\n'
+    printf 'Public TLS:    TRUSTED\n'
+    printf 'Next action:   Select "Resume managed OIDC deployment".\n'
+    return 0
+  fi
+
+  printf 'Status:        NOT YET READY\n'
+  printf 'Public TLS:    NOT YET TRUSTED\n'
+  printf 'Next action:   Wait, then check again or resume deployment.\n'
+  return 1
+}
+
+wait_for_trusted_keycloak_tls() {
+  local wait_seconds=900
+  local poll_seconds=15
+  local elapsed=0
+
+  info "Platform and identity deployment completed."
+  info "Waiting for a trusted TLS certificate for ${PUBLIC_HOST}."
+  info "This may take up to 15 minutes. Certificate status will be checked every ${poll_seconds} seconds."
+
+  while (( elapsed < wait_seconds )); do
+    if trusted_keycloak_tls_ready; then
+      info "Trusted TLS certificate verified. Continuing with Keycloak bootstrap and JupyterHub deployment."
+      return 0
+    fi
+
+    printf '[INFO] Certificate not yet trusted; waiting... (%sm/%sm)\n' \
+      "$((elapsed / 60))" "$((wait_seconds / 60))"
+    sleep "$poll_seconds"
+    ((elapsed += poll_seconds))
+  done
+
+  warn "Trusted TLS was not available after 15 minutes."
+  return 1
+}
+
+keycloak_tls_recovery_menu() {
+  local choice
+
+  while true; do
+    cat <<'MENU'
+
+Managed OIDC deployment is paused because trusted TLS is not yet available.
+
+  1) Check Keycloak TLS certificate status
+  2) Resume managed OIDC deployment
+  3) Exit with deployment paused
+MENU
+
+    prompt_choice choice "Choose an action" "1" 1 2 3
+
+    case "$choice" in
+      1)
+        if show_keycloak_tls_status; then
+          :
+        fi
+        ;;
+      2)
+        if trusted_keycloak_tls_ready; then
+          info "Trusted TLS certificate verified. Resuming managed OIDC deployment."
+          return 0
+        fi
+        warn "Trusted TLS is not ready yet. No bootstrap or application changes were made."
+        ;;
+      3)
+        MANAGED_DEPLOYMENT_PAUSED="true"
+        info "Deployment remains paused. Re-run the wizard when you are ready to resume."
+        return 0
+        ;;
+    esac
+  done
+}
+
 run_managed_oidc_deployment() {
   local keycloak_url jupyterhub_url secret_root
+
+  require_command curl
 
   keycloak_url="https://${PUBLIC_HOST}/keycloak"
   jupyterhub_url="https://${PUBLIC_HOST}/jupyter"
@@ -486,6 +588,12 @@ run_managed_oidc_deployment() {
 
   DIGITAFRICA_INVENTORY="$INVENTORY" \
     "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" identity
+
+  if ! wait_for_trusted_keycloak_tls; then
+    keycloak_tls_recovery_menu
+    [[ "$MANAGED_DEPLOYMENT_PAUSED" == "false" ]] ||
+      return 0
+  fi
 
   KEYCLOAK_ADMIN_PASSWORD_FILE="$KEYCLOAK_ADMIN_PASSWORD_FILE" \
     "$KEYCLOAK_BOOTSTRAP" \
@@ -512,6 +620,10 @@ run_deployment() {
     DIGITAFRICA_INVENTORY="$INVENTORY" \
       "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" full
   fi
+
+  [[ "$MANAGED_DEPLOYMENT_PAUSED" == "false" ]] || return 0
+
+  info "Managed deployment completed."
 
   if confirm "Run the read-only health check now?"; then
     DIGITAFRICA_INVENTORY="$INVENTORY" \
