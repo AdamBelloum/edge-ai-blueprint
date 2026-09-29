@@ -72,6 +72,19 @@ deploy_infrastructure() {
   "${SETUP_WIZARD}" --deploy
 }
 
+resume_managed_oidc_deployment() {
+  local tier
+
+  require_executable "${SETUP_WIZARD}"
+
+  if ! tier="$(choose_tier)"; then
+    info 'Managed OIDC resume cancelled.'
+    return 0
+  fi
+
+  "${SETUP_WIZARD}" --resume-managed-oidc "${tier}"
+}
+
 clean_vms_for_fresh_deployment() {
   local tier inventory confirmation
 
@@ -122,6 +135,7 @@ DIGITAfrica administrator
   1) Run infrastructure health check
   2) Configure and deploy infrastructure
   3) Clean VMs for a fresh deployment (destructive)
+  4) Resume paused Managed-Keycloak OIDC deployment
   0) Exit
 MENU
 
@@ -130,8 +144,9 @@ MENU
       1) run_health_check ;;
       2) deploy_infrastructure ;;
       3) clean_vms_for_fresh_deployment ;;
+      4) resume_managed_oidc_deployment ;;
       0) info 'Exiting.'; exit 0 ;;
-      *) warn 'Choose 0, 1, 2, or 3.' ;;
+      *) warn 'Choose 0, 1, 2, 3, or 4.' ;;
     esac
   done
 }

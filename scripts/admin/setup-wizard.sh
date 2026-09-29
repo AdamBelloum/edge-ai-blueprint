@@ -51,12 +51,18 @@ usage() {
 Usage:
   scripts/admin/setup-wizard.sh
   scripts/admin/setup-wizard.sh --deploy
+  scripts/admin/setup-wizard.sh --resume-managed-oidc <tier1|tier2>
 
 Creates/replaces a local ignored Tier-1 or Tier-2 inventory and configuration.
 
 --deploy
   After configuration confirmation, offer to run the selected deployment
   workflow immediately.
+
+--resume-managed-oidc <tier1|tier2>
+  Read the saved local configuration and resume a paused Managed-Keycloak OIDC
+  deployment after trusted TLS is available. Platform and identity phases are
+  not rerun.
 USAGE
 }
 
@@ -679,28 +685,131 @@ MENU
   done
 }
 
-run_managed_oidc_deployment() {
-  local keycloak_url jupyterhub_url secret_root
+load_saved_managed_oidc_configuration() {
+  local tier="$1"
+  local inventory_json
+  local -a saved_values
 
-  require_command curl
+  case "$tier" in
+    tier1|tier2)
+      DEPLOYMENT_TIER="$tier"
+      ;;
+    *)
+      die "Unsupported deployment tier for managed OIDC resume: ${tier}"
+      ;;
+  esac
+
+  WORKSHOP_DIR="${WORKSHOP_ROOT}/${DEPLOYMENT_TIER}"
+  INVENTORY="${WORKSHOP_DIR}/hosts.ini"
+  VARS_DIR="${WORKSHOP_DIR}/group_vars"
+  VARS_FILE="${VARS_DIR}/all.yml"
+
+  [[ -f "$INVENTORY" ]] ||
+    die "Saved ${DEPLOYMENT_TIER} inventory is missing: ${INVENTORY}"
+  [[ -f "$VARS_FILE" ]] ||
+    die "Saved ${DEPLOYMENT_TIER} variables are missing: ${VARS_FILE}"
+
+  inventory_json="$(
+    ansible-inventory -i "$INVENTORY" \
+      --host "${DEPLOYMENT_TIER}-server"
+  )" || die "Could not read the saved ${DEPLOYMENT_TIER} Ansible configuration."
+
+  mapfile -t saved_values < <(
+    python3 -c '
+import json
+import sys
+from urllib.parse import urlsplit
+
+data = json.load(sys.stdin)
+try:
+    deployment = data[sys.argv[1]]
+    jupyterhub = deployment["jupyterhub"]
+    identity = deployment["identity"]
+    public_url = urlsplit(jupyterhub["jupyterhub_public_url"])
+
+    if public_url.scheme != "https" or public_url.path.rstrip("/") != "/jupyter":
+        raise ValueError("jupyterhub_public_url must be an HTTPS /jupyter URL")
+    if not public_url.netloc:
+        raise ValueError("jupyterhub_public_url has no public host")
+    if deployment["profile"] != "managed-keycloak-oidc":
+        raise ValueError("profile is not managed-keycloak-oidc")
+    if identity["enabled"] is not True:
+        raise ValueError("identity.enabled is not true")
+
+    values = [
+        deployment["profile"],
+        deployment["tls_mode"],
+        public_url.netloc,
+        identity["namespace"],
+        identity["realm"],
+        identity["admin_user"],
+        identity["bootstrap_admin_password_file"],
+    ]
+except (KeyError, TypeError, ValueError) as error:
+    raise SystemExit(f"Saved configuration is not a valid managed OIDC deployment: {error}")
+
+for value in values:
+    print(value)
+' "$DEPLOYMENT_TIER" <<<"$inventory_json"
+  )
+
+  [[ "${#saved_values[@]}" == 7 ]] ||
+    die "Could not load the saved managed OIDC configuration from ${VARS_FILE}."
+
+  PROFILE="${saved_values[0]}"
+  TLS_MODE="${saved_values[1]}"
+  PUBLIC_HOST="${saved_values[2]}"
+  KEYCLOAK_NAMESPACE="${saved_values[3]}"
+  KEYCLOAK_REALM="${saved_values[4]}"
+  KEYCLOAK_ADMIN_USER="${saved_values[5]}"
+  KEYCLOAK_ADMIN_PASSWORD_FILE="${saved_values[6]}"
+  IDENTITY_ENABLED="true"
+
+  [[ "$TLS_MODE" == "letsencrypt" || "$TLS_MODE" == "provided" ]] ||
+    die "Saved managed OIDC configuration has unsupported TLS mode: ${TLS_MODE}"
+  [[ -r "$KEYCLOAK_ADMIN_PASSWORD_FILE" ]] ||
+    die "Saved Keycloak administrator password file is missing or unreadable: ${KEYCLOAK_ADMIN_PASSWORD_FILE}"
+}
+
+resume_managed_oidc_deployment() {
+  local tier="$1"
+
   require_command ansible
+  require_command ansible-inventory
+  require_command curl
   require_command python3
 
-  keycloak_url="https://${PUBLIC_HOST}/keycloak"
-  jupyterhub_url="https://${PUBLIC_HOST}/jupyter"
-  secret_root="${REPO_ROOT}/secrets/keycloak/${PUBLIC_HOST}/${KEYCLOAK_REALM}"
+  load_saved_managed_oidc_configuration "$tier"
 
-  DIGITAFRICA_INVENTORY="$INVENTORY" \
-    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" platform
+  info "Resuming managed OIDC deployment for ${DEPLOYMENT_TIER}."
+  info "Platform and identity phases will not be rerun."
 
-  DIGITAFRICA_INVENTORY="$INVENTORY" \
-    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" identity
-
-  if ! wait_for_trusted_keycloak_tls; then
+  if ! trusted_keycloak_tls_ready; then
+    if show_keycloak_tls_status; then
+      :
+    fi
     keycloak_tls_recovery_menu
     [[ "$MANAGED_DEPLOYMENT_PAUSED" == "false" ]] ||
       return 0
   fi
+
+  run_managed_oidc_post_tls
+
+  info "Managed OIDC deployment resumed successfully."
+
+  if confirm "Run the read-only health check now?"; then
+    DIGITAFRICA_INVENTORY="$INVENTORY" \
+    DIGITAFRICA_DEPLOYMENT_GROUP="${DEPLOYMENT_TIER}_server" \
+      "$HEALTH_SCRIPT" all
+  fi
+}
+
+run_managed_oidc_post_tls() {
+  local keycloak_url jupyterhub_url secret_root
+
+  keycloak_url="https://${PUBLIC_HOST}/keycloak"
+  jupyterhub_url="https://${PUBLIC_HOST}/jupyter"
+  secret_root="${REPO_ROOT}/secrets/keycloak/${PUBLIC_HOST}/${KEYCLOAK_REALM}"
 
   KEYCLOAK_ADMIN_PASSWORD_FILE="$KEYCLOAK_ADMIN_PASSWORD_FILE" \
     "$KEYCLOAK_BOOTSTRAP" \
@@ -718,6 +827,26 @@ run_managed_oidc_deployment() {
 
   DIGITAFRICA_INVENTORY="$INVENTORY" \
     "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" applications
+}
+
+run_managed_oidc_deployment() {
+  require_command curl
+  require_command ansible
+  require_command python3
+
+  DIGITAFRICA_INVENTORY="$INVENTORY" \
+    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" platform
+
+  DIGITAFRICA_INVENTORY="$INVENTORY" \
+    "$DEPLOY_SCRIPT" "$DEPLOYMENT_TIER" identity
+
+  if ! wait_for_trusted_keycloak_tls; then
+    keycloak_tls_recovery_menu
+    [[ "$MANAGED_DEPLOYMENT_PAUSED" == "false" ]] ||
+      return 0
+  fi
+
+  run_managed_oidc_post_tls
 }
 
 run_deployment() {
@@ -758,6 +887,14 @@ main() {
   case "${1:-}" in
     --deploy)
       RUN_DEPLOYMENT="true"
+      ;;
+    --resume-managed-oidc)
+      [[ "$#" == 2 ]] ||
+        die "Usage: scripts/admin/setup-wizard.sh --resume-managed-oidc <tier1|tier2>"
+      cd "$REPO_ROOT"
+      check_prerequisites
+      resume_managed_oidc_deployment "$2"
+      return 0
       ;;
     ""|--configure)
       ;;
