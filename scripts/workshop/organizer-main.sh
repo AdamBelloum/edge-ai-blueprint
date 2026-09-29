@@ -52,6 +52,10 @@ Actions:
   prepare                  Validate readiness and initialise a beginner or advanced cohort.
   reset                    Delete participant workspaces, Keycloak users, and groups.
 
+Interactive menu reset also offers to remove the local participant credential
+export after remote participant cleanup. The explicit reset action does not
+offer this local-file prompt.
+
 Reset does not change tutorial mode or create participant accounts. For
 administrator-password authentication, the reset helper prompts privately,
 or reads KEYCLOAK_ADMIN_PASSWORD_FILE when that protected file is configured.
@@ -161,7 +165,7 @@ run_reset() {
     args+=(--admin-user "$ADMIN_USER")
   fi
 
-  exec "$RESET_HELPER" "${args[@]}"
+  "$RESET_HELPER" "${args[@]}"
 }
 
 if [[ "$ACTION" == prepare ]]; then
@@ -188,6 +192,19 @@ case "$choice" in
       read -r SERVER_URL
     fi
     run_reset
+
+    credential_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/secrets/workshops/ab-01.lab.uvalight.net-beginner-credentials.tsv"
+    if [[ -f "$credential_file" ]]; then
+      read -r -p "Remove local participant credentials (${credential_file})? [y/N]: " remove_credentials
+      if [[ "$remove_credentials" == [Yy] ]]; then
+        rm -f -- "$credential_file"
+        printf 'Removed local participant credential file.\n'
+      else
+        printf 'Retained local participant credential file.\n'
+      fi
+    fi
+
+    exec "$0"
     ;;
   0) exit 0 ;;
   *) fail 'Choose 0, 1, or 2.' ;;
