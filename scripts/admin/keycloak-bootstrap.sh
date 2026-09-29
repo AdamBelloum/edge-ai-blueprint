@@ -79,6 +79,12 @@ curl_request() {
   curl "${args[@]}" "$@"
 }
 
+curl_status_request() {
+  local -a args=(--silent --show-error)
+  [[ -n "$CA_CERT" ]] && args+=(--cacert "$CA_CERT")
+  curl "${args[@]}" "$@"
+}
+
 validate_inputs() {
   [[ "$SERVER_URL" =~ ^https://[^[:space:]]+$ ]] ||
     die "--server-url must be an HTTPS URL."
@@ -174,12 +180,15 @@ api_exists() {
   local status body
 
   body="$(mktemp)"
-  status="$(
-    curl_request --output "$body" --write-out '%{http_code}' \
+  if ! status="$(
+    curl_status_request --output "$body" --write-out '%{http_code}' \
       --header "Authorization: Bearer ${token}" \
       --header 'Accept: application/json' \
-      "${SERVER_URL}/${path}" || true
-  )"
+      "${SERVER_URL}/${path}"
+  )"; then
+    rm -f "$body"
+    die "Keycloak API request failed while checking GET /${path}"
+  fi
 
   case "$status" in
     2*) cat "$body"; rm -f "$body"; return 0 ;;
