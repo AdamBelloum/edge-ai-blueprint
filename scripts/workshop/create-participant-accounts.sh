@@ -26,6 +26,7 @@ reset_password_for=""
 reset_all_passwords=false
 delete_all_participants=false
 create_missing=false
+status_only=false
 
 usage() {
   cat <<'EOF'
@@ -60,6 +61,7 @@ Safety:
   --reset-all-passwords        Reset every expected participant account from the inventory
   --create-missing             With --reset-all-passwords, create missing expected users/groups
   --delete-all-participants    Delete inventory-derived users and matching groups
+  --status                     Read-only status of expected users, groups, and memberships
   --dry-run                    Show intended actions without changing Keycloak
   -h, --help                   Show this help
 
@@ -98,6 +100,7 @@ while [[ $# -gt 0 ]]; do
     --reset-all-passwords) reset_all_passwords=true; shift ;;
     --delete-all-participants) delete_all_participants=true; shift ;;
     --create-missing) create_missing=true; shift ;;
+    --status) status_only=true; shift ;;
     --dry-run) dry_run=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
@@ -128,8 +131,8 @@ require_command curl
 require_command jq
 require_command python3
 [[ -n "${server_url}" ]] || fail "--server-url is required"
-[[ "${delete_all_participants}" == true || -n "${credentials_output}" ]] || \
-  fail "--credentials-output is required unless --delete-all-participants is used"
+[[ "${delete_all_participants}" == true || "${status_only}" == true || -n "${credentials_output}" ]] || \
+  fail "--credentials-output is required unless --delete-all-participants or --status is used"
 [[ -f "${inventory}" ]] || fail "Inventory not found: ${inventory}"
 [[ "${server_url}" =~ ^https:// ]] || fail "--server-url must use https://"
 [[ "${group_prefix}" =~ ^[A-Za-z0-9_-]+$ ]] || fail "--group-prefix may contain only letters, numbers, _ and -"
@@ -150,6 +153,16 @@ fi
 [[ "${create_missing}" != true || "${reset_all_passwords}" == true ]] || \
   fail "--create-missing requires --reset-all-passwords"
 
+if [[ "${status_only}" == true ]]; then
+  [[ "${delete_all_participants}" != true ]] || fail "--status cannot be combined with --delete-all-participants"
+  [[ -z "${reset_password_for}" ]] || fail "--status cannot be combined with --reset-password-for"
+  [[ "${reset_all_passwords}" != true ]] || fail "--status cannot be combined with --reset-all-passwords"
+  [[ "${create_missing}" != true ]] || fail "--status cannot be combined with --create-missing"
+  [[ "${dry_run}" != true ]] || fail "--status cannot be combined with --dry-run"
+fi
+
+interactive_password_auth=false
+
 if [[ "${dry_run}" != true ]]; then
   if [[ -n "${admin_client_id}${admin_client_secret_file}" ]]; then
     [[ -n "${admin_client_id}" && -n "${admin_client_secret_file}" ]] || \
@@ -160,16 +173,14 @@ if [[ "${dry_run}" != true ]]; then
     if [[ -n "${password_file}" ]]; then
       require_mode_600 "${password_file}"
     else
-      read -r -s -p "Keycloak administrator password for ${admin_user} in realm ${admin_realm}: " admin_password </dev/tty
-      printf '\n' >&2
-      [[ -n "${admin_password}" ]] || fail "A Keycloak administrator password is required."
+      interactive_password_auth=true
     fi
   else
     fail "Choose service-account authentication or supply --admin-user"
   fi
 fi
 
-if [[ "${delete_all_participants}" != true && -e "${credentials_output}" ]]; then
+if [[ "${delete_all_participants}" != true && "${status_only}" != true && -e "${credentials_output}" ]]; then
   fail "Credentials output already exists; choose a new path to prevent accidental overwrite: ${credentials_output}"
 fi
 
@@ -249,7 +260,34 @@ get_token() {
   curl --silent --show-error --fail --request POST "${endpoint}" "${payload[@]}" | jq -er '.access_token'
 }
 
-access_token="$(get_token)" || fail "Could not obtain a Keycloak administrator access token"
+if [[ "${interactive_password_auth}" == true ]]; then
+  access_token=""
+  for attempt in 1 2 3; do
+    if ! read -r -s -p "Keycloak administrator password for ${admin_user} in realm ${admin_realm} (attempt ${attempt}/3): " admin_password </dev/tty; then
+      printf '\n' >&2
+      fail "Could not read the Keycloak administrator password; the participant-account operation was not performed."
+    fi
+    printf '\n' >&2
+
+    if [[ -z "${admin_password}" ]]; then
+      printf '[WARN] A non-empty Keycloak administrator password is required (%d/3 attempts used).\n' "${attempt}" >&2
+      continue
+    fi
+
+    if access_token="$(get_token 2>/dev/null)"; then
+      break
+    fi
+    unset admin_password
+
+    if (( attempt < 3 )); then
+      printf '[WARN] Keycloak authentication failed (%d/3 attempts used). Check the password and try again.\n' "${attempt}" >&2
+    fi
+  done
+
+  [[ -n "${access_token}" ]] || fail "Keycloak authentication failed after 3 attempts; the participant-account operation was not performed."
+else
+  access_token="$(get_token)" || fail "Could not obtain a Keycloak administrator access token"
+fi
 unset admin_password
 
 api() {
@@ -281,7 +319,7 @@ cleanup_credentials() {
   exit "${status}"
 }
 
-if [[ "${delete_all_participants}" != true ]]; then
+if [[ "${delete_all_participants}" != true && "${status_only}" != true ]]; then
   credentials_dir="$(dirname "${credentials_output}")"
   credentials_name="$(basename "${credentials_output}")"
   mkdir -p "${credentials_dir}"
@@ -301,6 +339,58 @@ find_user_id() {
   encoded="$(urlencode "${username}")"
   api GET "/users?username=${encoded}&exact=true" | jq -er --arg username "${username}" '.[] | select(.username == $username) | .id' | head -n 1
 }
+
+if [[ "${status_only}" == true ]]; then
+  users_present=0
+  groups_present=0
+  valid_memberships=0
+  inconsistent=false
+
+  for index in "${!workers[@]}"; do
+    username="$(printf '%s%02d' "${group_prefix}" "$((index + 1))")"
+    user_id=""
+    group_id=""
+
+    if user_id="$(find_user_id "${username}" 2>/dev/null)"; then
+      users_present=$((users_present + 1))
+    fi
+    if group_id="$(find_group_id "${username}" 2>/dev/null)"; then
+      groups_present=$((groups_present + 1))
+    fi
+
+    if [[ -n "${user_id}" && -n "${group_id}" ]]; then
+      if api GET "/users/${user_id}/groups?briefRepresentation=true&first=0&max=1000" |
+          jq -e --arg group_id "${group_id}" '.[] | select(.id == $group_id)' >/dev/null; then
+        valid_memberships=$((valid_memberships + 1))
+        printf 'participant_account=%s status=complete worker=%s\n' "${username}" "${workers[index]}"
+      else
+        inconsistent=true
+        printf 'participant_account=%s status=missing-membership worker=%s\n' "${username}" "${workers[index]}"
+      fi
+    elif [[ -z "${user_id}" && -z "${group_id}" ]]; then
+      printf 'participant_account=%s status=absent worker=%s\n' "${username}" "${workers[index]}"
+    else
+      inconsistent=true
+      printf 'participant_account=%s status=partial worker=%s\n' "${username}" "${workers[index]}"
+    fi
+  done
+
+  if [[ "${inconsistent}" == true ]]; then
+    overall_status="inconsistent"
+  elif [[ "${users_present}" -eq 0 && "${groups_present}" -eq 0 ]]; then
+    overall_status="absent"
+  elif [[ "${users_present}" -eq "${#workers[@]}" &&
+          "${groups_present}" -eq "${#workers[@]}" &&
+          "${valid_memberships}" -eq "${#workers[@]}" ]]; then
+    overall_status="complete"
+  else
+    overall_status="inconsistent"
+  fi
+
+  printf 'participant_account_status=%s expected=%d users_present=%d groups_present=%d valid_memberships=%d\n' \
+    "${overall_status}" "${#workers[@]}" "${users_present}" "${groups_present}" "${valid_memberships}"
+  exit 0
+fi
 
 random_password() {
   python3 - <<'PY'

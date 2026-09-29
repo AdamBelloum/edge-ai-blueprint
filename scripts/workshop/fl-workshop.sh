@@ -449,8 +449,8 @@ REMOTE
   if "$ASSUME_COHORT_RESET"; then
     log "Proceeding with the explicitly confirmed participant-workspace reset."
   elif ! confirm "$confirmation"; then
-    log "No change made."
-    return 0
+    log "Cohort initialisation cancelled; no change made."
+    return 3
   fi
 
   run_deployment_remote "$(cat <<REMOTE
