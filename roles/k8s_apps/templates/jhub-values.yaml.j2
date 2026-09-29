@@ -7,7 +7,7 @@
 {% set workshop_group_nodes = {} %}
 {% for _worker in fl_workshop_client_hosts %}
 {% set _group_name = 'group_%02d' | format(loop.index) %}
-{% set _node_name = hostvars[_worker].ansible_fqdn | default(_worker) %}
+{% set _node_name = hostvars[_worker].ansible_fqdn %}
 {% set _ = workshop_group_nodes.update({_group_name: _node_name}) %}
 {% endfor %}
 {% set flower_server_host = groups[fl_workshop_server_group][0] %}

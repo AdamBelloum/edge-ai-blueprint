@@ -15,7 +15,7 @@
   ansible.builtin.command:
     cmd: >-
       kubectl wait --for=condition=Ready
-      node/{{ hostvars[item].ansible_fqdn | default(item) }} --timeout=30s
+      node/{{ hostvars[item].ansible_fqdn }} --timeout=30s
   loop: "{{ fl_workshop_client_hosts }}"
   changed_when: false
 

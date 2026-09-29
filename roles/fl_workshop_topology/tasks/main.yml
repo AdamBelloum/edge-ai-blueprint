@@ -28,3 +28,28 @@
   tags:
     - workshop_assets
     - workshop_seed
+
+- name: Gather Kubernetes node identity for every workshop client
+  ansible.builtin.setup:
+    filter: ansible_fqdn
+  loop: "{{ fl_workshop_client_hosts }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  run_once: true
+  tags:
+    - workshop_assets
+    - workshop_seed
+
+- name: Require a resolved Kubernetes node name for every workshop client
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].ansible_fqdn is defined
+      - hostvars[item].ansible_fqdn | length > 0
+    fail_msg: >-
+      Workshop client {{ item }} has no resolved ansible_fqdn. A Kubernetes
+      node name is required for deterministic participant-server placement.
+  loop: "{{ fl_workshop_client_hosts }}"
+  run_once: true
+  tags:
+    - workshop_assets
+    - workshop_seed
