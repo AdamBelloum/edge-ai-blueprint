@@ -26,9 +26,9 @@ ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 usage() {
   cat <<'EOF'
 Usage:
-  organizer-main.sh [OPTIONS] [menu|prepare|reset|status]
+  organizer-main.sh [OPTIONS] [menu|prepare|reset|status|release-solutions]
 
-The single organiser entry point for workshop preparation and participant cleanup.
+The single organiser entry point for workshop preparation, solution release, and participant cleanup.
 
 Preparation options:
   --mode beginner|advanced  Workshop level. Prompted for interactive preparation;
@@ -55,6 +55,7 @@ Actions:
   prepare                  Validate readiness and initialise a beginner or advanced cohort.
   reset                    Delete participant workspaces, Keycloak users, and groups.
   status                   Read-only status of expected participant identities.
+  release-solutions        Release reference solutions for an advanced workshop.
 
 Interactive menu reset also offers to remove the local participant credential
 export after remote participant cleanup. The explicit reset action does not
@@ -84,7 +85,7 @@ while (($#)); do
     --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
     --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
     --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    menu|prepare|status)
+    menu|prepare|status|release-solutions)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"; shift
       ;;
@@ -107,7 +108,7 @@ case "$ACTION" in
       fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
     fi
     ;;
-  reset|status)
+  reset|status|release-solutions)
     [[ -z "$MODE" ]] || fail '--mode is valid only with the prepare action.'
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with the prepare action.'
     "$CONFIRM_COHORT_RESET" && fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
@@ -242,12 +243,16 @@ elif [[ "$ACTION" == reset ]]; then
 elif [[ "$ACTION" == status ]]; then
   check_participant_accounts
   exit 0
+elif [[ "$ACTION" == release-solutions ]]; then
+  "$COHORT_HELPER" release-solutions
+  exit 0
 fi
 
-[[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare or reset.'
+[[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare, reset, or release-solutions.'
 printf '\nDIGITAfrica workshop organiser\n\n'
 printf '  1) Prepare and initialise a beginner or advanced workshop\n'
 printf '  2) Delete participant workspaces and Keycloak identities\n'
+printf '  3) Release reference solutions for advanced workshop\n'
 printf '  0) Exit\n\n'
 printf 'Selection: '
 read -r choice
@@ -289,7 +294,11 @@ case "$choice" in
 
     exec "$0"
     ;;
+  3)
+    "$COHORT_HELPER" release-solutions
+    exec "$0"
+    ;;
   0) exit 0 ;;
-  *) fail 'Choose 0, 1, or 2.' ;;
+  *) fail 'Choose 0, 1, 2, or 3.' ;;
 esac
 
