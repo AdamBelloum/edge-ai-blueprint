@@ -14,7 +14,7 @@ set -euo pipefail
 WIZARD_VERSION="5.5.1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 HELPER="$SCRIPT_DIR/fl-workshop.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 

@@ -6,12 +6,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-PREPARE_HELPER="$SCRIPT_DIR/organizer_wizard.sh"
-COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
-ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
-RESET_HELPER="$SCRIPT_DIR/reset-new-workshop.sh"
-FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+PREPARE_HELPER="$SCRIPT_DIR/federated-learning/organizer_wizard.sh"
+COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
+ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
+RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
 
 NON_INTERACTIVE=false
 CONFIRM_COHORT_RESET=false

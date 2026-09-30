@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WORKSHOP_CONTEXT="${SCRIPT_DIR}/workshop-context.sh"
+WORKSHOP_CONTEXT="${SCRIPT_DIR}/../lib/workshop-context.sh"
 
 [[ -r "${WORKSHOP_CONTEXT}" ]] || {
   printf 'ERROR: Missing workshop context helper: %s\n' "${WORKSHOP_CONTEXT}" >&2

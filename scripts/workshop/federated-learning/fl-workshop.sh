@@ -11,9 +11,9 @@ set -o nounset
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
-COHORT_MAPPING_HELPER="$SCRIPT_DIR/reconcile-cohort-mapping.sh"
+COHORT_MAPPING_HELPER="$SCRIPT_DIR/../identity/reconcile-cohort-mapping.sh"
 
 usage() {
   cat <<'EOF'
@@ -407,7 +407,7 @@ start_new_cohort() {
 
 This action deletes only the persistent JupyterHub home workspaces of the
 inventory-derived participant identities. Active participant servers must not
-be running. When invoked through reset-new-workshop.sh, selected participant
+be running. When invoked through reset-federated-learning-workshop.sh, selected participant
 servers are stopped automatically after its first reset confirmation; when
 using this helper directly, stop them through JupyterHub first.
 
@@ -721,7 +721,7 @@ main() {
       release_reference_solutions
       ;;
     reconcile-cohort-mapping)
-      exec "$SCRIPT_DIR/reconcile-cohort-mapping.sh"
+      exec "$SCRIPT_DIR/../identity/reconcile-cohort-mapping.sh"
       ;;
     new-cohort)
       start_new_cohort "$COHORT_MODE"

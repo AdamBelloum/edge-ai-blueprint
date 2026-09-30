@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
 readonly FLOWER_SERVICE="fl-workshop-server.service"

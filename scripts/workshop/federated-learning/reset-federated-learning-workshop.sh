@@ -12,11 +12,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
+ACCOUNT_HELPER="$SCRIPT_DIR/../identity/create-participant-accounts.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 
 SERVER_URL=""
 REALM="digitafrica"
@@ -28,7 +28,7 @@ ADMIN_CLIENT_SECRET_FILE=""
 usage() {
   cat <<'EOF'
 Usage:
-  reset-new-workshop.sh --server-url URL \
+  reset-federated-learning-workshop.sh --server-url URL \
     (--admin-user USER | --admin-client-id ID --admin-client-secret-file FILE) \
     [--realm NAME] [--admin-realm NAME]
 
