@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 IDENTITY_RESET_HELPER="$SCRIPT_DIR/../identity/reset-participant-environment.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"

@@ -138,8 +138,8 @@ if ! load_workshop_context; then
   exit 2
 fi
 
-# shellcheck source=../lib/common.sh
-source "${SCRIPT_DIR}/../lib/common.sh"
+# shellcheck source=../../lib/common.sh
+source "${SCRIPT_DIR}/../../lib/common.sh"
 
 run_preflight() {
   print_heading "Workshop platform preflight"

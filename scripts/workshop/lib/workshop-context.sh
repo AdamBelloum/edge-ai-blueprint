@@ -3,8 +3,9 @@
 # This deliberately has no Tier-1/Tier-2 semantics.
 
 WORKSHOP_CONTEXT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WORKSHOP_CONTEXT_REPOSITORY_ROOT="$(cd -- "${WORKSHOP_CONTEXT_DIR}/../.." && pwd)"
-WORKSHOP_RELEASE_RECORD="${WORKSHOP_RELEASE_RECORD:-${WORKSHOP_CONTEXT_DIR}/workshop-release.env}"
+WORKSHOP_SCRIPT_DIR="$(cd -- "${WORKSHOP_CONTEXT_DIR}/.." && pwd)"
+WORKSHOP_CONTEXT_REPOSITORY_ROOT="$(cd -- "${WORKSHOP_CONTEXT_DIR}/../../.." && pwd)"
+WORKSHOP_RELEASE_RECORD="${WORKSHOP_RELEASE_RECORD:-${WORKSHOP_SCRIPT_DIR}/workshop-release.env}"
 
 load_workshop_context() {
   [[ -r "${WORKSHOP_RELEASE_RECORD}" ]] || {
