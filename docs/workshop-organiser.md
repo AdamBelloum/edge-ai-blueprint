@@ -44,35 +44,40 @@ The explicit acknowledgement is required because cohort preparation may replace 
 
 ## Reset participant state
 
-Choose menu option `2` when a workshop cycle has finished or must be restarted. The organiser asks for the public Keycloak URL when it has not already been configured.
+The organiser provides two separate reset actions. Both preserve long-lived
+platform and administrator material.
 
-Reset removes the selected participant state:
+### Full federated-learning reset
 
-- participant JupyterHub workspaces;
-- participant Keycloak users; and
-- participant Keycloak groups.
+Choose menu option `2`, or run `organizer-main.sh reset`, after a workshop
+cycle finishes or when the complete cohort must be removed.
 
-It does not change the tutorial mode, create a replacement cohort, start Flower, or alter platform infrastructure.
+It stops the organiser-controlled Flower server and removes:
 
-The interactive menu reset also offers to remove the local participant credential export. In the currently configured deployment this is:
+- selected participant JupyterHub servers and workspaces;
+- inventory-derived participant Keycloak users and groups; and
+- matching protected local credential exports under `secrets/workshops/`.
 
-```text
-secrets/workshops/ab-01.lab.uvalight.net-beginner-credentials.tsv
-```
+The confirmation explicitly includes deletion of stale initial credentials.
+They must not be committed to Git.
 
-Remove this file when the associated participant accounts have been reset. It contains stale initial credentials and must not be committed to Git. The organiser must explicitly confirm its removal.
+### Participant-identity reset only
 
-The reset action leaves long-lived platform and administrator material intact, including:
+Choose menu option `3`, or run `organizer-main.sh reset-participants`, when
+only participant identities and their credential exports must be removed.
 
-- the Keycloak realm and administrator credentials;
-- the JupyterHub OIDC client and client secret;
-- TLS certificates and private keys;
-- SSH keys; and
-- deployment inventory and configuration.
+It removes inventory-derived participant Keycloak users/groups and matching
+protected local credential exports. It does **not** stop or start Flower,
+remove JupyterHub servers or workspaces, change tutorial mode, create a new
+cohort, or alter platform infrastructure.
 
-After reset, JupyterHub continues to redirect users to Keycloak. Removed participants cannot authenticate because their accounts no longer exist. Begin a new workshop cycle with preparation before participants can use the platform again.
+Both actions leave the Keycloak realm and administrator credentials, JupyterHub
+OIDC client material, TLS certificates/private keys, SSH keys, and deployment
+inventory/configuration intact.
 
-> **Scope note:** local credential-export removal is offered by interactive menu option `2`. The explicit command-line `reset` action removes remote participant state but does not currently prompt to remove the local credential file.
+After a full reset, prepare a new workshop cycle before participants use the
+platform again. An identity-only reset deliberately retains existing
+FL/JupyterHub state.
 
 ## Participant guidance
 

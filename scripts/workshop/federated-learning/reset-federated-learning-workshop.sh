@@ -12,7 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-ACCOUNT_HELPER="$SCRIPT_DIR/../identity/create-participant-accounts.sh"
+IDENTITY_RESET_HELPER="$SCRIPT_DIR/../identity/reset-participant-environment.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
@@ -57,7 +57,7 @@ while (($#)); do
 done
 
 [[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
-[[ -x "$ACCOUNT_HELPER" ]] || fail "Missing executable account helper: $ACCOUNT_HELPER"
+[[ -x "$IDENTITY_RESET_HELPER" ]] || fail "Missing executable participant-environment reset helper: $IDENTITY_RESET_HELPER"
 [[ -x "$COHORT_HELPER" ]] || fail "Missing executable cohort helper: $COHORT_HELPER"
 [[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
 [[ -r "$COMMON" ]] || fail "Missing common helper: $COMMON"
@@ -136,10 +136,10 @@ printf '%s\n' \
   "Participant identities: ${GROUP_IDS[*]}" \
   '' \
   'This permanently deletes only the selected participant JupyterHub workspaces,
-   inventory-derived Keycloak users, and matching Keycloak groups.' \
+   inventory-derived Keycloak users/groups, and matching local credential exports.' \
   'Ensure participants have first had time to copy any needed data from their running servers.' \
   'Tutorial state, administrators, service accounts, and unrelated records are not changed.'
-printf 'Delete these participant workspaces and Keycloak identities? [y/N]: '
+printf 'Delete these participant workspaces, Keycloak identities, and local credential exports? [y/N]: '
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
 
@@ -151,18 +151,18 @@ stop_selected_participant_servers
 workspace_args=(delete-workspaces --yes)
 "$COHORT_HELPER" "${workspace_args[@]}"
 
-account_args=(
+identity_reset_args=(
   --server-url "$SERVER_URL"
   --realm "$REALM"
-  --delete-all-participants
+  --yes
 )
-[[ -n "$ADMIN_REALM" ]] && account_args+=(--admin-realm "$ADMIN_REALM")
+[[ -n "$ADMIN_REALM" ]] && identity_reset_args+=(--admin-realm "$ADMIN_REALM")
 if [[ -n "$ADMIN_USER" ]]; then
-  account_args+=(--admin-user "$ADMIN_USER")
+  identity_reset_args+=(--admin-user "$ADMIN_USER")
 else
-  account_args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
+  identity_reset_args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
 fi
 
-"$ACCOUNT_HELPER" "${account_args[@]}"
+"$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"
 
-printf 'New workshop cleanup completed: selected participant workspaces and Keycloak identities were deleted.\n'
+printf 'Full federated-learning workshop cleanup completed.\n'

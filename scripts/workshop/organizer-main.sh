@@ -10,6 +10,7 @@ PREPARE_HELPER="$SCRIPT_DIR/federated-learning/organizer_wizard.sh"
 COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
 
@@ -27,7 +28,7 @@ ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 usage() {
   cat <<'EOF'
 Usage:
-  organizer-main.sh [OPTIONS] [menu|prepare|reset|status|release-solutions|flower]
+  organizer-main.sh [OPTIONS] [menu|prepare|reset|reset-participants|status|release-solutions|flower]
 
 The single organiser entry point for workshop preparation, solution release, and participant cleanup.
 
@@ -43,7 +44,7 @@ Prepare checks that no active participant identities exist, validates readiness,
 initialises the selected tutorial mode and fresh workspaces, then creates one
 Keycloak identity per active worker. It never starts Flower before cohort initialisation.
 
-Keycloak options (required for prepare, reset, and status):
+Keycloak options (required for prepare, reset, reset-participants, and status):
   --server-url URL         Public Keycloak base URL (or KEYCLOAK_SERVER_URL).
   --realm NAME             Participant realm. Default: digitafrica.
   --admin-user USER        Keycloak administrator. Default: admin.
@@ -54,18 +55,18 @@ Keycloak options (required for prepare, reset, and status):
 Actions:
   menu                     Show the organiser menu. Default.
   prepare                  Validate readiness and initialise a beginner or advanced cohort.
-  reset                    Delete participant workspaces, Keycloak users, and groups.
+  reset                    Full FL reset: stop Flower, remove participant servers,
+                           workspaces, identities, and credential exports.
+  reset-participants       Remove only participant identities and matching local
+                           credential exports; leaves FL/JupyterHub state unchanged.
   status                   Read-only status of expected participant identities.
   release-solutions        Release reference solutions for an advanced workshop.
   flower                    Open the interactive Flower server lifecycle manager.
 
-Interactive menu reset also offers to remove the local participant credential
-export after remote participant cleanup. The explicit reset action does not
-offer this local-file prompt.
-
-Reset does not change tutorial mode or create participant accounts. For
-administrator-password authentication, the reset helper prompts privately,
-or reads KEYCLOAK_ADMIN_PASSWORD_FILE when that protected file is configured.
+Neither reset action changes tutorial mode or creates participant accounts.
+For administrator-password authentication, the selected reset helper prompts
+privately, or reads KEYCLOAK_ADMIN_PASSWORD_FILE when that protected file is
+configured.
 EOF
 }
 
@@ -87,13 +88,9 @@ while (($#)); do
     --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
     --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
     --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    menu|prepare|status|release-solutions|flower)
+    menu|prepare|reset|reset-participants|status|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"; shift
-      ;;
-    reset)
-      [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
-      ACTION="reset"; shift
       ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option or action: $1" ;;
@@ -110,7 +107,7 @@ case "$ACTION" in
       fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
     fi
     ;;
-  reset|status|release-solutions|flower)
+  reset|reset-participants|status|release-solutions|flower)
     [[ -z "$MODE" ]] || fail '--mode is valid only with the prepare action.'
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with the prepare action.'
     "$CONFIRM_COHORT_RESET" && fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
@@ -129,7 +126,8 @@ load_workshop_context
 [[ -x "$PREPARE_HELPER" ]] || fail "Missing prepare helper: $PREPARE_HELPER"
 [[ -x "$COHORT_HELPER" ]] || fail "Missing cohort helper: $COHORT_HELPER"
 [[ -x "$ACCOUNT_HELPER" ]] || fail "Missing account helper: $ACCOUNT_HELPER"
-[[ -x "$RESET_HELPER" ]] || fail "Missing reset helper: $RESET_HELPER"
+[[ -x "$RESET_HELPER" ]] || fail "Missing full FL reset helper: $RESET_HELPER"
+[[ -x "$PARTICIPANT_RESET_HELPER" ]] || fail "Missing participant-environment reset helper: $PARTICIPANT_RESET_HELPER"
 [[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
 
 common_args=()
@@ -286,11 +284,34 @@ run_reset() {
   "$RESET_HELPER" "${args[@]}"
 }
 
+run_reset_participants() {
+  local -a args=()
+
+  [[ "$SERVER_URL" =~ ^https:// ]] || \
+    fail 'reset-participants requires --server-url HTTPS_URL or KEYCLOAK_SERVER_URL.'
+  args+=(--server-url "$SERVER_URL" --realm "$REALM")
+  [[ -n "$ADMIN_REALM" ]] && args+=(--admin-realm "$ADMIN_REALM")
+
+  if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+    [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]] || \
+      fail 'Both --admin-client-id and --admin-client-secret-file are required.'
+    args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
+  else
+    ADMIN_USER="${ADMIN_USER:-admin}"
+    args+=(--admin-user "$ADMIN_USER")
+  fi
+
+  "$PARTICIPANT_RESET_HELPER" "${args[@]}"
+}
+
 if [[ "$ACTION" == prepare ]]; then
   run_prepare
   exit 0
 elif [[ "$ACTION" == reset ]]; then
   run_reset
+  exit 0
+elif [[ "$ACTION" == reset-participants ]]; then
+  run_reset_participants
   exit 0
 elif [[ "$ACTION" == status ]]; then
   check_participant_accounts
@@ -304,12 +325,13 @@ elif [[ "$ACTION" == flower ]]; then
   exit 0
 fi
 
-[[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare, reset, or release-solutions.'
+[[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare, reset, reset-participants, status, or release-solutions.'
 printf '\nDIGITAfrica workshop organiser\n\n'
 printf '  1) Prepare and initialise a beginner or advanced workshop\n'
-printf '  2) Delete participant workspaces and Keycloak identities\n'
-printf '  3) Release reference solutions for advanced workshop\n'
-printf '  4) Manage the Flower server (status, start, stop, parameters, logs)\n'
+printf '  2) Reset the full federated-learning workshop\n'
+printf '  3) Reset participant identities and credential exports only\n'
+printf '  4) Release reference solutions for advanced workshop\n'
+printf '  5) Manage the Flower server (status, start, stop, parameters, logs)\n'
 printf '  0) Exit\n\n'
 printf 'Selection: '
 read -r choice
@@ -328,38 +350,25 @@ case "$choice" in
       read -r SERVER_URL
     fi
     run_reset
-
-    credential_host="${SERVER_URL#https://}"
-    credential_host="${credential_host%%/*}"
-    credential_files=()
-    for credential_mode in beginner advanced; do
-      credential_file="${REPOSITORY_ROOT}/secrets/workshops/${credential_host}-${credential_mode}-credentials.tsv"
-      [[ -f "$credential_file" ]] && credential_files+=("$credential_file")
-    done
-
-    if ((${#credential_files[@]})); then
-      printf 'Local participant credential exports:\n'
-      printf '  %s\n' "${credential_files[@]}"
-      read -r -p "Remove these local participant credential exports? [y/N]: " remove_credentials
-      if [[ "$remove_credentials" == [Yy] ]]; then
-        rm -f -- "${credential_files[@]}"
-        printf 'Removed local participant credential export(s).\n'
-      else
-        printf 'Retained local participant credential export(s).\n'
-      fi
-    fi
-
     exec "$0"
     ;;
   3)
-    "$COHORT_HELPER" release-solutions
+    if [[ -z "$SERVER_URL" ]]; then
+      printf 'Public Keycloak URL (for example https://host/keycloak): '
+      read -r SERVER_URL
+    fi
+    run_reset_participants
     exec "$0"
     ;;
   4)
+    "$COHORT_HELPER" release-solutions
+    exec "$0"
+    ;;
+  5)
     run_flower_manager_menu
     exec "$0"
     ;;
   0) exit 0 ;;
-  *) fail 'Choose 0, 1, 2, 3, or 4.' ;;
+  *) fail 'Choose 0, 1, 2, 3, 4, or 5.' ;;
 esac
 
