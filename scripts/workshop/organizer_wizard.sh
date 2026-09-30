@@ -7,7 +7,7 @@
 # - Downloaded source data and prepared partitions are runtime preparation artefacts,
 #   not Git-release artefacts.
 # - Each active Silo must expose a manifest-backed partition with an integrity check.
-# - After a GO verdict, an interactive organiser may start the real Flower server.
+# - Readiness validation never starts or stops the real Flower server.
 
 set -euo pipefail
 
@@ -35,13 +35,13 @@ Usage: $(basename "$0") [--non-interactive] [--skip-participant-mapping] [--vers
 Validates participant-driven federated-learning workshop platform readiness.
 
 Options:
-  --non-interactive          Never offer to start the organiser-controlled Flower server.
+  --non-interactive          Run readiness checks without interactive prompts.
   --skip-participant-mapping Defer only the rendered JupyterHub mapping check.
                                Used by the pre-reconciliation preparation phase.
   --version                  Print the Wizard version and exit.
 
-In interactive mode, a GO verdict offers to start the organiser-controlled
-Flower server. --non-interactive never starts the real server.
+A GO verdict confirms readiness only. Start, stop, or configure the real
+Flower server through organizer-main.sh after cohort preparation is complete.
 
 Detailed remote diagnostics are saved to a timestamped local log file.
 EOF
@@ -221,42 +221,6 @@ REMOTE
 
 # Never leave a probe process behind if the wizard is interrupted or fails.
 trap 'stop_readiness_probe >/dev/null 2>&1 || true' EXIT
-
-start_workshop_server() {
-  local start_script start_result
-
-  start_script=$(cat <<REMOTE
-set -euo pipefail
-
-systemctl start fl-workshop-server.service
-
-for _ in {1..10}; do
-  if systemctl is-active --quiet fl-workshop-server.service && \
-     ss -ltnH | awk '{print \$4}' | grep -Eq '(^|:)$FLOWER_SERVER_PORT$'; then
-    echo "Flower server is active and listening on port $FLOWER_SERVER_PORT."
-    journalctl --no-pager -u fl-workshop-server.service -n 30
-    exit 0
-  fi
-  sleep 1
-done
-
-echo "Flower server did not become active and listen on port $FLOWER_SERVER_PORT." >&2
-systemctl --no-pager --full status fl-workshop-server.service >&2 || true
-journalctl --no-pager -u fl-workshop-server.service -n 50 >&2 || true
-exit 1
-REMOTE
-)
-
-  if start_result="$(remote "Start organiser-controlled Flower server" "$start_script")"; then
-    printf 'WORKSHOP SERVER STARTED — it is now waiting for the authorised Silo clients.\n'
-    printf 'Server diagnostics: %s\n' "$LOG_FILE"
-    return 0
-  fi
-
-  printf 'ERROR: The Flower server could not be started; do not ask students to start clients.\n' >&2
-  printf 'See diagnostic log: %s\n' "$LOG_FILE" >&2
-  return 1
-}
 
 if declare -F run_deployment_remote >/dev/null &&
    declare -F run_inventory_target_remote >/dev/null &&
@@ -685,25 +649,8 @@ fi
 
 printf '\nVERDICT: PLATFORM GO — selected worker topology, staged partitions,\nJupyterHub group mapping, and Flower server readiness checks passed.\n\nRemaining operational gate: each participant group must complete the\nJupyterHub notebook/client smoke test before federated training begins.\n'
 
-if "$NON_INTERACTIVE"; then
-  printf 'Non-interactive mode: the organiser-controlled Flower server was not started.\n'
-elif [[ ! -t 0 ]]; then
-  printf 'No interactive terminal: the organiser-controlled Flower server was not started.\n'
-else
-  printf 'PLATFORM GO — start the organiser-controlled Flower server now? [y/N]: '
-  start_answer=""
-  if ! read -r start_answer; then
-    start_answer=""
-  fi
-
-  case "$start_answer" in
-    [yY]|[yY][eE][sS])
-      start_workshop_server || exit 1
-      ;;
-    *)
-      printf 'Flower server was not started. Start it later by rerunning the wizard after a PLATFORM GO verdict.\n'
-      ;;
-  esac
-fi
+printf '\nReadiness checks do not start Flower. After the cohort is prepared, use\n'
+printf '  scripts/workshop/organizer-main.sh\n'
+printf 'and select "Manage the Flower server" to inspect, start, stop, or configure it.\n'
 
 exit 0

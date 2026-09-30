@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
+FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
@@ -58,6 +59,7 @@ done
 [[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
 [[ -x "$ACCOUNT_HELPER" ]] || fail "Missing executable account helper: $ACCOUNT_HELPER"
 [[ -x "$COHORT_HELPER" ]] || fail "Missing executable cohort helper: $COHORT_HELPER"
+[[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
 [[ -r "$COMMON" ]] || fail "Missing common helper: $COMMON"
 [[ -z "$ADMIN_USER" || -z "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] || \
   fail 'Choose either --admin-user or service-account authentication, not both.'
@@ -140,6 +142,9 @@ printf '%s\n' \
 printf 'Delete these participant workspaces and Keycloak identities? [y/N]: '
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
+
+printf '%s\n' 'Stopping the organiser-controlled Flower server before participant reset...'
+"$FLOWER_MANAGER" stop
 
 stop_selected_participant_servers
 

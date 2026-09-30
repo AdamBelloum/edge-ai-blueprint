@@ -10,6 +10,7 @@ PREPARE_HELPER="$SCRIPT_DIR/organizer_wizard.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/reset-new-workshop.sh"
+FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 
 NON_INTERACTIVE=false
@@ -26,7 +27,7 @@ ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 usage() {
   cat <<'EOF'
 Usage:
-  organizer-main.sh [OPTIONS] [menu|prepare|reset|status|release-solutions]
+  organizer-main.sh [OPTIONS] [menu|prepare|reset|status|release-solutions|flower]
 
 The single organiser entry point for workshop preparation, solution release, and participant cleanup.
 
@@ -56,6 +57,7 @@ Actions:
   reset                    Delete participant workspaces, Keycloak users, and groups.
   status                   Read-only status of expected participant identities.
   release-solutions        Release reference solutions for an advanced workshop.
+  flower                    Open the interactive Flower server lifecycle manager.
 
 Interactive menu reset also offers to remove the local participant credential
 export after remote participant cleanup. The explicit reset action does not
@@ -85,7 +87,7 @@ while (($#)); do
     --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
     --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
     --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    menu|prepare|status|release-solutions)
+    menu|prepare|status|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"; shift
       ;;
@@ -108,7 +110,7 @@ case "$ACTION" in
       fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
     fi
     ;;
-  reset|status|release-solutions)
+  reset|status|release-solutions|flower)
     [[ -z "$MODE" ]] || fail '--mode is valid only with the prepare action.'
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with the prepare action.'
     "$CONFIRM_COHORT_RESET" && fail '--confirm-cohort-reset is valid only with --non-interactive prepare.'
@@ -128,6 +130,7 @@ load_workshop_context
 [[ -x "$COHORT_HELPER" ]] || fail "Missing cohort helper: $COHORT_HELPER"
 [[ -x "$ACCOUNT_HELPER" ]] || fail "Missing account helper: $ACCOUNT_HELPER"
 [[ -x "$RESET_HELPER" ]] || fail "Missing reset helper: $RESET_HELPER"
+[[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
 
 common_args=()
 
@@ -204,8 +207,11 @@ run_prepare() {
       ;;
   esac
 
-  # A participant server started before cohort initialisation would make the
-  # workspace-reset safety check refuse preparation. Flower is started later.
+  # A prior experiment must not survive into a newly initialised cohort.
+  # The fresh server is started only after all cohort and identity steps succeed.
+  printf '%s\n' 'Stopping any prior organiser-controlled Flower server...'
+  "$FLOWER_MANAGER" stop
+
   "$PREPARE_HELPER" "${pre_reconciliation_readiness_args[@]}"
 
   cohort_args+=("$MODE")
@@ -223,6 +229,42 @@ run_prepare() {
   "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --credentials-output "$credentials_output"
   printf 'Participant credentials are available locally (mode 0600): %s
 ' "$credentials_output"
+
+  printf '%s\n' 'Starting a fresh Flower server for the newly initialised cohort...'
+  "$FLOWER_MANAGER" restart --defaults
+  printf '%s\n' 'Flower server is ready; participants may now begin the guided client notebook.'
+}
+
+run_flower_manager_menu() {
+  local choice rounds min_clients
+
+  printf '\nFlower server lifecycle\n\n'
+  printf '  1) Show status and effective parameters\n'
+  printf '  2) Start the server using current parameters\n'
+  printf '  3) Stop the server\n'
+  printf '  4) Stop and start a fresh server using current parameters\n'
+  printf '  5) Update rounds and required-client parameters (server remains stopped)\n'
+  printf '  6) Show recent Flower server logs\n'
+  printf '  0) Return to organiser menu\n\n'
+  printf 'Selection: '
+  read -r choice
+
+  case "$choice" in
+    1) "$FLOWER_MANAGER" status ;;
+    2) "$FLOWER_MANAGER" start ;;
+    3) "$FLOWER_MANAGER" stop ;;
+    4) "$FLOWER_MANAGER" restart ;;
+    5)
+      printf 'Number of federated-training rounds: '
+      read -r rounds
+      printf 'Required participating clients in every round: '
+      read -r min_clients
+      "$FLOWER_MANAGER" configure --rounds "$rounds" --min-clients "$min_clients"
+      ;;
+    6) "$FLOWER_MANAGER" logs ;;
+    0) return 0 ;;
+    *) fail 'Choose 0, 1, 2, 3, 4, 5, or 6.' ;;
+  esac
 }
 
 run_reset() {
@@ -256,6 +298,10 @@ elif [[ "$ACTION" == status ]]; then
 elif [[ "$ACTION" == release-solutions ]]; then
   "$COHORT_HELPER" release-solutions
   exit 0
+elif [[ "$ACTION" == flower ]]; then
+  [[ -t 0 ]] || fail 'The flower action requires an interactive terminal.'
+  run_flower_manager_menu
+  exit 0
 fi
 
 [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell: prepare, reset, or release-solutions.'
@@ -263,6 +309,7 @@ printf '\nDIGITAfrica workshop organiser\n\n'
 printf '  1) Prepare and initialise a beginner or advanced workshop\n'
 printf '  2) Delete participant workspaces and Keycloak identities\n'
 printf '  3) Release reference solutions for advanced workshop\n'
+printf '  4) Manage the Flower server (status, start, stop, parameters, logs)\n'
 printf '  0) Exit\n\n'
 printf 'Selection: '
 read -r choice
@@ -308,7 +355,11 @@ case "$choice" in
     "$COHORT_HELPER" release-solutions
     exec "$0"
     ;;
+  4)
+    run_flower_manager_menu
+    exec "$0"
+    ;;
   0) exit 0 ;;
-  *) fail 'Choose 0, 1, 2, or 3.' ;;
+  *) fail 'Choose 0, 1, 2, 3, or 4.' ;;
 esac
 
