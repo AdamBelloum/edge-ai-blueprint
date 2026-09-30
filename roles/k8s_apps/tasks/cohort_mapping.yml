@@ -1,0 +1,48 @@
+---
+# Reconcile only the inventory-derived JupyterHub participant mapping for a
+# fresh workshop cohort. This intentionally excludes identity, TLS, tutorial
+# assets, and participant-account lifecycle work.
+
+- name: Render JupyterHub Helm values for the current workshop cohort
+  ansible.builtin.template:
+    src: jhub-values.yaml.j2
+    dest: /opt/digitafrica/k8s/jhub-values.yaml
+    mode: "0600"
+
+- name: Require Helm for workshop cohort reconciliation
+  ansible.builtin.command:
+    cmd: helm version --short
+  changed_when: false
+
+- name: Reconcile JupyterHub with the current workshop cohort mapping
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    helm upgrade --install jhub jupyterhub/jupyterhub \
+      --namespace {{ digitafrica_deployment.digitafrica_namespace }} \
+      --timeout 15m0s \
+      -f /opt/digitafrica/k8s/jhub-values.yaml
+  args:
+    executable: /bin/bash
+
+- name: Wait for JupyterHub deployments after cohort mapping reconciliation
+  ansible.builtin.shell: |
+    set -euo pipefail
+    deployments="$(k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      get deploy -l app.kubernetes.io/instance=jhub \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}')"
+
+    [[ -n "$deployments" ]] || {
+      echo "No JupyterHub deployments found for Helm release jhub." >&2
+      exit 1
+    }
+
+    for deployment in $deployments; do
+      echo "Waiting for deployment/$deployment"
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        rollout status "deployment/$deployment" --timeout=600s
+    done
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false

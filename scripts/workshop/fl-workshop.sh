@@ -13,6 +13,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
 ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
+COHORT_MAPPING_HELPER="$SCRIPT_DIR/reconcile-cohort-mapping.sh"
 
 usage() {
   cat <<'EOF'
@@ -32,6 +33,9 @@ Actions:
   new-cohort beginner|advanced [--yes]
                     Delete participant workspaces and initialise a fresh cohort.
                     --yes confirms the destructive workspace reset explicitly.
+  reconcile-cohort-mapping
+                    Re-render inventory-derived JupyterHub group placement and
+                    reconcile only the JupyterHub Helm release.
   delete-workspaces [--yes]
                     Delete participant workspaces without changing tutorial state.
   help              Show this help text.
@@ -53,7 +57,7 @@ while (($#)); do
       ASSUME_COHORT_RESET=true
       shift
       ;;
-    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|delete-workspaces|help|--help|-h)
+    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|reconcile-cohort-mapping|delete-workspaces|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
         usage >&2
@@ -157,6 +161,14 @@ Manual checks still required before participants arrive:
   7. Run the guided local-data notebook and the guided Flower-client notebook
      with a real participant account before the workshop starts.
 EOF
+}
+
+reconcile_current_cohort_mapping() {
+  [[ -x "$COHORT_MAPPING_HELPER" ]] ||
+    die "Workshop cohort-mapping helper is missing or not executable: $COHORT_MAPPING_HELPER"
+
+  print_heading "Reconcile current participant JupyterHub mapping"
+  "$COHORT_MAPPING_HELPER"
 }
 
 resolve_participant_workers() {
@@ -533,6 +545,7 @@ REMOTE
 )"
 
   if [[ -n "$mode" ]]; then
+    reconcile_current_cohort_mapping
     show_tutorial_state
   fi
 }
@@ -706,6 +719,9 @@ main() {
       ;;
     release-solutions)
       release_reference_solutions
+      ;;
+    reconcile-cohort-mapping)
+      exec "$SCRIPT_DIR/reconcile-cohort-mapping.sh"
       ;;
     new-cohort)
       start_new_cohort "$COHORT_MODE"

@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-WIZARD_VERSION="5.4.0"
+WIZARD_VERSION="5.5.1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/workshop-context.sh"
@@ -30,13 +30,15 @@ fail() { printf 'FAIL  %s\n' "$1"; FAILURES=$((FAILURES + 1)); FAILURE_MESSAGES+
 heading() { printf '\n============================================================\n%s\n============================================================\n' "$1"; }
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--non-interactive] [--version]
+Usage: $(basename "$0") [--non-interactive] [--skip-participant-mapping] [--version]
 
 Validates participant-driven federated-learning workshop platform readiness.
 
 Options:
-  --non-interactive  Never offer to start the organiser-controlled Flower server.
-  --version          Print the Wizard version and exit.
+  --non-interactive          Never offer to start the organiser-controlled Flower server.
+  --skip-participant-mapping Defer only the rendered JupyterHub mapping check.
+                               Used by the pre-reconciliation preparation phase.
+  --version                  Print the Wizard version and exit.
 
 In interactive mode, a GO verdict offers to start the organiser-controlled
 Flower server. --non-interactive never starts the real server.
@@ -46,11 +48,16 @@ EOF
 }
 
 NON_INTERACTIVE=false
+SKIP_PARTICIPANT_MAPPING=false
 
 while (($#)); do
   case "$1" in
     --non-interactive)
       NON_INTERACTIVE=true
+      shift
+      ;;
+    --skip-participant-mapping)
+      SKIP_PARTICIPANT_MAPPING=true
       shift
       ;;
     --version)
@@ -258,6 +265,7 @@ if declare -F run_deployment_remote >/dev/null &&
   heading "Wizard v$WIZARD_VERSION — Step 2/6 — Resolve participant group topology"
   WORKERS=()
   GROUP_IDS=()
+  WORKER_NODE_NAMES=()
   WORKER_GROUP="$(deployment_worker_group)"
 
   printf 'Workshop inventory     : %s\n' "${DIGITAFRICA_INVENTORY}"
@@ -305,11 +313,42 @@ for host in hosts:
 
       if "$topology_safe" && ((${#WORKERS[@]} >= MIN_CLIENTS)); then
         for index in "${!WORKERS[@]}"; do
+          worker="${WORKERS[$index]}"
           group_id="$(printf 'group_%02d' "$((index + 1))")"
           GROUP_IDS+=("$group_id")
-          printf '      %s → %s\n' "$group_id" "${WORKERS[$index]}"
+
+          node_probe_script=$(cat <<'REMOTE'
+set -euo pipefail
+printf '__DIGITAFRICA_K8S_NODE__=%s\n' "$(hostname -f)"
+REMOTE
+)
+
+          node_probe_output=""
+          if node_probe_output="$(worker_remote "$worker" "Resolve Kubernetes node hostname for $worker" "$node_probe_script")"; then
+            mapfile -t resolved_node_names < <(
+              printf '%s\n' "$node_probe_output" |
+                sed -n 's/^__DIGITAFRICA_K8S_NODE__=//p'
+            )
+
+            if ((${#resolved_node_names[@]} != 1)) ||
+               [[ ! "${resolved_node_names[0]}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+              fail "Could not derive one safe Kubernetes node hostname for worker $worker."
+              topology_safe=false
+              continue
+            fi
+
+            WORKER_NODE_NAMES+=("${resolved_node_names[0]}")
+            printf '      %s → %s (Kubernetes node: %s)\n' \
+              "$group_id" "$worker" "${resolved_node_names[0]}"
+          else
+            fail "Could not resolve the Kubernetes node hostname for worker $worker."
+            topology_safe=false
+          fi
         done
-        pass "Resolved ${#WORKERS[@]} participant groups from ordered inventory group $WORKER_GROUP; MIN_CLIENTS=$MIN_CLIENTS."
+
+        if "$topology_safe"; then
+          pass "Resolved ${#WORKERS[@]} participant groups and Kubernetes node hostnames from ordered inventory group $WORKER_GROUP; MIN_CLIENTS=$MIN_CLIENTS."
+        fi
       elif "$topology_safe"; then
         fail "Inventory worker group $WORKER_GROUP has ${#WORKERS[@]} workers; MIN_CLIENTS=$MIN_CLIENTS requires at least $MIN_CLIENTS."
       fi
@@ -419,7 +458,14 @@ REMOTE
     fi
   fi
 
-  heading "Wizard v$WIZARD_VERSION — Step 4/6 — Validate rendered participant JupyterHub mapping"
+  if "$SKIP_PARTICIPANT_MAPPING"; then
+    heading "Wizard v$WIZARD_VERSION — Step 4/6 — Rendered participant mapping deferred"
+    printf 'SKIP  Rendered JupyterHub participant-mapping validation is deferred until after cohort reconciliation.\n'
+  else
+    heading "Wizard v$WIZARD_VERSION — Step 4/6 — Validate rendered participant JupyterHub mapping"
+  if ((${#WORKER_NODE_NAMES[@]} != ${#WORKERS[@]})); then
+    fail "Cannot validate the rendered JupyterHub mapping because resolved Kubernetes node hostnames are incomplete."
+  else
   JUPYTERHUB_VALUES_PATH="/opt/digitafrica/k8s/jhub-values.yaml"
   JUPYTERHUB_WORKSHOP_MOUNT="/home/jovyan/digitafrica/workshop"
   expected_group_nodes_json="{"
@@ -428,7 +474,7 @@ REMOTE
     if ((index > 0)); then
       expected_group_nodes_json+=","
     fi
-    expected_group_nodes_json+="\"${GROUP_IDS[$index]}\":\"${WORKERS[$index]}\""
+    expected_group_nodes_json+="\"${GROUP_IDS[$index]}\":\"${WORKER_NODE_NAMES[$index]}\""
   done
   expected_group_nodes_json+="}"
 
@@ -528,6 +574,9 @@ REMOTE
     pass "Rendered JupyterHub mapping assigns every inventory group to its ordered worker with the read-only participant runtime mount."
   else
     fail "Rendered JupyterHub participant mapping is absent, inconsistent with inventory, or lacks required participant runtime settings."
+  fi
+  fi
+
   fi
 
   heading "Wizard v$WIZARD_VERSION — Step 5/6 — Verify managed Flower runtime and bounded listener"
@@ -629,6 +678,11 @@ if ((FAILURES)); then
   printf '  - %s\n' "${FAILURE_MESSAGES[@]}"
   exit 1
 fi
+if "$SKIP_PARTICIPANT_MAPPING"; then
+  printf '\nVERDICT: PRE-RECONCILIATION READY — selected worker topology, staged partitions,\nand Flower runtime checks passed. Rendered JupyterHub mapping validation is deferred.\n\nNext required step: reconcile the cohort mapping, then rerun this wizard without\n--skip-participant-mapping before starting the workshop or Flower server.\n'
+  exit 0
+fi
+
 printf '\nVERDICT: PLATFORM GO — selected worker topology, staged partitions,\nJupyterHub group mapping, and Flower server readiness checks passed.\n\nRemaining operational gate: each participant group must complete the\nJupyterHub notebook/client smoke test before federated training begins.\n'
 
 if "$NON_INTERACTIVE"; then

@@ -182,7 +182,12 @@ check_participant_accounts() {
 }
 
 run_prepare() {
-  local -a readiness_args=("${common_args[@]}" --non-interactive)
+  local -a pre_reconciliation_readiness_args=(
+    "${common_args[@]}" --non-interactive --skip-participant-mapping
+  )
+  local -a post_reconciliation_readiness_args=(
+    "${common_args[@]}" --non-interactive
+  )
   local -a cohort_args=(new-cohort)
   local credentials_output
 
@@ -201,13 +206,18 @@ run_prepare() {
 
   # A participant server started before cohort initialisation would make the
   # workspace-reset safety check refuse preparation. Flower is started later.
-  "$PREPARE_HELPER" "${readiness_args[@]}"
+  "$PREPARE_HELPER" "${pre_reconciliation_readiness_args[@]}"
 
   cohort_args+=("$MODE")
   "$NON_INTERACTIVE" && cohort_args+=(--yes)
   if ! "$COHORT_HELPER" "${cohort_args[@]}"; then
     fail 'Cohort initialisation did not complete; participant accounts were not created.'
   fi
+
+  # new-cohort has reset selected workspaces, rendered the current inventory
+  # mapping, upgraded JupyterHub, and waited for rollout. Validate that final
+  # mapping before identity accounts are created or credentials are exported.
+  "$PREPARE_HELPER" "${post_reconciliation_readiness_args[@]}"
 
   credentials_output="$(participant_credentials_file)"
   "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --credentials-output "$credentials_output"
