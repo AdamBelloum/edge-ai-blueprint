@@ -28,7 +28,7 @@ Actions:
   tutorial-state    Show the current tutorial mode and solution-release state.
   set-tutorial-mode beginner|advanced
                     Set the tutorial mode for subsequently spawned servers.
-  release-solutions Mark reference solutions as released for subsequent spawns.
+  release-solutions Release reference solutions for an advanced workshop.
   new-cohort beginner|advanced [--yes]
                     Delete participant workspaces and initialise a fresh cohort.
                     --yes confirms the destructive workspace reset explicitly.
@@ -334,22 +334,37 @@ REMOTE
 }
 
 release_reference_solutions() {
-  print_heading "Release reference solutions"
+  print_heading "Release reference solutions for advanced workshop"
   printf '%s\n' \
     "This is a one-way organiser action for subsequently spawned participant servers." \
-    "Existing user servers and files are not modified."
+    "Existing user servers and files are not modified." \
+    "The release is performed only when the current tutorial mode is advanced."
 
-  if ! confirm "Release reference solutions"; then
+  if ! confirm "Release reference solutions for the advanced workshop"; then
     log "No change made."
     return 0
   fi
 
   run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
+mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.mode}')"
+
+if [ "\$mode" != "advanced" ]; then
+  printf '%s\n' \
+    "Reference solutions can only be released for an advanced workshop." \
+    "Current tutorial mode: \${mode:-unset}" \
+    "No change was made."
+  exit 0
+fi
+
 k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   patch configmap digitafrica-workshop-state \
   --type merge \
   -p '{"data":{"solutions_released":"true"}}'
+
+printf '%s\n' "Reference solutions released for subsequently spawned advanced-workshop servers."
 REMOTE
 )"
 
@@ -627,7 +642,7 @@ Choose an action:
   5) Show experiment record template
   6) Show tutorial mode and solution-release state
   7) Set tutorial mode for subsequent participant spawns
-  8) Release reference solutions for subsequent participant spawns
+  8) Release reference solutions for advanced workshop
   9) Start a fresh beginner or advanced workshop cohort
   0) Exit
 EOF
