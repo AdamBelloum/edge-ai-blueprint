@@ -39,7 +39,7 @@
   vars: *tier2_deployment_vars
   roles:
     - role: fl_workshop_topology
-      tags: [applications]
+      tags: [applications, workshop_cohort]
       when: not (digitafrica_uninstall | default(false) | bool)
     - role: k8s_apps
       when: not (digitafrica_uninstall | default(false) | bool)

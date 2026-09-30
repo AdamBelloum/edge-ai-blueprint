@@ -22,3 +22,13 @@
         - applications
   tags:
     - applications
+
+- name: Reconcile the current workshop cohort JupyterHub mapping
+  ansible.builtin.include_tasks:
+    file: cohort_mapping.yml
+    apply:
+      tags:
+        - workshop_cohort
+  tags:
+    - workshop_cohort
+  when: not (digitafrica_uninstall | default(false) | bool)
