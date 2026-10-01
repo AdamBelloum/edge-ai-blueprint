@@ -1,0 +1,8 @@
+---
+keycloak_tls_sync_service_name: "digitafrica-keycloak-tls-sync"
+keycloak_tls_sync_script_path: "/usr/local/lib/digitafrica/keycloak-tls-sync.sh"
+keycloak_tls_sync_source_namespace: "{{ oidc.oidc_identity_namespace | default('digitafrica-identity') }}"
+keycloak_tls_sync_source_secret: "keycloak-tls"
+keycloak_tls_sync_target_secret: "jhub-tls"
+keycloak_tls_sync_interval: "6h"
+keycloak_tls_sync_k3s_command: "/usr/local/bin/k3s"

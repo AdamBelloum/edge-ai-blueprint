@@ -1,0 +1,26 @@
+---
+- name: Disable Keycloak TLS synchroniser units when present
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - "{{ keycloak_tls_sync_service_name }}.timer"
+    - "{{ keycloak_tls_sync_service_name }}.service"
+  failed_when: false
+
+- name: Remove Keycloak TLS synchroniser units and script
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/systemd/system/{{ keycloak_tls_sync_service_name }}.timer"
+    - "/etc/systemd/system/{{ keycloak_tls_sync_service_name }}.service"
+    - "{{ keycloak_tls_sync_script_path }}"
+
+- name: Reload systemd after Keycloak TLS synchroniser removal
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
