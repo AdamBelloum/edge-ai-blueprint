@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# Publish and verify Introduction to AI Module 1 workshop material.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
+COMMON_HELPER="$SCRIPT_DIR/../../lib/common.sh"
+
+CONFIGMAP_NAME="digitafrica-introduction-to-ai-module1"
+NOTEBOOK_NAME="01_symbolic_ai_tutorial.ipynb"
+REMOTE_STAGE_PATH="/tmp/digitafrica-introduction-to-ai-module1.ipynb"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  module1.sh publish [--yes]
+  module1.sh status
+  module1.sh check
+
+Actions:
+  publish     Validate and publish the reviewed Module 1 notebook.
+  status      Show whether the Module 1 ConfigMap contains the notebook.
+  check       Verify that Module 1 is ready for first-spawn notebook seeding.
+
+The source file and immutable Tutorials revision must be defined in the active
+workshop-release.env as INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE and
+INTRODUCTION_TO_AI_MODULE1_SOURCE_REF.
+
+Publishing affects subsequently spawned participant servers only. It never
+changes an existing participant notebook, participant identity, FL workspace,
+data partition, or Flower server.
+USAGE
+}
+
+ACTION=""
+ASSUME_YES=false
+
+while (($#)); do
+  case "$1" in
+    publish|status|check)
+      [[ -z "$ACTION" ]] || {
+        printf 'Specify one action only.\n' >&2
+        usage >&2
+        exit 2
+      }
+      ACTION="$1"
+      shift
+      ;;
+    --yes)
+      ASSUME_YES=true
+      shift
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option or action: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+[[ -n "$ACTION" ]] || {
+  usage >&2
+  exit 2
+}
+
+if "$ASSUME_YES" && [[ "$ACTION" != "publish" ]]; then
+  printf '%s\n' '--yes is valid only with publish.' >&2
+  exit 2
+fi
+
+[[ -r "$WORKSHOP_CONTEXT" ]] || {
+  printf 'Missing workshop context helper: %s\n' "$WORKSHOP_CONTEXT" >&2
+  exit 2
+}
+# shellcheck source=../lib/workshop-context.sh
+source "$WORKSHOP_CONTEXT"
+load_workshop_context
+
+[[ -r "$COMMON_HELPER" ]] || {
+  printf 'Missing shared helper: %s\n' "$COMMON_HELPER" >&2
+  exit 2
+}
+# shellcheck source=../../lib/common.sh
+source "$COMMON_HELPER"
+
+require_module1_source() {
+  : "${INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE:?Workshop release record must define INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE.}"
+  : "${INTRODUCTION_TO_AI_MODULE1_SOURCE_REF:?Workshop release record must define INTRODUCTION_TO_AI_MODULE1_SOURCE_REF.}"
+
+  [[ -f "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" ]] ||
+    die "Module 1 source notebook is not readable: $INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE"
+
+  [[ "$(basename -- "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE")" == "$NOTEBOOK_NAME" ]] ||
+    die "Module 1 source file must be named $NOTEBOOK_NAME"
+
+  [[ "$INTRODUCTION_TO_AI_MODULE1_SOURCE_REF" =~ ^[0-9A-Fa-f]{7,64}$ ]] ||
+    die 'INTRODUCTION_TO_AI_MODULE1_SOURCE_REF must be an immutable Tutorials Git commit SHA.'
+
+  require_command python3
+  python3 - "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" <<'PYTHON_VALIDATE'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"Module 1 source is not valid UTF-8 notebook JSON: {exc}")
+
+if not isinstance(notebook, dict) or not isinstance(notebook.get("cells"), list):
+    raise SystemExit("Module 1 source is not a valid Jupyter notebook structure.")
+PYTHON_VALIDATE
+}
+
+remote_status_script() {
+  printf 'namespace=%q\n' "$DIGITAFRICA_NAMESPACE"
+  cat <<'REMOTE_STATUS'
+set -euo pipefail
+
+if ! k3s kubectl -n "$namespace" get configmap \
+  digitafrica-introduction-to-ai-module1 >/dev/null 2>&1; then
+  printf '%s\n' 'module1_configmap_status=absent'
+  exit 0
+fi
+
+notebook="$(
+  k3s kubectl -n "$namespace" get configmap \
+    digitafrica-introduction-to-ai-module1 \
+    -o jsonpath='{.data.01_symbolic_ai_tutorial\.ipynb}'
+)"
+
+if [[ -z "$notebook" ]]; then
+  printf '%s\n' 'module1_configmap_status=placeholder'
+  exit 0
+fi
+
+printf '%s\n' 'module1_configmap_status=published'
+printf '%s' "$notebook" | sha256sum | awk '{print "module1_configmap_sha256=" $1}'
+REMOTE_STATUS
+}
+
+show_status() {
+  print_heading "Introduction to AI — Module 1 publication status"
+  run_deployment_remote "$(remote_status_script)"
+  cat <<'STATUS_MESSAGE'
+
+A published notebook is copied only when a participant next spawns a JupyterHub
+server and does not already have:
+~/Introduction-to-AI/Module-1/01_symbolic_ai_tutorial.ipynb
+STATUS_MESSAGE
+}
+
+publish_module1() {
+  local source_sha256
+  local copy_arguments
+  local remote_script
+
+  require_module1_source
+  require_command sha256sum
+  require_ansible_environment
+
+  source_sha256="$(
+    sha256sum "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" | awk '{print $1}'
+  )"
+
+  print_heading "Publish Introduction to AI — Module 1"
+  printf 'Source notebook : %s\n' "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE"
+  printf 'Tutorials commit: %s\n' "$INTRODUCTION_TO_AI_MODULE1_SOURCE_REF"
+  printf 'SHA-256         : %s\n' "$source_sha256"
+  printf 'ConfigMap       : %s\n' "$CONFIGMAP_NAME"
+  printf '%s\n' \
+    'This updates material for subsequently spawned participant servers only.' \
+    'Existing participant notebooks are preserved.'
+
+  if ! "$ASSUME_YES" && ! confirm 'Publish this reviewed Module 1 notebook'; then
+    log 'No Module 1 publication was performed.'
+    return 0
+  fi
+
+  copy_arguments="src='$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE' dest='$REMOTE_STAGE_PATH' owner=root group=root mode=0600"
+  ANSIBLE_STDOUT_CALLBACK=default ansible \
+    -i "$DIGITAFRICA_INVENTORY" \
+    "$DIGITAFRICA_DEPLOYMENT_GROUP" \
+    -b \
+    -m ansible.builtin.copy \
+    -a "$copy_arguments"
+
+  printf -v remote_script 'namespace=%q\nsource_file=%q\n' \
+    "$DIGITAFRICA_NAMESPACE" "$REMOTE_STAGE_PATH"
+  remote_script+="$(cat <<'REMOTE_PUBLISH'
+set -euo pipefail
+trap 'rm -f "$source_file"' EXIT
+
+test -s "$source_file"
+
+k3s kubectl -n "$namespace" \
+  create configmap digitafrica-introduction-to-ai-module1 \
+  --from-file=01_symbolic_ai_tutorial.ipynb="$source_file" \
+  --dry-run=client -o yaml | \
+  k3s kubectl apply -f -
+
+printf '%s\n' 'Module 1 notebook published successfully.'
+REMOTE_PUBLISH
+)"
+
+  run_deployment_remote "$remote_script"
+  show_status
+}
+
+case "$ACTION" in
+  publish) publish_module1 ;;
+  status) show_status ;;
+  check)
+    show_status
+    printf '%s\n' \
+      'Readiness condition: status must be published before credentials are shared.' \
+      'The administrator must have deployed the JupyterHub Module 1 seed-volume change.'
+    ;;
+esac

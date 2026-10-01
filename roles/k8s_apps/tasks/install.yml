@@ -373,6 +373,25 @@
   tags:
     - workshop_assets
 
+- name: Create initial Introduction to AI Module 1 ConfigMap when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      get configmap digitafrica-introduction-to-ai-module1 >/dev/null 2>&1; then
+      echo "preserved"
+    else
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        create configmap digitafrica-introduction-to-ai-module1 \
+        --from-literal=README.txt='Module 1 has not yet been published by the organiser.'
+      echo "created"
+    fi
+  args:
+    executable: /bin/bash
+  register: introduction_to_ai_module1_configmap
+  changed_when: "'created' in introduction_to_ai_module1_configmap.stdout"
+  tags:
+    - workshop_assets
+
 - name: Create/update Tier-2 notebook runtime requirements ConfigMap
   ansible.builtin.shell: |
     set -e
