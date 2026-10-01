@@ -265,6 +265,9 @@ singleuser:
       - name: digitafrica-workshop-state
         configMap:
           name: digitafrica-workshop-state
+      - name: digitafrica-seed-introduction-to-ai-module1
+        configMap:
+          name: digitafrica-introduction-to-ai-module1
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
       - name: digitafrica-runtime-requirements
         configMap:
@@ -319,6 +322,10 @@ singleuser:
           beginner_source=/seed/beginner
           advanced_source=/seed/advanced
           solutions_source=/seed/solutions
+          module1_source=/seed/introduction-to-ai/module1
+          module1_parent=/home/jovyan/Introduction-to-AI
+          module1_workspace="$module1_parent/Module-1"
+          module1_notebook=01_symbolic_ai_tutorial.ipynb
           state_dir=/state
 
           mode="$(tr -d '\r\n' < "$state_dir/mode")"
@@ -439,6 +446,24 @@ singleuser:
               "WORKSHOP_VERSION.json"
           fi
 
+          # Introduction to AI Module 1 is independent of the federated-
+          # learning tutorial mode and is copied only when a participant does
+          # not already have a personal notebook copy.
+          if [ -f "$module1_source/$module1_notebook" ]; then
+            mkdir -p "$module1_workspace"
+            chown 1000:100 "$module1_parent" "$module1_workspace"
+            chmod 0755 "$module1_parent" "$module1_workspace"
+
+            copy_seed_file \
+              "$module1_source/$module1_notebook" \
+              "$module1_workspace/$module1_notebook" \
+              false
+
+            write_receipt_if_absent \
+              "$module1_workspace/MODULE1_SEED_RECEIPT.txt" \
+              "$module1_notebook"
+          fi
+
           echo "[seed] workshop mode: $mode"
           echo "[seed] solutions released: $solutions_released"
       volumeMounts:
@@ -453,6 +478,9 @@ singleuser:
           readOnly: true
         - name: digitafrica-workshop-state
           mountPath: /state
+          readOnly: true
+        - name: digitafrica-seed-introduction-to-ai-module1
+          mountPath: /seed/introduction-to-ai/module1
           readOnly: true
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
