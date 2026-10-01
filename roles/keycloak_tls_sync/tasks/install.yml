@@ -1,4 +1,19 @@
 ---
+- name: Remove independently managed JupyterHub certificate before synchronisation
+  become: true
+  ansible.builtin.command:
+    argv:
+      - "{{ keycloak_tls_sync_k3s_command }}"
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - delete
+      - certificate
+      - "{{ keycloak_tls_sync_target_secret }}"
+      - --ignore-not-found
+  register: keycloak_tls_sync_jupyterhub_certificate_cleanup
+  changed_when: "'deleted' in keycloak_tls_sync_jupyterhub_certificate_cleanup.stdout"
+
 - name: Ensure Keycloak TLS synchroniser directory exists
   become: true
   ansible.builtin.file:
