@@ -1,0 +1,13 @@
+[Unit]
+Description=Synchronise Keycloak TLS Secret for JupyterHub
+After=k3s.service
+Wants=k3s.service
+ConditionPathExists={{ keycloak_tls_sync_k3s_command }}
+
+[Service]
+Type=oneshot
+ExecStart={{ keycloak_tls_sync_script_path }}
+TimeoutStartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

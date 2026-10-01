@@ -1,0 +1,35 @@
+---
+- name: Derive the configured Keycloak public URL
+  ansible.builtin.set_fact:
+    keycloak_tls_sync_keycloak_public_url: >-
+      {{
+        (digitafrica_deployment.identity | default({})).keycloak_public_url
+        | default(oidc.oidc_issuer_url | default(''), true)
+      }}
+
+- name: Determine whether Keycloak TLS synchronisation is required
+  ansible.builtin.set_fact:
+    keycloak_tls_sync_required: >-
+      {{
+        (oidc.oidc_enabled | default(false) | bool)
+        and (digitafrica_deployment.expose_mode == 'ingress')
+        and (digitafrica_deployment.tls_mode | default('none') in ['letsencrypt', 'provided'])
+        and
+        (
+          (digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname'))
+          ==
+          (keycloak_tls_sync_keycloak_public_url | urlsplit('hostname'))
+        )
+      }}
+
+- name: Install Keycloak TLS synchroniser
+  ansible.builtin.include_tasks: install.yml
+  when:
+    - keycloak_tls_sync_required | bool
+    - not (digitafrica_uninstall | default(false) | bool)
+
+- name: Remove Keycloak TLS synchroniser
+  ansible.builtin.include_tasks: uninstall.yml
+  when: >-
+    (digitafrica_uninstall | default(false) | bool)
+    or not (keycloak_tls_sync_required | bool)

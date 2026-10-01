@@ -1,0 +1,56 @@
+---
+- name: Ensure Keycloak TLS synchroniser directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ keycloak_tls_sync_script_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Keycloak TLS synchroniser script
+  become: true
+  ansible.builtin.template:
+    src: digitafrica-keycloak-tls-sync.sh.j2
+    dest: "{{ keycloak_tls_sync_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Keycloak TLS synchroniser service
+  become: true
+  ansible.builtin.template:
+    src: digitafrica-keycloak-tls-sync.service.j2
+    dest: "/etc/systemd/system/{{ keycloak_tls_sync_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Keycloak TLS synchroniser timer
+  become: true
+  ansible.builtin.template:
+    src: digitafrica-keycloak-tls-sync.timer.j2
+    dest: "/etc/systemd/system/{{ keycloak_tls_sync_service_name }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Reload systemd after Keycloak TLS synchroniser installation
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Enable and start Keycloak TLS synchroniser timer
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ keycloak_tls_sync_service_name }}.timer"
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Synchronise the current Keycloak TLS certificate immediately
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ keycloak_tls_sync_service_name }}.service"
+    state: started
+  when: not ansible_check_mode

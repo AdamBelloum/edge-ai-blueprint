@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically synchronise Keycloak TLS Secret for JupyterHub
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ keycloak_tls_sync_interval }}
+Persistent=true
+Unit={{ keycloak_tls_sync_service_name }}.service
+
+[Install]
+WantedBy=timers.target

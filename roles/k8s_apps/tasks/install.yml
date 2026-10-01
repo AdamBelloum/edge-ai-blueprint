@@ -544,6 +544,57 @@
   tags:
     - workshop_seed
 
+- name: Remove independently managed JupyterHub certificate when sharing Keycloak TLS
+  ansible.builtin.shell: |
+    set -e
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      delete certificate jhub-tls --ignore-not-found
+  args:
+    executable: /bin/bash
+  register: jupyterhub_shared_tls_certificate_cleanup
+  changed_when: "'deleted' in jupyterhub_shared_tls_certificate_cleanup.stdout"
+  when:
+    - oidc.oidc_enabled | default(false) | bool
+    - digitafrica_deployment.expose_mode == 'ingress'
+    - digitafrica_deployment.tls_mode | default('none') in ['letsencrypt', 'provided']
+    - >-
+      (digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname')) ==
+      ((digitafrica_deployment.identity | default({})).keycloak_public_url | default('') | urlsplit('hostname'))
+
+- name: Replicate Keycloak TLS Secret into the JupyterHub namespace
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    temporary_directory="$(mktemp -d)"
+    trap 'rm -rf "${temporary_directory}"' EXIT
+
+    k3s kubectl -n {{ oidc.oidc_identity_namespace }} get secret keycloak-tls \
+      -o jsonpath='{.data.tls\.crt}' | base64 --decode > "${temporary_directory}/tls.crt"
+    k3s kubectl -n {{ oidc.oidc_identity_namespace }} get secret keycloak-tls \
+      -o jsonpath='{.data.tls\.key}' | base64 --decode > "${temporary_directory}/tls.key"
+
+    test -s "${temporary_directory}/tls.crt"
+    test -s "${temporary_directory}/tls.key"
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create secret tls jhub-tls \
+      --cert="${temporary_directory}/tls.crt" \
+      --key="${temporary_directory}/tls.key" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  register: jupyterhub_shared_tls_secret
+  changed_when: >-
+    'created' in jupyterhub_shared_tls_secret.stdout or
+    'configured' in jupyterhub_shared_tls_secret.stdout
+  when:
+    - oidc.oidc_enabled | default(false) | bool
+    - digitafrica_deployment.expose_mode == 'ingress'
+    - digitafrica_deployment.tls_mode | default('none') in ['letsencrypt', 'provided']
+    - >-
+      (digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname')) ==
+      ((digitafrica_deployment.identity | default({})).keycloak_public_url | default('') | urlsplit('hostname'))
+
 - name: List resources created by Helm release (debug)
   ansible.builtin.shell: |
     set -e

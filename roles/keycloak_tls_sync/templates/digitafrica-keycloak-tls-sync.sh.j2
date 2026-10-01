@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Replicate the currently valid Keycloak TLS Secret for same-host JupyterHub.
+# The source Secret remains cert-manager managed; this script never creates a
+# Certificate or CertificateRequest.
+
+set -Eeuo pipefail
+umask 077
+
+readonly K3S={{ keycloak_tls_sync_k3s_command | quote }}
+readonly SOURCE_NAMESPACE={{ keycloak_tls_sync_source_namespace | quote }}
+readonly SOURCE_SECRET={{ keycloak_tls_sync_source_secret | quote }}
+readonly TARGET_NAMESPACE={{ digitafrica_deployment.digitafrica_namespace | quote }}
+readonly TARGET_SECRET={{ keycloak_tls_sync_target_secret | quote }}
+
+temporary_directory="$(mktemp -d)"
+trap 'rm -rf "${temporary_directory}"' EXIT
+
+source_cert="${temporary_directory}/tls.crt"
+source_key="${temporary_directory}/tls.key"
+target_cert="${temporary_directory}/target-tls.crt"
+
+"${K3S}" kubectl -n "${SOURCE_NAMESPACE}" get secret "${SOURCE_SECRET}" \
+  -o jsonpath='{.data.tls\.crt}' | base64 --decode > "${source_cert}"
+"${K3S}" kubectl -n "${SOURCE_NAMESPACE}" get secret "${SOURCE_SECRET}" \
+  -o jsonpath='{.data.tls\.key}' | base64 --decode > "${source_key}"
+
+test -s "${source_cert}"
+test -s "${source_key}"
+
+source_sha256="$(sha256sum "${source_cert}" | awk '{print $1}')"
+
+if "${K3S}" kubectl -n "${TARGET_NAMESPACE}" get secret "${TARGET_SECRET}" >/dev/null 2>&1; then
+  "${K3S}" kubectl -n "${TARGET_NAMESPACE}" get secret "${TARGET_SECRET}" \
+    -o jsonpath='{.data.tls\.crt}' | base64 --decode > "${target_cert}"
+
+  if [[ -s "${target_cert}" ]] &&
+     [[ "$(sha256sum "${target_cert}" | awk '{print $1}')" == "${source_sha256}" ]]; then
+    printf 'Keycloak TLS Secret is already synchronised (%s).\n' "${source_sha256}"
+    exit 0
+  fi
+fi
+
+"${K3S}" kubectl -n "${TARGET_NAMESPACE}" create secret tls "${TARGET_SECRET}" \
+  --cert="${source_cert}" \
+  --key="${source_key}" \
+  --dry-run=client \
+  -o yaml |
+  "${K3S}" kubectl -n "${TARGET_NAMESPACE}" apply -f -
+
+printf 'Synchronised Keycloak TLS Secret (%s).\n' "${source_sha256}"

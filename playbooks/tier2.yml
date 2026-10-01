@@ -43,12 +43,18 @@
       when: not (digitafrica_uninstall | default(false) | bool)
     - role: k8s_apps
       when: not (digitafrica_uninstall | default(false) | bool)
+    - role: keycloak_tls_sync
+      tags: [applications, keycloak_tls_sync]
+      when: not (digitafrica_uninstall | default(false) | bool)
 
 - name: Deploy DIGITAfrica apps on Tier-2 (uninstall)
   hosts: tier2_server
   vars: *tier2_deployment_vars
   roles:
     - role: k8s_apps
+      when: digitafrica_uninstall | default(false) | bool
+    - role: keycloak_tls_sync
+      tags: [applications, keycloak_tls_sync]
       when: digitafrica_uninstall | default(false) | bool
 
 - name: Tier-2 k3s agents (uninstall)

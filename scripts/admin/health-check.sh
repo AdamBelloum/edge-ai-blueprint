@@ -93,7 +93,9 @@ load_jupyterhub_health_configuration() {
 
   if [[ "${OIDC_ENABLED}" == "true" ]]; then
     OIDC_ISSUER_URL="$(deployment_public_setting oidc_issuer_url)"
-    OIDC_IDENTITY_NAMESPACE="$(deployment_public_setting oidc_identity_namespace)"
+    if ! OIDC_IDENTITY_NAMESPACE="$(deployment_public_setting oidc_identity_namespace 2>/dev/null)"; then
+      OIDC_IDENTITY_NAMESPACE="digitafrica-identity"
+    fi
   else
     OIDC_ISSUER_URL=""
     OIDC_IDENTITY_NAMESPACE=""
@@ -252,6 +254,37 @@ if k3s kubectl -n "\$namespace" get certificate keycloak-tls >/dev/null 2>&1; th
     -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}{"\n"}{end}' |
     grep -Fx 'True'
 fi
+
+printf '%s\n' '===== Keycloak-to-JupyterHub TLS synchroniser ====='
+target_namespace=${DIGITAFRICA_NAMESPACE@Q}
+
+systemctl is-enabled --quiet digitafrica-keycloak-tls-sync.timer
+systemctl is-active --quiet digitafrica-keycloak-tls-sync.timer
+systemctl show digitafrica-keycloak-tls-sync.service \
+  --property=Result \
+  --value \
+  --no-pager |
+  grep -Fx 'success'
+
+k3s kubectl -n "\$target_namespace" get secret jhub-tls \
+  --output=jsonpath='{.type}{"\n"}' |
+  grep -Fx 'kubernetes.io/tls'
+
+source_hash="\$(k3s kubectl -n "\$namespace" get secret keycloak-tls \
+  -o jsonpath='{.data.tls\.crt}' |
+  base64 --decode |
+  sha256sum |
+  cut -d ' ' -f1)"
+target_hash="\$(k3s kubectl -n "\$target_namespace" get secret jhub-tls \
+  -o jsonpath='{.data.tls\.crt}' |
+  base64 --decode |
+  sha256sum |
+  cut -d ' ' -f1)"
+
+printf 'Keycloak TLS SHA-256: %s\nJupyterHub TLS SHA-256: %s\n' \
+  "\${source_hash}" \
+  "\${target_hash}"
+test "\${source_hash}" = "\${target_hash}"
 
 echo 'Managed Keycloak in-cluster health check passed.'
 EOF

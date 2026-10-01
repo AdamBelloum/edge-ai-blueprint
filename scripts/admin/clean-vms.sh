@@ -22,6 +22,10 @@ remote_cleanup(){
     [[ -n "$unit" ]] || continue
     run systemctl disable --now "$unit" || true; run rm -f "/etc/systemd/system/$unit"
   done < <(systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -E '^(digitafrica|flower|fl-workshop|jupyterhub)[A-Za-z0-9_.@-]*\.service$' || true)
+  while IFS= read -r unit; do
+    [[ -n "${unit}" ]] || continue
+    run systemctl disable --now "${unit}" || true; run rm -f "/etc/systemd/system/${unit}"
+  done < <(systemctl list-unit-files --type=timer --no-legend 2>/dev/null | awk "{print \$1}" | grep -E "^(digitafrica|flower|fl-workshop|jupyterhub)[A-Za-z0-9_.@-]*\.timer\$" || true)
   run systemctl daemon-reload || true
 
   if command -v helm >/dev/null 2>&1; then
