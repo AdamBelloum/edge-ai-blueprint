@@ -217,9 +217,16 @@ case "$ACTION" in
   publish) publish_module1 ;;
   status) show_status ;;
   check)
-    show_status
+    status_output="$(show_status)"
+    printf '%s\n' "$status_output"
     printf '%s\n' \
       'Readiness condition: status must be published before credentials are shared.' \
       'The administrator must have deployed the JupyterHub Module 1 seed-volume change.'
+
+    if ! grep -Fqx 'module1_configmap_status=published' <<<"$status_output"; then
+      printf '%s\n' \
+        'Module 1 is not published; participant credentials must not be shared.' >&2
+      exit 1
+    fi
     ;;
 esac
