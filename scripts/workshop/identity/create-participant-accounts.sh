@@ -260,7 +260,7 @@ if [[ "${dry_run}" == true ]]; then
 fi
 
 get_token() {
-  local endpoint secret
+  local endpoint secret response response_body http_status
   local -a payload
   endpoint="${server_url}/realms/$(urlencode "${admin_realm}")/protocol/openid-connect/token"
   if [[ -n "${admin_client_id}" ]]; then
@@ -270,7 +270,30 @@ get_token() {
     if [[ -n "${password_file}" ]]; then admin_password="$(<"${password_file}")"; fi
     payload=(--data-urlencode 'grant_type=password' --data-urlencode "client_id=admin-cli" --data-urlencode "username=${admin_user}" --data-urlencode "password=${admin_password}")
   fi
-  curl --silent --show-error --fail --request POST "${endpoint}" "${payload[@]}" | jq -er '.access_token'
+
+  if ! response="$(
+    curl --silent --show-error \
+      --write-out $'\n%{http_code}' \
+      --request POST "${endpoint}" "${payload[@]}"
+  )"; then
+    return 1
+  fi
+
+  http_status="${response##*$'\n'}"
+  response_body="${response%$'\n'*}"
+
+  if [[ "${http_status}" == "200" ]]; then
+    jq -er '.access_token' <<<"${response_body}"
+    return
+  fi
+
+  if [[ -n "${password_file}" ]] &&
+    jq -e '.error == "invalid_grant"' >/dev/null 2>&1 <<<"${response_body}"; then
+    return 10
+  fi
+
+  printf '[ERROR] Could not obtain a Keycloak administrator access token (HTTP %s).\n' "${http_status}" >&2
+  return 1
 }
 
 if [[ "${interactive_password_auth}" == true ]]; then
@@ -299,7 +322,16 @@ if [[ "${interactive_password_auth}" == true ]]; then
 
   [[ -n "${access_token}" ]] || fail "Keycloak authentication failed after 3 attempts; the participant-account operation was not performed."
 else
-  access_token="$(get_token)" || fail "Could not obtain a Keycloak administrator access token"
+  if access_token="$(get_token)"; then
+    :
+  else
+    token_status=$?
+    if [[ -n "${password_file}" && "${token_status}" -eq 10 ]]; then
+      printf '[ERROR] Keycloak authentication rejected the administrator password from KEYCLOAK_ADMIN_PASSWORD_FILE.\n' >&2
+      exit 10
+    fi
+    fail "Could not obtain a Keycloak administrator access token"
+  fi
 fi
 unset admin_password
 
