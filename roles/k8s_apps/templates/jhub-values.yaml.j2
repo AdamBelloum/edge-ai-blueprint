@@ -13,6 +13,14 @@
 {% set flower_server_host = groups[fl_workshop_server_group][0] %}
 {% set flower_server_address = (hostvars[flower_server_host].ansible_host | default(flower_server_host)) ~ ':8080' %}
 {% set jupyterhub_control_node = hostvars[flower_server_host].ansible_fqdn | default(flower_server_host) %}
+{% set jhub_host = digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
+{% set identity_config = digitafrica_deployment.identity | default({}) %}
+{% set keycloak_host = identity_config.keycloak_public_url | default('') | urlsplit('hostname') %}
+{% set jupyterhub_reuses_keycloak_tls = (
+  (oidc.oidc_enabled | default(false) | bool)
+  and (digitafrica_deployment.tls_mode | default('none') in ['letsencrypt', 'provided'])
+  and jhub_host == keycloak_host
+) %}
 proxy:
   service:
 {% if digitafrica_deployment.expose_mode == 'ingress' %}
@@ -32,11 +40,10 @@ ingress:
 {% if digitafrica_deployment.tls_mode | default('none') != 'none' %}
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' %}
+{% if digitafrica_deployment.tls_mode | default('none') == 'letsencrypt' and not jupyterhub_reuses_keycloak_tls %}
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 {% endif %}
 {% endif %}
-{% set jhub_host = digitafrica_deployment.jupyterhub.jupyterhub_public_url | urlsplit('hostname') %}
 {% if jhub_host | regex_search('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}
   # Host is a raw IP — omit hosts field so Traefik matches all incoming requests
 {% else %}
