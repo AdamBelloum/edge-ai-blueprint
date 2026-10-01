@@ -6,7 +6,8 @@
 #   2. Delete only their persistent JupyterHub workspaces.
 #   3. Delete only their inventory-derived Keycloak users and matching groups.
 #
-# Tutorial state, administrators, service accounts, and unrelated realm records are preserved.
+# The active workshop state is restored to neutral. Administrators, service accounts,
+# and unrelated realm records are preserved.
 
 set -euo pipefail
 
@@ -165,4 +166,13 @@ fi
 
 "$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"
 
-printf 'Full federated-learning workshop cleanup completed.\n'
+run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"workshop_type":"none","mode":"beginner","solutions_released":"false"}}'
+REMOTE
+)"
+
+printf 'Full workshop cleanup completed; workshop state is now neutral.\n'

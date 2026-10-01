@@ -14,6 +14,7 @@ PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
+COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
 ACTION="menu"
 MODE=""
@@ -37,7 +38,7 @@ Actions:
   initialise-identities   Provision participant identities and groups only.
   issue-credentials       Issue temporary passwords and write a protected TSV export.
   status                  Show expected participant-account status.
-  module1-publish         Publish the reviewed Introduction to AI Module 1 notebook.
+  module1-publish         Publish Module 1 and activate Introduction to AI for new spawns.
   module1-check           Check Introduction to AI Module 1 publication readiness.
   fl-prepare              Initialise the selected Federated Learning workshop mode.
   reset                   Full Federated Learning reset.
@@ -161,6 +162,11 @@ esac
 source "$WORKSHOP_CONTEXT"
 load_workshop_context
 
+[[ -r "$COMMON_HELPER" ]] ||
+  fail "Missing shared helper: $COMMON_HELPER"
+# shellcheck source=../lib/common.sh
+source "$COMMON_HELPER"
+
 for helper in \
   "$PREPARE_HELPER" \
   "$COHORT_HELPER" \
@@ -217,6 +223,110 @@ check_participant_accounts() {
     absent|complete|inconsistent) ;;
     *) fail 'Could not determine participant-account status.' ;;
   esac
+}
+
+run_status() {
+  check_participant_accounts
+  check_workshop_runtime_state
+}
+
+check_workshop_runtime_state() {
+  local remote_script
+  local state_output
+
+  printf -v remote_script 'namespace=%q\n' "$DIGITAFRICA_NAMESPACE"
+  remote_script+="$(cat <<'REMOTE'
+set -euo pipefail
+
+workshop_type="$(k3s kubectl -n "$namespace" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_type}')"
+
+case "$workshop_type" in
+  none|introduction-to-ai|federated-learning) ;;
+  *)
+    printf 'workshop_type=invalid\n'
+    printf 'participant_workspace_status=unknown\n'
+    exit 0
+    ;;
+esac
+
+pvc_names="$(k3s kubectl -n "$namespace" get pvc \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+
+if grep -Eq '^claim-group-[0-9]+---' <<<"$pvc_names"; then
+  workspace_status=present
+else
+  workspace_status=clean
+fi
+
+printf 'workshop_type=%s\n' "$workshop_type"
+printf 'participant_workspace_status=%s\n' "$workspace_status"
+REMOTE
+)"
+
+  state_output="$(run_deployment_remote "$remote_script")"
+  printf '%s\n' "$state_output"
+
+  WORKSHOP_TYPE="$(sed -n 's/.*workshop_type=\([^[:space:]]*\).*/\1/p' <<<"$state_output")"
+  PARTICIPANT_WORKSPACE_STATUS="$(
+    sed -n 's/.*participant_workspace_status=\([^[:space:]]*\).*/\1/p' <<<"$state_output"
+  )"
+
+  case "$WORKSHOP_TYPE" in
+    none|introduction-to-ai|federated-learning) ;;
+    *) fail 'Could not determine the active workshop type. Deploy the current workshop state migration first.' ;;
+  esac
+  case "$PARTICIPANT_WORKSPACE_STATUS" in
+    clean|present) ;;
+    *) fail 'Could not determine whether participant workspaces exist.' ;;
+  esac
+}
+ensure_workshop_activation_allowed() {
+  local requested_type="$1"
+
+  case "$requested_type" in
+    introduction-to-ai|federated-learning) ;;
+    *) fail "Unsupported workshop type: $requested_type" ;;
+  esac
+
+  check_workshop_runtime_state
+
+  if [[ "$WORKSHOP_TYPE" == "$requested_type" || "$WORKSHOP_TYPE" == none ]]; then
+    return 0
+  fi
+
+  if [[ "$PARTICIPANT_WORKSPACE_STATUS" == clean ]]; then
+    printf '%s\n' \
+      "Changing workshop selection from $WORKSHOP_TYPE to $requested_type." \
+      'No participant workspace exists; participant identities and credentials are preserved.'
+    return 0
+  fi
+
+  fail \
+    "Cannot change the active workshop from $WORKSHOP_TYPE to $requested_type while participant workspaces exist. Use Reset workshop cycle → Reset Federated Learning workshop first."
+}
+
+set_introduction_to_ai_workshop_state() {
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"workshop_type":"introduction-to-ai","mode":"beginner","solutions_released":"false"}}'
+REMOTE
+)"
+  printf '%s\n' 'Introduction to AI is now the active workshop for subsequently spawned participant servers.'
+}
+
+run_introduction_to_ai_prepare() {
+  check_participant_accounts
+  [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
+    fail 'Provision complete participant identities and groups before starting Introduction to AI.'
+
+  ensure_workshop_activation_allowed introduction-to-ai
+  "$MODULE1_HELPER" publish
+  set_introduction_to_ai_workshop_state
 }
 
 run_initialise_identities() {
@@ -277,6 +387,8 @@ run_fl_prepare() {
   check_participant_accounts
   [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
     fail 'Provision participant identities before initialising a Federated Learning workshop.'
+
+  ensure_workshop_activation_allowed federated-learning
 
   printf '%s\n' 'Stopping any prior organiser-controlled Flower server...'
   "$FLOWER_MANAGER" stop
@@ -343,7 +455,7 @@ run_introduction_to_ai_menu() {
 
   while true; do
     printf '\nIntroduction to AI\n\n'
-    printf '  1) Module 1 — publish or update reviewed notebook\n'
+    printf '  1) Module 1 — publish and activate for new participant spawns\n'
     printf '  2) Module 1 — check publication readiness\n'
     printf '  3) Module 2 — not configured yet\n'
     printf '  4) Module 3 — not configured yet\n'
@@ -352,7 +464,7 @@ run_introduction_to_ai_menu() {
     read -r choice
 
     case "$choice" in
-      1) "$MODULE1_HELPER" publish ;;
+      1) run_introduction_to_ai_prepare ;;
       2) "$MODULE1_HELPER" check ;;
       3|4) printf 'This module has not been configured yet.\n' ;;
       0) return 0 ;;
@@ -476,8 +588,8 @@ case "$ACTION" in
     ;;
   initialise-identities) run_initialise_identities ;;
   issue-credentials) run_issue_credentials ;;
-  status) check_participant_accounts ;;
-  module1-publish) "$MODULE1_HELPER" publish ;;
+  status) run_status ;;
+  module1-publish) run_introduction_to_ai_prepare ;;
   module1-check) "$MODULE1_HELPER" check ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;

@@ -328,24 +328,35 @@ singleuser:
           module1_notebook=01_symbolic_ai_tutorial.ipynb
           state_dir=/state
 
+          workshop_type="$(tr -d '\r\n' < "$state_dir/workshop_type")"
           mode="$(tr -d '\r\n' < "$state_dir/mode")"
           solutions_released="$(tr -d '\r\n' < "$state_dir/solutions_released")"
 
-          case "$mode" in
-            beginner|advanced) ;;
+          case "$workshop_type" in
+            none|introduction-to-ai|federated-learning) ;;
             *)
-              echo "[seed] ERROR: unsupported workshop mode: $mode" >&2
+              echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
               exit 1
               ;;
           esac
 
-          case "$solutions_released" in
-            true|false) ;;
-            *)
-              echo "[seed] ERROR: invalid solutions_released state: $solutions_released" >&2
-              exit 1
-              ;;
-          esac
+          if [ "$workshop_type" = "federated-learning" ]; then
+            case "$mode" in
+              beginner|advanced) ;;
+              *)
+                echo "[seed] ERROR: unsupported workshop mode: $mode" >&2
+                exit 1
+                ;;
+            esac
+
+            case "$solutions_released" in
+              true|false) ;;
+              *)
+                echo "[seed] ERROR: invalid solutions_released state: $solutions_released" >&2
+                exit 1
+                ;;
+            esac
+          fi
 
           copy_seed_file() {{ '{{' }}
             source_file="$1"
@@ -386,6 +397,7 @@ singleuser:
 
           mkdir -p "$workspace"
 
+          if [ "$workshop_type" = "federated-learning" ]; then
           if [ "$mode" = "beginner" ]; then
             # Preserve the established beginner behaviour: only these managed
             # files at the workspace root are refreshed on each spawn.
@@ -445,11 +457,12 @@ singleuser:
               "$solutions_workspace/SOLUTIONS_RELEASE_RECEIPT.txt" \
               "WORKSHOP_VERSION.json"
           fi
+          fi
 
-          # Introduction to AI Module 1 is independent of the federated-
-          # learning tutorial mode and is copied only when a participant does
-          # not already have a personal notebook copy.
-          if [ -f "$module1_source/$module1_notebook" ]; then
+          # Module 1 is copied only for an active Introduction to AI workshop
+          # and only when a participant does not already have a personal copy.
+          if [ "$workshop_type" = "introduction-to-ai" ] && \
+             [ -f "$module1_source/$module1_notebook" ]; then
             mkdir -p "$module1_workspace"
             chown 1000:100 "$module1_parent" "$module1_workspace"
             chmod 0755 "$module1_parent" "$module1_workspace"
@@ -464,6 +477,7 @@ singleuser:
               "$module1_notebook"
           fi
 
+          echo "[seed] workshop type: $workshop_type"
           echo "[seed] workshop mode: $mode"
           echo "[seed] solutions released: $solutions_released"
       volumeMounts:

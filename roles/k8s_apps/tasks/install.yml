@@ -362,6 +362,7 @@
     else
       k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
         create configmap digitafrica-workshop-state \
+        --from-literal=workshop_type=none \
         --from-literal=mode=beginner \
         --from-literal=solutions_released=false
       echo "created"
@@ -372,6 +373,41 @@
   changed_when: "'created' in workshop_tutorial_state_configmap.stdout"
   tags:
     - workshop_assets
+    - workshop_state_migration
+
+- name: Add neutral workshop type to existing workshop state when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    workshop_type="$(
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        get configmap digitafrica-workshop-state \
+        -o jsonpath='{.data.workshop_type}'
+    )"
+
+    case "$workshop_type" in
+      '')
+        k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+          patch configmap digitafrica-workshop-state \
+          --type merge \
+          -p '{"data":{"workshop_type":"none"}}'
+        echo "initialised"
+        ;;
+      none|introduction-to-ai|federated-learning)
+        echo "preserved"
+        ;;
+      *)
+        printf 'Unsupported workshop_type in digitafrica-workshop-state: %s\n' \
+          "$workshop_type" >&2
+        exit 1
+        ;;
+    esac
+  args:
+    executable: /bin/bash
+  register: workshop_type_state_configmap
+  changed_when: "'initialised' in workshop_type_state_configmap.stdout"
+  tags:
+    - workshop_assets
+    - workshop_state_migration
 
 - name: Create initial Introduction to AI Module 1 ConfigMap when absent
   ansible.builtin.shell: |
