@@ -23,7 +23,7 @@ Actions:
   status      Show whether the Module 1 ConfigMap contains the notebook.
   check       Verify that Module 1 is ready for first-spawn notebook seeding.
 
-The source file and immutable Tutorials revision must be defined in the active
+The source file and immutable source Git revision must be defined in the active
 workshop-release.env as INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE and
 INTRODUCTION_TO_AI_MODULE1_SOURCE_REF.
 
@@ -99,7 +99,7 @@ require_module1_source() {
     die "Module 1 source file must be named $NOTEBOOK_NAME"
 
   [[ "$INTRODUCTION_TO_AI_MODULE1_SOURCE_REF" =~ ^[0-9A-Fa-f]{7,64}$ ]] ||
-    die 'INTRODUCTION_TO_AI_MODULE1_SOURCE_REF must be an immutable Tutorials Git commit SHA.'
+    die 'INTRODUCTION_TO_AI_MODULE1_SOURCE_REF must be an immutable source Git commit SHA.'
 
   require_command python3
   python3 - "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" <<'PYTHON_VALIDATE'
@@ -171,7 +171,7 @@ publish_module1() {
 
   print_heading "Publish Introduction to AI — Module 1"
   printf 'Source notebook : %s\n' "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE"
-  printf 'Tutorials commit: %s\n' "$INTRODUCTION_TO_AI_MODULE1_SOURCE_REF"
+  printf 'Source commit   : %s\n' "$INTRODUCTION_TO_AI_MODULE1_SOURCE_REF"
   printf 'SHA-256         : %s\n' "$source_sha256"
   printf 'ConfigMap       : %s\n' "$CONFIGMAP_NAME"
   printf '%s\n' \
