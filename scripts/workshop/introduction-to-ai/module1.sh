@@ -220,12 +220,12 @@ case "$ACTION" in
     status_output="$(show_status)"
     printf '%s\n' "$status_output"
     printf '%s\n' \
-      'Readiness condition: status must be published before credentials are shared.' \
+      'Readiness condition: status must be published before Module 1 is assigned to participants.' \
       'The administrator must have deployed the JupyterHub Module 1 seed-volume change.'
 
     if ! grep -Fqx 'module1_configmap_status=published' <<<"$status_output"; then
       printf '%s\n' \
-        'Module 1 is not published; participant credentials must not be shared.' >&2
+        'Module 1 is not published; do not run or assign Module 1 to participants.' >&2
       exit 1
     fi
     ;;

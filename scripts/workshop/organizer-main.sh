@@ -59,8 +59,8 @@ Options:
 
 Workflow:
   1. Provision participant identities and groups.
-  2. Publish and check the selected workshop material.
-  3. Issue/export credentials only after Module 1 is published.
+  2. Issue/export shared participant credentials.
+  3. Publish and check material before starting or assigning the selected workshop.
   4. Distribute credentials to participants.
 
 Federated Learning preparation is independent from Introduction to AI.
@@ -240,15 +240,6 @@ run_initialise_identities() {
   esac
 }
 
-require_module1_ready() {
-  local module_status
-
-  module_status="$("$MODULE1_HELPER" status)"
-  printf '%s\n' "$module_status"
-
-  grep -q 'module1_configmap_status=published' <<<"$module_status" ||
-    fail 'Module 1 is not published. Publish and verify Module 1 before issuing participant credentials.'
-}
 
 run_issue_credentials() {
   local credentials_output
@@ -257,7 +248,6 @@ run_issue_credentials() {
   [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
     fail 'Provision complete participant identities and groups before issuing credentials.'
 
-  require_module1_ready
 
   credentials_output="$(participant_credentials_file)"
   "$ACCOUNT_HELPER" \
