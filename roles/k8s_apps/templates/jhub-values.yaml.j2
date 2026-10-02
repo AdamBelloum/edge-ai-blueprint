@@ -85,6 +85,12 @@ hub:
   # assigned client VMs by the pre-spawn hook below.
   baseUrl: /jupyter
 
+  # Recheck the participant PVC on every spawn. This permits a workshop reset
+  # to remove workspace claims without leaving stale KubeSpawner PVC state.
+  config:
+    KubeSpawner:
+      remember_pvc_name: false
+
   extraConfig:
 {% if oidc.oidc_enabled %}
     05-digitafrica-oidc-secret: |
@@ -109,6 +115,11 @@ hub:
       OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
       WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
       WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
+
+      # Do not retain a removed participant PVC name in the Hub database.
+      # Ensure the dynamic home PVC exists before KubeSpawner creates the Pod.
+      c.KubeSpawner.remember_pvc_name = False
+      c.KubeSpawner.storage_pvc_ensure = True
 
       async def configure_digitafrica_group_workspace(spawner):
           username = spawner.user.name.lower()
