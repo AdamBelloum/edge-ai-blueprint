@@ -151,6 +151,12 @@
     - /opt/digitafrica/k8s-notebooks/beginner
     - /opt/digitafrica/k8s-notebooks/advanced
     - /opt/digitafrica/k8s-notebooks/solutions
+    # introduction-to-ai/module2 tracks
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
+    # ADD NEXT MODULE HERE — e.g. introduction-to-ai/module3/beginner|advanced|solutions
+    # ADD NEW WORKSHOP HERE — e.g. data-science/module1/beginner|advanced|solutions
   tags:
     - workshop_assets
 
@@ -178,6 +184,35 @@
   tags:
     - workshop_assets
 
+# ---------------------------------------------------------------------------
+# introduction-to-ai / module2 staging
+# To add module3: copy this block and replace module2 with module3.
+# To add a new workshop: copy this block and replace the workshop/module path.
+# ---------------------------------------------------------------------------
+- name: Stage introduction-to-ai module2 beginner assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/beginner/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner/
+    mode: "0644"
+  tags:
+    - workshop_assets
+
+- name: Stage introduction-to-ai module2 advanced assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/advanced/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced/
+    mode: "0644"
+  tags:
+    - workshop_assets
+
+- name: Stage introduction-to-ai module2 solutions assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/solutions/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions/
+    mode: "0644"
+  tags:
+    - workshop_assets
+
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
     set -euo pipefail
@@ -201,6 +236,21 @@
         "/opt/digitafrica/k8s-notebooks/solutions": (
             "01_Inspect_Local_Partition_solution.ipynb",
             "02_Run_Federated_Client_solution.ipynb",
+        ),
+        # introduction-to-ai/module2 provenance entries
+        # To add module3: copy this block and replace module2 with module3 filenames.
+        # To add a new workshop: copy this block and replace workshop/module path and filenames.
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner": (
+            "00_START_HERE.md",
+            "01_foundations_of_ml_beginner.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced": (
+            "00_START_HERE.md",
+            "01_foundations_of_ml_advanced.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions": (
+            "00_START_HERE.md",
+            "01_foundations_of_ml_solutions.ipynb",
         ),
     }
 
@@ -345,6 +395,15 @@
       path: /opt/digitafrica/k8s-notebooks/advanced
     - name: digitafrica-notebooks-solutions
       path: /opt/digitafrica/k8s-notebooks/solutions
+    # introduction-to-ai/module2 ConfigMaps
+    # To add module3: copy this block and replace module2 with module3.
+    # To add a new workshop: copy this block and replace the workshop/module path.
+    - name: digitafrica-notebooks-introduction-to-ai-module2-beginner
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner
+    - name: digitafrica-notebooks-introduction-to-ai-module2-advanced
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
+    - name: digitafrica-notebooks-introduction-to-ai-module2-solutions
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
   register: tutorial_asset_configmaps
   changed_when: >-
     'created' in tutorial_asset_configmaps.stdout or
