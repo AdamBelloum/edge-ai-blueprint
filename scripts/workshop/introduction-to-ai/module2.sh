@@ -178,7 +178,7 @@ check_track() {
 
   notebook="$(
     k3s kubectl -n "$namespace" get configmap "$configmap" \
-      -o jsonpath="{.data.${notebook_key}}"
+      -o jsonpath="{.data.${notebook_key//./\\.}}"
   )"
 
   if [[ -z "$notebook" ]]; then

@@ -242,15 +242,15 @@
         # To add a new workshop: copy this block and replace workshop/module path and filenames.
         "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner": (
             "00_START_HERE.md",
-            "01_foundations_of_ml_beginner.ipynb",
+            "02_foundations_of_ml_beginner.ipynb",
         ),
         "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced": (
             "00_START_HERE.md",
-            "01_foundations_of_ml_advanced.ipynb",
+            "02_foundations_of_ml_advanced.ipynb",
         ),
         "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions": (
             "00_START_HERE.md",
-            "01_foundations_of_ml_solutions.ipynb",
+            "02_foundations_of_ml_solutions.ipynb",
         ),
     }
 
@@ -422,6 +422,7 @@
       k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
         create configmap digitafrica-workshop-state \
         --from-literal=workshop_type=none \
+        --from-literal=introduction_to_ai_module=module1 \
         --from-literal=mode=beginner \
         --from-literal=solutions_released=false
       echo "created"
@@ -464,6 +465,40 @@
     executable: /bin/bash
   register: workshop_type_state_configmap
   changed_when: "'initialised' in workshop_type_state_configmap.stdout"
+  tags:
+    - workshop_assets
+    - workshop_state_migration
+
+- name: Add default Introduction to AI module selector when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    selected_module="$(
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        get configmap digitafrica-workshop-state \
+        -o jsonpath='{.data.introduction_to_ai_module}'
+    )"
+
+    case "$selected_module" in
+      '')
+        k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+          patch configmap digitafrica-workshop-state \
+          --type merge \
+          -p '{"data":{"introduction_to_ai_module":"module1"}}'
+        echo "initialised"
+        ;;
+      module1|module2)
+        echo "preserved"
+        ;;
+      *)
+        printf 'Unsupported introduction_to_ai_module in digitafrica-workshop-state: %s\n' \
+          "$selected_module" >&2
+        exit 1
+        ;;
+    esac
+  args:
+    executable: /bin/bash
+  register: introduction_to_ai_module_state_configmap
+  changed_when: "'initialised' in introduction_to_ai_module_state_configmap.stdout"
   tags:
     - workshop_assets
     - workshop_state_migration

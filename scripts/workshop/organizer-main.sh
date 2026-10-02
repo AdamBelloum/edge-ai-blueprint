@@ -43,8 +43,10 @@ Actions:
   initialise-identities   Provision participant identities and groups only.
   issue-credentials       Issue temporary passwords and write a protected TSV export.
   status                  Show expected participant-account status.
-  module1-publish         Publish Module 1 and activate Introduction to AI for new spawns.
+  module1-publish         Publish Module 1 and activate Introduction to AI Module 1 for new spawns.
   module1-check           Check Introduction to AI Module 1 publication readiness.
+  module2-publish         Publish and activate Introduction to AI Module 2 for new spawns.
+  module2-check           Check Introduction to AI Module 2 publication readiness.
   fl-prepare              Initialise the selected Federated Learning workshop mode.
   reset                   Reset the active workshop cycle and participant cohort.
   reset-participants      Remove participant identities and credential exports only.
@@ -490,15 +492,33 @@ ensure_workshop_activation_allowed() {
 }
 
 set_introduction_to_ai_workshop_state() {
+  local module="$1"
+  local mode solutions_released
+
+  case "$module" in
+    module1)
+      mode=beginner
+      solutions_released=false
+      ;;
+    module2)
+      mode=advanced
+      solutions_released=true
+      ;;
+    *)
+      fail "Unsupported Introduction to AI module: $module"
+      ;;
+  esac
+
   run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
 k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   patch configmap digitafrica-workshop-state \
   --type merge \
-  -p '{"data":{"workshop_type":"introduction-to-ai","mode":"beginner","solutions_released":"false"}}'
+  -p '{"data":{"workshop_type":"introduction-to-ai","introduction_to_ai_module":"${module}","mode":"${mode}","solutions_released":"${solutions_released}"}}'
 REMOTE
 )"
-  printf '%s\n' 'Introduction to AI is now the active workshop for subsequently spawned participant servers.'
+  printf '%s\n' \
+    "Introduction to AI ${module} is now active for subsequently spawned participant servers."
 }
 
 run_introduction_to_ai_prepare() {
@@ -509,7 +529,18 @@ run_introduction_to_ai_prepare() {
   ensure_workshop_activation_allowed introduction-to-ai
   "$MODULE1_HELPER" publish
   "$MODULE2_HELPER" publish
-  set_introduction_to_ai_workshop_state
+  set_introduction_to_ai_workshop_state module1
+}
+
+run_introduction_to_ai_module2_publish() {
+  check_participant_accounts
+  [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
+    fail 'Provision complete participant identities and groups before starting Introduction to AI Module 2.'
+
+  ensure_workshop_activation_allowed introduction-to-ai
+  "$MODULE2_HELPER" publish
+  "$MODULE2_HELPER" check
+  set_introduction_to_ai_workshop_state module2
 }
 
 run_initialise_identities() {
@@ -655,8 +686,9 @@ run_introduction_to_ai_menu() {
     printf '\nIntroduction to AI\n\n'
     printf '  1) Module 1 — publish and activate for new participant spawns\n'
     printf '  2) Module 1 — check publication readiness\n'
-    printf '  3) Module 2 — not configured yet\n'
-    printf '  4) Module 3 — not configured yet\n'
+    printf '  3) Module 2 — publish Advanced and Solution material, then activate\n'
+    printf '  4) Module 2 — check publication readiness\n'
+    printf '  5) Module 3 — not configured yet\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
@@ -664,10 +696,11 @@ run_introduction_to_ai_menu() {
     case "$choice" in
       1) run_introduction_to_ai_prepare ;;
       2) "$MODULE1_HELPER" check ;;
-      3) "$MODULE2_HELPER" check ;;
-      4) printf 'This module has not been configured yet.\n' ;;
+      3) run_introduction_to_ai_module2_publish ;;
+      4) "$MODULE2_HELPER" check ;;
+      5) printf 'This module has not been configured yet.\n' ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, 4, or 5.\n' >&2 ;;
     esac
   done
 }
@@ -790,6 +823,7 @@ case "$ACTION" in
   status) run_status ;;
   module1-publish) run_introduction_to_ai_prepare ;;
   module1-check) "$MODULE1_HELPER" check ;;
+  module2-publish) run_introduction_to_ai_module2_publish ;;
   module2-check) "$MODULE2_HELPER" check ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
