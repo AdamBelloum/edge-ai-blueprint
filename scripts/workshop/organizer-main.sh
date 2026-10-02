@@ -13,6 +13,7 @@ RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.s
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
+MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
 COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
@@ -290,7 +291,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-check|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -342,7 +343,8 @@ for helper in \
   "$RESET_HELPER" \
   "$PARTICIPANT_RESET_HELPER" \
   "$FLOWER_MANAGER" \
-  "$MODULE1_HELPER"; do
+  "$MODULE1_HELPER" \
+  "$MODULE2_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
 
@@ -506,6 +508,7 @@ run_introduction_to_ai_prepare() {
 
   ensure_workshop_activation_allowed introduction-to-ai
   "$MODULE1_HELPER" publish
+  "$MODULE2_HELPER" publish
   set_introduction_to_ai_workshop_state
 }
 
@@ -661,7 +664,8 @@ run_introduction_to_ai_menu() {
     case "$choice" in
       1) run_introduction_to_ai_prepare ;;
       2) "$MODULE1_HELPER" check ;;
-      3|4) printf 'This module has not been configured yet.\n' ;;
+      3) "$MODULE2_HELPER" check ;;
+      4) printf 'This module has not been configured yet.\n' ;;
       0) return 0 ;;
       *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
     esac
@@ -786,6 +790,7 @@ case "$ACTION" in
   status) run_status ;;
   module1-publish) run_introduction_to_ai_prepare ;;
   module1-check) "$MODULE1_HELPER" check ;;
+  module2-check) "$MODULE2_HELPER" check ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
   reset-participants) run_reset_participants ;;
