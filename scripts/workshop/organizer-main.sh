@@ -14,6 +14,7 @@ PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
 MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
+APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
 COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
@@ -47,6 +48,7 @@ Actions:
   module1-check           Check Introduction to AI Module 1 publication readiness.
   module2-publish         Publish and activate Introduction to AI Module 2 for new spawns.
   module2-check           Check Introduction to AI Module 2 publication readiness.
+  reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Initialise the selected Federated Learning workshop mode.
   reset                   Reset the active workshop cycle and participant cohort.
   reset-participants      Remove participant identities and credential exports only.
@@ -72,6 +74,7 @@ Workflow:
   4. Distribute credentials to participants.
 
 Federated Learning preparation is independent from Introduction to AI.
+After pulling or adding a workshop or module, run reconcile-applications before publishing it.
 USAGE
 }
 
@@ -293,7 +296,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-check|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -346,7 +349,8 @@ for helper in \
   "$PARTICIPANT_RESET_HELPER" \
   "$FLOWER_MANAGER" \
   "$MODULE1_HELPER" \
-  "$MODULE2_HELPER"; do
+  "$MODULE2_HELPER" \
+  "$APPLICATION_RECONCILIATION_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
 
@@ -412,6 +416,10 @@ check_participant_accounts() {
 run_status() {
   check_participant_accounts
   check_workshop_runtime_state
+}
+
+run_application_reconciliation() {
+  "$APPLICATION_RECONCILIATION_HELPER"
 }
 
 check_workshop_runtime_state() {
@@ -798,7 +806,8 @@ run_main_menu() {
     printf '\nDIGITAfrica workshop organiser\n\n'
     printf '  1) Manage participant cohort\n'
     printf '  2) Reset active workshop cycle\n'
-    printf '  3) Workshops\n'
+    printf '  3) Reconcile workshop applications after adding or updating a workshop/module\n'
+    printf '  4) Workshops\n'
     printf '  0) Exit\n\n'
     printf 'Selection: '
     read -r choice
@@ -806,9 +815,10 @@ run_main_menu() {
     case "$choice" in
       1) run_initialisation_menu ;;
       2) run_reset_menu ;;
-      3) run_workshops_menu ;;
+      3) run_application_reconciliation ;;
+      4) run_workshops_menu ;;
       0) exit 0 ;;
-      *) printf 'Choose 0, 1, 2, or 3.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
     esac
   done
 }
@@ -825,6 +835,7 @@ case "$ACTION" in
   module1-check) "$MODULE1_HELPER" check ;;
   module2-publish) run_introduction_to_ai_module2_publish ;;
   module2-check) "$MODULE2_HELPER" check ;;
+  reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
   reset-participants) run_reset_participants ;;

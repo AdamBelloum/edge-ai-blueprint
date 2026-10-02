@@ -10,6 +10,9 @@
     digitafrica_deployment: "{{ tier2 }}"
     fl_workshop_server_group: "tier2_server"
     fl_workshop_client_group: "tier2_agents"
+    # Pin the deployed Helm chart. Workshop-application reconciliation must
+    # never upgrade JupyterHub merely because the Helm repository has changed.
+    jupyterhub_chart_version: "4.4.2"
     workshop_notebook_runtime:
       enabled: true
       image_name: "quay.io/jupyterhub/k8s-singleuser-sample"

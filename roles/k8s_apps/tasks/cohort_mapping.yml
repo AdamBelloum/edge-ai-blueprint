@@ -20,6 +20,9 @@
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
     helm upgrade --install jhub jupyterhub/jupyterhub \
       --namespace {{ digitafrica_deployment.digitafrica_namespace }} \
+      {% if jupyterhub_chart_version | default('') | trim | length > 0 %}
+      --version {{ jupyterhub_chart_version | quote }} \
+      {% endif %}
       --timeout 15m0s \
       -f /opt/digitafrica/k8s/jhub-values.yaml
   args:
