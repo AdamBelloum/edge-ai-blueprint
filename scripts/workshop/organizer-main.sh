@@ -45,7 +45,7 @@ Actions:
   module1-publish         Publish Module 1 and activate Introduction to AI for new spawns.
   module1-check           Check Introduction to AI Module 1 publication readiness.
   fl-prepare              Initialise the selected Federated Learning workshop mode.
-  reset                   Full Federated Learning reset.
+  reset                   Reset the active workshop cycle and participant cohort.
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
   flower                  Open the Flower lifecycle manager.
@@ -64,8 +64,8 @@ Options:
 
 Workflow:
   1. Provision participant identities and groups.
-  2. Issue/export shared participant credentials.
-  3. Publish and check material before starting or assigning the selected workshop.
+  2. Prepare the selected workshop after the participant cohort exists.
+  3. Issue/export shared participant credentials when they are ready to distribute.
   4. Distribute credentials to participants.
 
 Federated Learning preparation is independent from Introduction to AI.
@@ -484,7 +484,7 @@ ensure_workshop_activation_allowed() {
   fi
 
   fail \
-    "Cannot change the active workshop from $WORKSHOP_TYPE to $requested_type while participant workspaces exist. Use Reset workshop cycle → Reset Federated Learning workshop first."
+    "Cannot change the active workshop from $WORKSHOP_TYPE to $requested_type while participant workspaces exist. Use Reset active workshop cycle → Reset active workshop and participant cohort first."
 }
 
 set_introduction_to_ai_workshop_state() {
@@ -581,7 +581,7 @@ run_fl_prepare() {
   select_fl_mode
   check_participant_accounts
   [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
-    fail 'Provision participant identities before initialising a Federated Learning workshop.'
+    fail 'Provision the participant cohort before initialising a Federated Learning workshop.'
 
   ensure_workshop_activation_allowed federated-learning
 
@@ -716,7 +716,7 @@ run_initialisation_menu() {
   local choice
 
   while true; do
-    printf '\nInitialise workshop cycle\n\n'
+    printf '\nManage participant cohort\n\n'
     printf '  1) Provision participant identities and groups\n'
     printf '  2) Issue and export participant credentials\n'
     printf '  3) Show participant-account status\n'
@@ -738,8 +738,8 @@ run_reset_menu() {
   local choice
 
   while true; do
-    printf '\nReset workshop cycle\n\n'
-    printf '  1) Reset Federated Learning workshop\n'
+    printf '\nReset active workshop cycle\n\n'
+    printf '  1) Reset active workshop and participant cohort\n'
     printf '  2) Remove participant identities and credential exports only\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
@@ -759,8 +759,8 @@ run_main_menu() {
 
   while true; do
     printf '\nDIGITAfrica workshop organiser\n\n'
-    printf '  1) Initialise workshop cycle\n'
-    printf '  2) Reset workshop cycle\n'
+    printf '  1) Manage participant cohort\n'
+    printf '  2) Reset active workshop cycle\n'
     printf '  3) Workshops\n'
     printf '  0) Exit\n\n'
     printf 'Selection: '
