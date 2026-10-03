@@ -25,14 +25,14 @@ usage() {
   cat <<'USAGE'
 Usage:
   module2.sh status
-  module2.sh check
+  module2.sh check --mode beginner|advanced
 
 Actions:
   status  Show whether each internally deployed Module 2 ConfigMap contains
           its expected notebook and show current workshop state.
-  check   Verify activation readiness: the guided beginner and advanced TODO
-          tracks must be deployed. Solutions are verified separately by the
-          explicit organiser solution-release action.
+  check   Verify activation readiness for the selected teaching track.
+          Solutions are verified separately by the explicit organiser
+          solution-release action.
 
 Run organiser-main.sh reconcile-applications after adding or changing Module 2
 material. Application reconciliation deploys all three tracks but does not
@@ -41,6 +41,7 @@ USAGE
 }
 
 ACTION=""
+TRACK=""
 
 while (($#)); do
   case "$1" in
@@ -52,6 +53,25 @@ while (($#)); do
       }
       ACTION="$1"
       shift
+      ;;
+    --mode)
+      [[ "$ACTION" == "check" ]] || {
+        printf '%s\n' '--mode is valid only after the check action.' >&2
+        usage >&2
+        exit 2
+      }
+      [[ -z "$TRACK" ]] || {
+        printf 'Specify one Module 2 mode only.\n' >&2
+        usage >&2
+        exit 2
+      }
+      [[ $# -ge 2 ]] || {
+        printf '%s\n' '--mode requires beginner or advanced.' >&2
+        usage >&2
+        exit 2
+      }
+      TRACK="$2"
+      shift 2
       ;;
     -h|--help|help)
       usage
@@ -69,6 +89,21 @@ done
   usage >&2
   exit 2
 }
+
+if [[ "$ACTION" == "check" ]]; then
+  case "$TRACK" in
+    beginner|advanced) ;;
+    *)
+      printf '%s\n' 'check requires --mode beginner or --mode advanced.' >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+elif [[ -n "$TRACK" ]]; then
+  printf '%s\n' '--mode is valid only with the check action.' >&2
+  usage >&2
+  exit 2
+fi
 
 [[ -r "$WORKSHOP_CONTEXT" ]] || {
   printf 'Missing workshop context helper: %s\n' "$WORKSHOP_CONTEXT" >&2
@@ -146,9 +181,9 @@ show_status() {
 
 Application reconciliation deploys all three tracks as protected ConfigMaps.
 
-Activating Module 2 copies the guided beginner and advanced TODO notebooks only
-when a participant next spawns a JupyterHub server and does not already have
-the relevant file under:
+Activating Module 2 copies only the organiser-selected Beginner or Advanced
+TODO notebook when a participant next spawns a JupyterHub server and does not
+already have the relevant file under:
   ~/Introduction-to-AI/Module-2/
 
 Reference solutions are copied only after the organiser explicitly releases
@@ -157,32 +192,26 @@ STATUS_MESSAGE
 }
 
 check_activation_readiness() {
+  local track="$1"
   local status_output
-  local ready=true
 
   status_output="$(show_status)"
   printf '%s\n' "$status_output"
 
-  for track in beginner advanced; do
-    if ! grep -Fq "module2_${track}_configmap_status=deployed" <<<"$status_output"; then
-      printf 'NOT deployed: Module 2 %s teaching track\n' "$track" >&2
-      ready=false
-    fi
-  done
-
-  if [[ "$ready" != true ]]; then
+  if ! grep -Fq "module2_${track}_configmap_status=deployed" <<<"$status_output"; then
+    printf 'NOT deployed: Module 2 %s teaching track\n' "$track" >&2
     printf '%s\n' \
-      'Module 2 is not ready for activation.' \
+      "Module 2 ${track} activation is not ready." \
       'Run reconcile-applications before assigning Module 2 to participants.' >&2
     exit 1
   fi
 
   printf '%s\n' \
-    'Module 2 activation readiness passed: beginner and advanced tracks are deployed.' \
+    "Module 2 ${track} activation readiness passed." \
     'Solutions remain protected until the organiser releases them explicitly.'
 }
 
 case "$ACTION" in
   status) show_status ;;
-  check)  check_activation_readiness ;;
+  check)  check_activation_readiness "$TRACK" ;;
 esac

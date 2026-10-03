@@ -503,16 +503,17 @@ ensure_workshop_activation_allowed() {
 
 set_introduction_to_ai_workshop_state() {
   local module="$1"
-  local mode solutions_released
+  local mode="$2"
+  local solutions_released=false
 
-  case "$module" in
-    module1)
-      mode=beginner
-      solutions_released=false
+  case "${module}:${mode}" in
+    module1:beginner|module2:beginner|module2:advanced)
       ;;
-    module2)
-      mode=advanced
-      solutions_released=false
+    module1:*)
+      fail 'Introduction to AI Module 1 supports only mode=beginner.'
+      ;;
+    module2:*)
+      fail 'Introduction to AI Module 2 requires mode=beginner or mode=advanced.'
       ;;
     *)
       fail "Unsupported Introduction to AI module: $module"
@@ -528,7 +529,40 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
 REMOTE
 )"
   printf '%s\n' \
-    "Introduction to AI ${module} is now active for subsequently spawned participant servers."
+    "Introduction to AI ${module} (${mode}) is now active for subsequently spawned participant servers."
+}
+
+select_introduction_to_ai_module2_mode() {
+  local choice
+
+  if [[ -n "${INTRODUCTION_TO_AI_MODE:-}" ]]; then
+    case "$INTRODUCTION_TO_AI_MODE" in
+      beginner|advanced)
+        printf '%s\n' "$INTRODUCTION_TO_AI_MODE"
+        return 0
+        ;;
+      *)
+        fail 'INTRODUCTION_TO_AI_MODE must be either beginner or advanced.'
+        ;;
+    esac
+  fi
+
+  [[ -t 0 ]] || fail \
+    'Module 2 publication requires an interactive terminal or INTRODUCTION_TO_AI_MODE=beginner|advanced.'
+
+  while true; do
+    printf '\nIntroduction to AI — Module 2 track\n\n' >&2
+    printf '  1) Beginner — guided hands-on notebook\n' >&2
+    printf '  2) Advanced — TODO-based notebook\n' >&2
+    printf 'Selection: ' >&2
+    read -r choice
+
+    case "$choice" in
+      1) printf '%s\n' beginner; return 0 ;;
+      2) printf '%s\n' advanced; return 0 ;;
+      *) printf 'Choose 1 or 2.\n' >&2 ;;
+    esac
+  done
 }
 
 run_introduction_to_ai_prepare() {
@@ -538,17 +572,28 @@ run_introduction_to_ai_prepare() {
 
   ensure_workshop_activation_allowed introduction-to-ai
   "$MODULE1_HELPER" publish
-  set_introduction_to_ai_workshop_state module1
+  set_introduction_to_ai_workshop_state module1 beginner
 }
 
 run_introduction_to_ai_module2_publish() {
+  local mode
+
+  mode="$(select_introduction_to_ai_module2_mode)"
+
   check_participant_accounts
   [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
     fail 'Provision complete participant identities and groups before starting Introduction to AI Module 2.'
 
   ensure_workshop_activation_allowed introduction-to-ai
-  "$MODULE2_HELPER" check
-  set_introduction_to_ai_workshop_state module2
+  "$MODULE2_HELPER" check --mode "$mode"
+  set_introduction_to_ai_workshop_state module2 "$mode"
+}
+
+run_introduction_to_ai_module2_check() {
+  local mode
+
+  mode="$(select_introduction_to_ai_module2_mode)"
+  "$MODULE2_HELPER" check --mode "$mode"
 }
 
 run_introduction_to_ai_module2_release_solutions() {
@@ -751,7 +796,7 @@ run_introduction_to_ai_menu() {
     printf '  1) Module 1 — publish and activate for new participant spawns\n'
     printf '  2) Module 1 — check publication readiness\n'
     printf '  3) Module 2 — activate guided beginner and advanced TODO material\n'
-    printf '  4) Module 2 — check activation readiness\n'
+    printf '  4) Module 2 — check selected track readiness\n'
     printf '  5) Module 2 — release reference solutions after the workshop\n'
     printf '  6) Module 3 — not configured yet\n'
     printf '  0) Back\n\n'
@@ -762,7 +807,7 @@ run_introduction_to_ai_menu() {
       1) run_introduction_to_ai_prepare ;;
       2) "$MODULE1_HELPER" check ;;
       3) run_introduction_to_ai_module2_publish ;;
-      4) "$MODULE2_HELPER" check ;;
+      4) run_introduction_to_ai_module2_check ;;
       5) run_introduction_to_ai_module2_release_solutions ;;
       6) printf 'This module has not been configured yet.\n' ;;
       0) return 0 ;;
@@ -892,7 +937,7 @@ case "$ACTION" in
   module1-publish) run_introduction_to_ai_prepare ;;
   module1-check) "$MODULE1_HELPER" check ;;
   module2-publish) run_introduction_to_ai_module2_publish ;;
-  module2-check) "$MODULE2_HELPER" check ;;
+  module2-check) run_introduction_to_ai_module2_check ;;
   module2-release-solutions) run_introduction_to_ai_module2_release_solutions ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;

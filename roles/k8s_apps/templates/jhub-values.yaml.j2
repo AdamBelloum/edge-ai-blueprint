@@ -388,7 +388,9 @@ singleuser:
               ;;
           esac
 
-          if [ "$workshop_type" = "federated-learning" ]; then
+          if [ "$workshop_type" = "federated-learning" ] || \
+             { [ "$workshop_type" = "introduction-to-ai" ] && \
+               [ "$introduction_to_ai_module" = "module2" ]; }; then
             case "$mode" in
               beginner|advanced) ;;
               *)
@@ -526,44 +528,48 @@ singleuser:
               "$module1_notebook"
           fi
 
-          # Module 2 always provides the guided beginner and advanced TODO tracks.
-          # Reference solutions are copied only after an explicit organiser release.
+          # Module 2 provides only the teaching track selected by the organiser.
+          # Reference solutions are available only for the Advanced track and only
+          # after an explicit organiser release.
           if [ "$workshop_type" = "introduction-to-ai" ] && \
              [ "$introduction_to_ai_module" = "module2" ]; then
-            if [ "$mode" != "advanced" ]; then
-              echo "[seed] ERROR: Module 2 requires mode=advanced" >&2
-              exit 1
-            fi
+            mkdir -p "$module2_workspace"
+            chown 1000:100 "$module2_parent" "$module2_workspace"
+            chmod 0755 "$module2_parent" "$module2_workspace"
 
-            mkdir -p "$module2_beginner_workspace" "$module2_advanced_workspace"
-            chown 1000:100 \
-              "$module2_parent" \
-              "$module2_workspace" \
-              "$module2_beginner_workspace" \
-              "$module2_advanced_workspace"
-            chmod 0755 \
-              "$module2_parent" \
-              "$module2_workspace" \
-              "$module2_beginner_workspace" \
-              "$module2_advanced_workspace"
-
-            copy_seed_file \
-              "$module2_beginner_source/$module2_beginner_notebook" \
-              "$module2_beginner_workspace/$module2_beginner_notebook" \
-              false
-            write_receipt_if_absent \
-              "$module2_beginner_workspace/MODULE2_BEGINNER_SEED_RECEIPT.txt" \
-              "$module2_beginner_notebook"
-
-            copy_seed_file \
-              "$module2_advanced_source/$module2_advanced_notebook" \
-              "$module2_advanced_workspace/$module2_advanced_notebook" \
-              false
-            write_receipt_if_absent \
-              "$module2_advanced_workspace/MODULE2_ADVANCED_SEED_RECEIPT.txt" \
-              "$module2_advanced_notebook"
+            case "$mode" in
+              beginner)
+              mkdir -p "$module2_beginner_workspace"
+              chown 1000:100 "$module2_beginner_workspace"
+              chmod 0755 "$module2_beginner_workspace"
+              copy_seed_file \
+                "$module2_beginner_source/$module2_beginner_notebook" \
+                "$module2_beginner_workspace/$module2_beginner_notebook" \
+                false
+              write_receipt_if_absent \
+                "$module2_beginner_workspace/MODULE2_BEGINNER_SEED_RECEIPT.txt" \
+                "$module2_beginner_notebook"
+              ;;
+              advanced)
+              mkdir -p "$module2_advanced_workspace"
+              chown 1000:100 "$module2_advanced_workspace"
+              chmod 0755 "$module2_advanced_workspace"
+              copy_seed_file \
+                "$module2_advanced_source/$module2_advanced_notebook" \
+                "$module2_advanced_workspace/$module2_advanced_notebook" \
+                false
+              write_receipt_if_absent \
+                "$module2_advanced_workspace/MODULE2_ADVANCED_SEED_RECEIPT.txt" \
+                "$module2_advanced_notebook"
+              ;;
+            esac
 
             if [ "$solutions_released" = "true" ]; then
+              if [ "$mode" != "advanced" ]; then
+                echo "[seed] ERROR: Module 2 solutions require mode=advanced" >&2
+                exit 1
+              fi
+
               mkdir -p "$module2_solutions_workspace"
               chown 1000:100 "$module2_solutions_workspace"
               chmod 0755 "$module2_solutions_workspace"
