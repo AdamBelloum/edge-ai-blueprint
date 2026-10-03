@@ -6,12 +6,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
-PREPARE_HELPER="$SCRIPT_DIR/federated-learning/organizer_wizard.sh"
 COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
-FLOWER_MANAGER="$SCRIPT_DIR/federated-learning/manage-flower-server.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
 MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
@@ -52,7 +50,7 @@ Actions:
   module2-release-solutions
                           Release Introduction to AI Module 2 solutions after the workshop.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
-  fl-prepare              Initialise the selected Federated Learning workshop mode.
+  fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
@@ -350,12 +348,10 @@ source "$COMMON_HELPER"
 source "$ORGANIZER_RUNTIME"
 
 for helper in \
-  "$PREPARE_HELPER" \
   "$COHORT_HELPER" \
   "$ACCOUNT_HELPER" \
   "$RESET_HELPER" \
   "$PARTICIPANT_RESET_HELPER" \
-  "$FLOWER_MANAGER" \
   "$MODULE1_HELPER" \
   "$MODULE2_HELPER" \
   "$APPLICATION_RECONCILIATION_HELPER"; do

@@ -30,65 +30,21 @@ select_fl_mode() {
 }
 
 run_fl_prepare() {
-  local -a pre_reconciliation_readiness_args=(--non-interactive --skip-participant-mapping)
-  local -a post_reconciliation_readiness_args=(--non-interactive)
-  local -a cohort_args=(new-cohort)
+  local -a preparation_args=(prepare)
 
   select_fl_mode
   check_participant_accounts
   [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
-    fail 'Provision the participant cohort before initialising a Federated Learning workshop.'
+    fail 'Provision the participant cohort before preparing a Federated Learning workshop.'
 
-  ensure_workshop_activation_allowed federated-learning
+  preparation_args+=("$MODE")
+  "$NON_INTERACTIVE" && preparation_args+=(--yes)
 
-  printf '%s\n' 'Stopping any prior organiser-controlled Flower server...'
-  "$FLOWER_MANAGER" stop
-
-  "$PREPARE_HELPER" "${pre_reconciliation_readiness_args[@]}"
-
-  cohort_args+=("$MODE")
-  "$NON_INTERACTIVE" && cohort_args+=(--yes)
-  "$COHORT_HELPER" "${cohort_args[@]}"
-
-  "$PREPARE_HELPER" "${post_reconciliation_readiness_args[@]}"
-
-  printf '%s\n' 'Starting a fresh Flower server for the initialised cohort...'
-  "$FLOWER_MANAGER" restart --defaults
-  printf '%s\n' 'Federated Learning preparation completed.'
+  "$COHORT_HELPER" "${preparation_args[@]}"
 }
 
 run_flower_manager_menu() {
-  local choice rounds min_clients
-
-  while true; do
-    printf '\nFlower server lifecycle\n\n'
-    printf '  1) Show status and effective parameters\n'
-    printf '  2) Start the server\n'
-    printf '  3) Stop the server\n'
-    printf '  4) Restart the server\n'
-    printf '  5) Update rounds and required-client parameters\n'
-    printf '  6) Show recent server logs\n'
-    printf '  0) Back\n\n'
-    printf 'Selection: '
-    read -r choice
-
-    case "$choice" in
-      1) "$FLOWER_MANAGER" status ;;
-      2) "$FLOWER_MANAGER" start ;;
-      3) "$FLOWER_MANAGER" stop ;;
-      4) "$FLOWER_MANAGER" restart ;;
-      5)
-        printf 'Number of federated-training rounds: '
-        read -r rounds
-        printf 'Required participating clients in every round: '
-        read -r min_clients
-        "$FLOWER_MANAGER" configure --rounds "$rounds" --min-clients "$min_clients"
-        ;;
-      6) "$FLOWER_MANAGER" logs ;;
-      0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, 4, 5, or 6.\n' >&2 ;;
-    esac
-  done
+  "$COHORT_HELPER" flower
 }
 
 run_federated_learning_menu() {
@@ -96,8 +52,8 @@ run_federated_learning_menu() {
 
   while true; do
     printf '\nFederated Learning\n\n'
-    printf '  1) Initialise beginner workshop\n'
-    printf '  2) Initialise advanced workshop\n'
+    printf '  1) Prepare beginner workshop and start Flower\n'
+    printf '  2) Prepare advanced workshop and start Flower\n'
     printf '  3) Release advanced reference solutions\n'
     printf '  4) Manage Flower server\n'
     printf '  0) Back\n\n'
