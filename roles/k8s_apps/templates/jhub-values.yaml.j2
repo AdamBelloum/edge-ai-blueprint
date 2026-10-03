@@ -279,7 +279,10 @@ singleuser:
       - name: digitafrica-seed-introduction-to-ai-module1
         configMap:
           name: digitafrica-introduction-to-ai-module1
-      # Module 2 intentionally exposes only the advanced and solution tracks.
+      # Module 2 has guided beginner, advanced TODO, and protected solution tracks.
+      - name: digitafrica-seed-introduction-to-ai-module2-beginner
+        configMap:
+          name: digitafrica-notebooks-introduction-to-ai-module2-beginner
       - name: digitafrica-seed-introduction-to-ai-module2-advanced
         configMap:
           name: digitafrica-notebooks-introduction-to-ai-module2-advanced
@@ -344,12 +347,15 @@ singleuser:
           module1_parent=/home/jovyan/Introduction-to-AI
           module1_workspace="$module1_parent/Module-1"
           module1_notebook=01_symbolic_ai_tutorial.ipynb
+          module2_beginner_source=/seed/introduction-to-ai/module2/beginner
           module2_advanced_source=/seed/introduction-to-ai/module2/advanced
           module2_solutions_source=/seed/introduction-to-ai/module2/solutions
           module2_parent=/home/jovyan/Introduction-to-AI
           module2_workspace="$module2_parent/Module-2"
+          module2_beginner_workspace="$module2_workspace/beginner"
           module2_advanced_workspace="$module2_workspace/advanced"
           module2_solutions_workspace="$module2_workspace/solutions"
+          module2_beginner_notebook=02_foundations_of_ml_beginner.ipynb
           module2_advanced_notebook=02_foundations_of_ml_advanced.ipynb
           module2_solutions_notebook=02_foundations_of_ml_solutions.ipynb
           state_dir=/state
@@ -520,26 +526,34 @@ singleuser:
               "$module1_notebook"
           fi
 
-          # Module 2 deliberately exposes only advanced material and its
-          # reference solution. The beginner Module 2 ConfigMap is never mounted.
+          # Module 2 always provides the guided beginner and advanced TODO tracks.
+          # Reference solutions are copied only after an explicit organiser release.
           if [ "$workshop_type" = "introduction-to-ai" ] && \
              [ "$introduction_to_ai_module" = "module2" ]; then
-            if [ "$mode" != "advanced" ] || [ "$solutions_released" != "true" ]; then
-              echo "[seed] ERROR: Module 2 requires mode=advanced and solutions_released=true" >&2
+            if [ "$mode" != "advanced" ]; then
+              echo "[seed] ERROR: Module 2 requires mode=advanced" >&2
               exit 1
             fi
 
-            mkdir -p "$module2_advanced_workspace" "$module2_solutions_workspace"
+            mkdir -p "$module2_beginner_workspace" "$module2_advanced_workspace"
             chown 1000:100 \
               "$module2_parent" \
               "$module2_workspace" \
-              "$module2_advanced_workspace" \
-              "$module2_solutions_workspace"
+              "$module2_beginner_workspace" \
+              "$module2_advanced_workspace"
             chmod 0755 \
               "$module2_parent" \
               "$module2_workspace" \
-              "$module2_advanced_workspace" \
-              "$module2_solutions_workspace"
+              "$module2_beginner_workspace" \
+              "$module2_advanced_workspace"
+
+            copy_seed_file \
+              "$module2_beginner_source/$module2_beginner_notebook" \
+              "$module2_beginner_workspace/$module2_beginner_notebook" \
+              false
+            write_receipt_if_absent \
+              "$module2_beginner_workspace/MODULE2_BEGINNER_SEED_RECEIPT.txt" \
+              "$module2_beginner_notebook"
 
             copy_seed_file \
               "$module2_advanced_source/$module2_advanced_notebook" \
@@ -549,13 +563,19 @@ singleuser:
               "$module2_advanced_workspace/MODULE2_ADVANCED_SEED_RECEIPT.txt" \
               "$module2_advanced_notebook"
 
-            copy_seed_file \
-              "$module2_solutions_source/$module2_solutions_notebook" \
-              "$module2_solutions_workspace/$module2_solutions_notebook" \
-              false
-            write_receipt_if_absent \
-              "$module2_solutions_workspace/MODULE2_SOLUTIONS_RELEASE_RECEIPT.txt" \
-              "$module2_solutions_notebook"
+            if [ "$solutions_released" = "true" ]; then
+              mkdir -p "$module2_solutions_workspace"
+              chown 1000:100 "$module2_solutions_workspace"
+              chmod 0755 "$module2_solutions_workspace"
+
+              copy_seed_file \
+                "$module2_solutions_source/$module2_solutions_notebook" \
+                "$module2_solutions_workspace/$module2_solutions_notebook" \
+                false
+              write_receipt_if_absent \
+                "$module2_solutions_workspace/MODULE2_SOLUTIONS_RELEASE_RECEIPT.txt" \
+                "$module2_solutions_notebook"
+            fi
           fi
 
           echo "[seed] workshop type: $workshop_type"
@@ -577,6 +597,9 @@ singleuser:
           readOnly: true
         - name: digitafrica-seed-introduction-to-ai-module1
           mountPath: /seed/introduction-to-ai/module1
+          readOnly: true
+        - name: digitafrica-seed-introduction-to-ai-module2-beginner
+          mountPath: /seed/introduction-to-ai/module2/beginner
           readOnly: true
         - name: digitafrica-seed-introduction-to-ai-module2-advanced
           mountPath: /seed/introduction-to-ai/module2/advanced
