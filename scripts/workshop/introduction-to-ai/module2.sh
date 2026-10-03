@@ -11,6 +11,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
+ORGANIZER_RUNTIME="$SCRIPT_DIR/../lib/organizer-runtime.sh"
+COHORT_WORKFLOW="$SCRIPT_DIR/../identity/cohort-workshop.sh"
 COMMON_HELPER="$SCRIPT_DIR/../../lib/common.sh"
 
 CONFIGMAP_BEGINNER="digitafrica-notebooks-introduction-to-ai-module2-beginner"
@@ -26,13 +28,25 @@ usage() {
 Usage:
   module2.sh status
   module2.sh check --mode beginner|advanced
+  module2.sh activate [--mode beginner|advanced] [identity options]
+  module2.sh release-solutions [--yes]
 
 Actions:
-  status  Show whether each internally deployed Module 2 ConfigMap contains
-          its expected notebook and show current workshop state.
-  check   Verify activation readiness for the selected teaching track.
-          Solutions are verified separately by the explicit organiser
-          solution-release action.
+  status             Show each Module 2 ConfigMap and current workshop state.
+  check              Verify activation readiness for the selected teaching track.
+  activate           Verify the cohort and selected track, then activate Module 2
+                     for subsequently spawned participant servers. If --mode is
+                     omitted, select a track interactively or set
+                     INTRODUCTION_TO_AI_MODE=beginner|advanced.
+  release-solutions  One-way release of advanced-track reference solutions for
+                     subsequently spawned participant servers only.
+
+Identity options for activate:
+  --server-url URL
+  --realm NAME
+  --admin-user USER
+  --admin-realm NAME
+  --admin-client-id ID --admin-client-secret-file FILE
 
 Run organiser-main.sh reconcile-applications after adding or changing Module 2
 material. Application reconciliation deploys all three tracks but does not
@@ -42,10 +56,18 @@ USAGE
 
 ACTION=""
 TRACK=""
+ASSUME_YES=false
+
+SERVER_URL="${KEYCLOAK_SERVER_URL:-}"
+REALM="${KEYCLOAK_REALM:-digitafrica}"
+ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-}"
+ADMIN_USER="${KEYCLOAK_ADMIN_USER:-}"
+ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-}"
+ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 
 while (($#)); do
   case "$1" in
-    status|check)
+    status|check|activate|release-solutions)
       [[ -z "$ACTION" ]] || {
         printf 'Specify one action only.\n' >&2
         usage >&2
@@ -55,8 +77,8 @@ while (($#)); do
       shift
       ;;
     --mode)
-      [[ "$ACTION" == "check" ]] || {
-        printf '%s\n' '--mode is valid only after the check action.' >&2
+      [[ "$ACTION" == "check" || "$ACTION" == "activate" ]] || {
+        printf '%s\n' '--mode is valid only after check or activate.' >&2
         usage >&2
         exit 2
       }
@@ -71,6 +93,34 @@ while (($#)); do
         exit 2
       }
       TRACK="$2"
+      shift 2
+      ;;
+    --yes)
+      ASSUME_YES=true
+      shift
+      ;;
+    --server-url)
+      SERVER_URL="${2:-}"
+      shift 2
+      ;;
+    --realm)
+      REALM="${2:-}"
+      shift 2
+      ;;
+    --admin-user)
+      ADMIN_USER="${2:-}"
+      shift 2
+      ;;
+    --admin-realm)
+      ADMIN_REALM="${2:-}"
+      shift 2
+      ;;
+    --admin-client-id)
+      ADMIN_CLIENT_ID="${2:-}"
+      shift 2
+      ;;
+    --admin-client-secret-file)
+      ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
     -h|--help|help)
@@ -90,18 +140,32 @@ done
   exit 2
 }
 
-if [[ "$ACTION" == "check" ]]; then
-  case "$TRACK" in
-    beginner|advanced) ;;
-    *)
-      printf '%s\n' 'check requires --mode beginner or --mode advanced.' >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-elif [[ -n "$TRACK" ]]; then
-  printf '%s\n' '--mode is valid only with the check action.' >&2
+case "$TRACK" in
+  ""|beginner|advanced) ;;
+  *)
+    printf '%s\n' '--mode requires beginner or advanced.' >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$ACTION" == "check" && -z "$TRACK" ]]; then
+  printf '%s\n' 'check requires --mode beginner or --mode advanced.' >&2
   usage >&2
+  exit 2
+fi
+
+if "$ASSUME_YES" && [[ "$ACTION" != "release-solutions" ]]; then
+  printf '%s\n' '--yes is valid only with release-solutions.' >&2
+  exit 2
+fi
+
+if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] &&
+  [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]]; then
+  :
+elif [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+  printf '%s\n' \
+    'Both --admin-client-id and --admin-client-secret-file are required.' >&2
   exit 2
 fi
 
@@ -119,6 +183,110 @@ load_workshop_context
 }
 # shellcheck source=../../lib/common.sh
 source "$COMMON_HELPER"
+
+[[ -r "$ORGANIZER_RUNTIME" ]] || {
+  printf 'Missing organiser runtime helper: %s
+' "$ORGANIZER_RUNTIME" >&2
+  exit 2
+}
+# shellcheck source=../lib/organizer-runtime.sh
+source "$ORGANIZER_RUNTIME"
+
+[[ -x "$COHORT_WORKFLOW" ]] || {
+  printf 'Missing executable cohort workflow: %s
+' "$COHORT_WORKFLOW" >&2
+  exit 2
+}
+
+build_cohort_arguments() {
+  COHORT_ARGUMENTS=()
+
+  [[ -n "$SERVER_URL" ]] &&
+    COHORT_ARGUMENTS+=(--server-url "$SERVER_URL")
+  [[ -n "$REALM" ]] &&
+    COHORT_ARGUMENTS+=(--realm "$REALM")
+  [[ -n "$ADMIN_REALM" ]] &&
+    COHORT_ARGUMENTS+=(--admin-realm "$ADMIN_REALM")
+
+  if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+    COHORT_ARGUMENTS+=(
+      --admin-client-id "$ADMIN_CLIENT_ID"
+      --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE"
+    )
+  elif [[ -n "$ADMIN_USER" ]]; then
+    COHORT_ARGUMENTS+=(--admin-user "$ADMIN_USER")
+  fi
+}
+
+require_complete_participant_cohort() {
+  build_cohort_arguments
+  "$COHORT_WORKFLOW" "${COHORT_ARGUMENTS[@]}" require-complete
+}
+
+select_module2_mode() {
+  local choice
+
+  if [[ -n "$TRACK" ]]; then
+    printf '%s
+' "$TRACK"
+    return 0
+  fi
+
+  if [[ -n "${INTRODUCTION_TO_AI_MODE:-}" ]]; then
+    case "$INTRODUCTION_TO_AI_MODE" in
+      beginner|advanced)
+        printf '%s
+' "$INTRODUCTION_TO_AI_MODE"
+        return 0
+        ;;
+      *)
+        printf '%s
+'           'INTRODUCTION_TO_AI_MODE must be either beginner or advanced.' >&2
+        return 2
+        ;;
+    esac
+  fi
+
+  [[ -t 0 ]] || {
+    printf '%s
+'       'Module 2 activation requires an interactive terminal or --mode beginner|advanced.' >&2
+    return 2
+  }
+
+  while true; do
+    printf '
+Introduction to AI — Module 2 track
+
+' >&2
+    printf '  1) Beginner — guided hands-on notebook
+' >&2
+    printf '  2) Advanced — TODO-based notebook
+' >&2
+    printf 'Selection: ' >&2
+    read -r choice
+
+    case "$choice" in
+      1) printf '%s
+' beginner; return 0 ;;
+      2) printf '%s
+' advanced; return 0 ;;
+      *) printf 'Choose 1 or 2.
+' >&2 ;;
+    esac
+  done
+}
+
+set_module2_workshop_state() {
+  local mode="$1"
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","introduction_to_ai_module":"module2","mode":"${mode}","solutions_released":"false"}}'
+REMOTE
+)"
+  printf '%s
+'     "Introduction to AI module2 (${mode}) is now active for subsequently spawned participant servers."
+}
 
 remote_status_script() {
   printf 'namespace=%q\n' "$DIGITAFRICA_NAMESPACE"
@@ -211,7 +379,76 @@ check_activation_readiness() {
     'Solutions remain protected until the organiser releases them explicitly.'
 }
 
+activate_module2() {
+  local mode
+
+  mode="$(select_module2_mode)"
+  require_complete_participant_cohort
+  ensure_workshop_activation_allowed introduction-to-ai
+  check_activation_readiness "$mode"
+  set_module2_workshop_state "$mode"
+}
+
+release_module2_solutions() {
+  print_heading "Release Introduction to AI — Module 2 solutions"
+  printf '%s\n' \
+    'This is a one-way organiser action for subsequently spawned participant servers.' \
+    'Existing participant servers and notebooks are not modified.' \
+    'It is available only while Introduction to AI Module 2 advanced mode is active.'
+
+  if ! "$ASSUME_YES" &&
+    ! confirm "Release Module 2 reference solutions after the workshop"; then
+    log 'No Module 2 solution release was performed.'
+    return 0
+  fi
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+
+workshop_type="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_type}')"
+module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.introduction_to_ai_module}')"
+mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.mode}')"
+
+if [ "\$workshop_type" != "introduction-to-ai" ] || \
+  [ "\$module" != "module2" ] || \
+  [ "\$mode" != "advanced" ]; then
+  printf '%s\n' \
+    'Module 2 solutions can be released only while Introduction to AI Module 2 advanced mode is active.' \
+    "Current state: workshop_type=\${workshop_type:-unset}, module=\${module:-unset}, mode=\${mode:-unset}" >&2
+  exit 1
+fi
+
+solution_notebook="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-notebooks-introduction-to-ai-module2-solutions \
+  -o jsonpath='{.data.02_foundations_of_ml_solutions\.ipynb}')"
+if [ -z "\$solution_notebook" ]; then
+  printf '%s\n' \
+    'Module 2 solutions ConfigMap does not contain the expected notebook.' \
+    'Run reconcile-applications before releasing solutions.' >&2
+  exit 1
+fi
+
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"solutions_released":"true"}}'
+
+printf '%s\n' 'Module 2 solutions released for subsequently spawned participant servers.'
+REMOTE
+)"
+
+  show_status
+}
+
 case "$ACTION" in
   status) show_status ;;
-  check)  check_activation_readiness "$TRACK" ;;
+  check) check_activation_readiness "$TRACK" ;;
+  activate) activate_module2 ;;
+  release-solutions) release_module2_solutions ;;
 esac
