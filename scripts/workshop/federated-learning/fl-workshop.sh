@@ -12,8 +12,11 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
+ORGANIZER_RUNTIME="$SCRIPT_DIR/../lib/organizer-runtime.sh"
+COHORT_WORKFLOW="$SCRIPT_DIR/../identity/cohort-workshop.sh"
 ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
 COHORT_MAPPING_HELPER="$SCRIPT_DIR/../identity/reconcile-cohort-mapping.sh"
+FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 
 usage() {
   cat <<'EOF'
@@ -33,6 +36,9 @@ Actions:
   new-cohort beginner|advanced [--yes]
                     Delete participant workspaces and initialise a fresh cohort.
                     --yes confirms the destructive workspace reset explicitly.
+  prepare beginner|advanced [--yes]
+                    Verify readiness, initialise a fresh cohort, and start Flower.
+  flower            Manage the organiser-controlled Flower server.
   reconcile-cohort-mapping
                     Re-render inventory-derived JupyterHub group placement and
                     reconcile only the JupyterHub Helm release.
@@ -40,9 +46,9 @@ Actions:
                     Delete participant workspaces without changing tutorial state.
   help              Show this help text.
 
-This helper does not launch training. Start a Flower server and clients only
-with an experiment-specific command that has been reviewed against the current
-application source and approved data-handling arrangements.
+This helper manages only the organiser-controlled Flower server. Participant
+clients remain participant-driven and must use reviewed application source and
+approved data-handling arrangements.
 EOF
 }
 
@@ -57,7 +63,7 @@ while (($#)); do
       ASSUME_COHORT_RESET=true
       shift
       ;;
-    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|reconcile-cohort-mapping|delete-workspaces|help|--help|-h)
+    menu|preflight|revisions|inspect-workspaces|checklist|record-template|tutorial-state|release-solutions|reconcile-cohort-mapping|delete-workspaces|flower|help|--help|-h)
       if [[ "$SELECTED_ACTION" != "menu" ]]; then
         printf 'Only one action may be specified.\n' >&2
         usage >&2
@@ -86,6 +92,28 @@ while (($#)); do
       esac
       SELECTED_ACTION="set-tutorial-mode"
       TUTORIAL_MODE="$2"
+      shift 2
+      ;;
+    prepare)
+      if [[ "$SELECTED_ACTION" != "menu" ]]; then
+        printf 'Only one action may be specified.\n' >&2
+        usage >&2
+        exit 2
+      fi
+      (($# >= 2)) || {
+        printf 'prepare requires beginner or advanced.\n' >&2
+        usage >&2
+        exit 2
+      }
+      case "$2" in
+        beginner|advanced) ;;
+        *)
+          printf 'Invalid preparation mode: %s (expected beginner or advanced).\n' "$2" >&2
+          exit 2
+          ;;
+      esac
+      SELECTED_ACTION="prepare"
+      COHORT_MODE="$2"
       shift 2
       ;;
     new-cohort)
@@ -120,9 +148,9 @@ done
 
 if "$ASSUME_COHORT_RESET"; then
   case "$SELECTED_ACTION" in
-    new-cohort|delete-workspaces) ;;
+    new-cohort|delete-workspaces|prepare) ;;
     *)
-      printf '%s\n' '--yes is valid only with new-cohort or delete-workspaces.' >&2
+      printf '%s\n' '--yes is valid only with new-cohort, prepare, or delete-workspaces.' >&2
       exit 2
       ;;
   esac
@@ -140,6 +168,11 @@ fi
 
 # shellcheck source=../../lib/common.sh
 source "${SCRIPT_DIR}/../../lib/common.sh"
+
+[[ -r "$ORGANIZER_RUNTIME" ]] ||
+  die "Missing organiser runtime helper: $ORGANIZER_RUNTIME"
+# shellcheck source=../lib/organizer-runtime.sh
+source "$ORGANIZER_RUNTIME"
 
 run_preflight() {
   print_heading "Workshop platform preflight"
@@ -161,6 +194,86 @@ Manual checks still required before participants arrive:
   7. Run the guided local-data notebook and the guided Flower-client notebook
      with a real participant account before the workshop starts.
 EOF
+}
+
+prepare_federated_learning_workshop() {
+  local mode="$1"
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *) die "Invalid preparation mode: $mode" ;;
+  esac
+
+  [[ -x "$COHORT_WORKFLOW" ]] ||
+    die "Cohort workflow helper is missing or not executable: $COHORT_WORKFLOW"
+  [[ -x "$FLOWER_MANAGER" ]] ||
+    die "Flower server manager is missing or not executable: $FLOWER_MANAGER"
+  [[ -x "$ORGANIZER_WIZARD" ]] ||
+    die "Workshop readiness wizard is missing or not executable: $ORGANIZER_WIZARD"
+
+  print_heading "Prepare Federated Learning workshop"
+
+  "$COHORT_WORKFLOW" require-complete
+  ensure_workshop_activation_allowed federated-learning
+
+  printf '%s\n' "Stopping any existing organiser-controlled Flower server."
+  "$FLOWER_MANAGER" stop
+
+  printf '%s\n' "Checking readiness before cohort reconciliation."
+  bash "$ORGANIZER_WIZARD" --non-interactive --skip-participant-mapping
+
+  start_new_cohort "$mode"
+
+  printf '%s\n' "Checking complete readiness after cohort reconciliation."
+  bash "$ORGANIZER_WIZARD" --non-interactive
+
+  printf '%s\n' "Starting Flower with inventory-derived default parameters."
+  "$FLOWER_MANAGER" restart --defaults
+
+  printf '%s\n' "Federated Learning workshop preparation completed."
+}
+
+run_flower_manager_menu() {
+  local choice
+  local rounds
+  local min_clients
+
+  while true; do
+    cat <<'EOF'
+
+Flower server lifecycle
+
+  1) Show status and effective parameters
+  2) Start the server
+  3) Stop the server
+  4) Restart the server
+  5) Configure rounds and required clients (leaves server stopped)
+  6) Show recent server logs
+  0) Back
+EOF
+
+    read -r -p "Selection: " choice
+    case "$choice" in
+      1) "$FLOWER_MANAGER" status ;;
+      2)
+        ensure_workshop_activation_allowed federated-learning
+        "$FLOWER_MANAGER" start
+        ;;
+      3) "$FLOWER_MANAGER" stop ;;
+      4)
+        ensure_workshop_activation_allowed federated-learning
+        "$FLOWER_MANAGER" restart
+        ;;
+      5)
+        read -r -p "Number of federated-training rounds: " rounds
+        read -r -p "Required participating clients in every round: " min_clients
+        "$FLOWER_MANAGER" configure --rounds "$rounds" --min-clients "$min_clients"
+        ;;
+      6) "$FLOWER_MANAGER" logs ;;
+      0) return 0 ;;
+      *) warn "Choose a number from 0 to 6." ;;
+    esac
+  done
 }
 
 reconcile_current_cohort_mapping() {
@@ -661,6 +774,8 @@ Choose an action:
   7) Set tutorial mode for subsequent participant spawns
   8) Release reference solutions for advanced workshop
   9) Start a fresh beginner or advanced workshop cohort
+ 10) Prepare a fresh beginner or advanced workshop and start Flower
+ 11) Manage Flower server
   0) Exit
 EOF
     read -r -p "Selection: " choice
@@ -687,8 +802,16 @@ EOF
           *) warn "Choose beginner or advanced." ;;
         esac
         ;;
+      10)
+        read -r -p "Preparation mode (beginner/advanced): " choice
+        case "$choice" in
+          beginner|advanced) prepare_federated_learning_workshop "$choice" ;;
+          *) warn "Choose beginner or advanced." ;;
+        esac
+        ;;
+      11) run_flower_manager_menu ;;
       0) log "Exiting."; return 0 ;;
-      *) warn "Choose a number from 0 to 9." ;;
+      *) warn "Choose a number from 0 to 11." ;;
     esac
   done
 }
@@ -729,6 +852,12 @@ main() {
       ;;
     new-cohort)
       start_new_cohort "$COHORT_MODE"
+      ;;
+    prepare)
+      prepare_federated_learning_workshop "$COHORT_MODE"
+      ;;
+    flower)
+      run_flower_manager_menu
       ;;
     delete-workspaces)
       start_new_cohort ""
