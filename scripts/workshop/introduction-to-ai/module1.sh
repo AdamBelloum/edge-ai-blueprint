@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
+ORGANIZER_RUNTIME="$SCRIPT_DIR/../lib/organizer-runtime.sh"
+COHORT_WORKFLOW="$SCRIPT_DIR/../identity/cohort-workshop.sh"
 COMMON_HELPER="$SCRIPT_DIR/../../lib/common.sh"
 
 CONFIGMAP_NAME="digitafrica-introduction-to-ai-module1"
@@ -15,13 +17,23 @@ usage() {
   cat <<'USAGE'
 Usage:
   module1.sh publish [--yes]
+  module1.sh publish-and-activate [--yes] [identity options]
   module1.sh status
   module1.sh check
 
 Actions:
-  publish     Validate and publish the reviewed Module 1 notebook.
-  status      Show whether the Module 1 ConfigMap contains the notebook.
-  check       Verify that Module 1 is ready for first-spawn notebook seeding.
+  publish               Validate and publish the reviewed Module 1 notebook.
+  publish-and-activate  Verify the participant cohort, publish Module 1, and
+                        activate it for subsequently spawned participant servers.
+  status                Show whether the Module 1 ConfigMap contains the notebook.
+  check                 Verify that Module 1 is ready for first-spawn notebook seeding.
+
+Identity options for publish-and-activate:
+  --server-url URL
+  --realm NAME
+  --admin-user USER
+  --admin-realm NAME
+  --admin-client-id ID --admin-client-secret-file FILE
 
 The source file and immutable source Git revision must be defined in the active
 workshop-release.env as INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE and
@@ -36,9 +48,16 @@ USAGE
 ACTION=""
 ASSUME_YES=false
 
+SERVER_URL="${KEYCLOAK_SERVER_URL:-}"
+REALM="${KEYCLOAK_REALM:-digitafrica}"
+ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-}"
+ADMIN_USER="${KEYCLOAK_ADMIN_USER:-}"
+ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-}"
+ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
+
 while (($#)); do
   case "$1" in
-    publish|status|check)
+    publish|publish-and-activate|status|check)
       [[ -z "$ACTION" ]] || {
         printf 'Specify one action only.\n' >&2
         usage >&2
@@ -50,6 +69,30 @@ while (($#)); do
     --yes)
       ASSUME_YES=true
       shift
+      ;;
+    --server-url)
+      SERVER_URL="${2:-}"
+      shift 2
+      ;;
+    --realm)
+      REALM="${2:-}"
+      shift 2
+      ;;
+    --admin-user)
+      ADMIN_USER="${2:-}"
+      shift 2
+      ;;
+    --admin-realm)
+      ADMIN_REALM="${2:-}"
+      shift 2
+      ;;
+    --admin-client-id)
+      ADMIN_CLIENT_ID="${2:-}"
+      shift 2
+      ;;
+    --admin-client-secret-file)
+      ADMIN_CLIENT_SECRET_FILE="${2:-}"
+      shift 2
       ;;
     -h|--help|help)
       usage
@@ -68,8 +111,18 @@ done
   exit 2
 }
 
-if "$ASSUME_YES" && [[ "$ACTION" != "publish" ]]; then
-  printf '%s\n' '--yes is valid only with publish.' >&2
+if "$ASSUME_YES" &&
+  [[ "$ACTION" != "publish" && "$ACTION" != "publish-and-activate" ]]; then
+  printf '%s\n' '--yes is valid only with publish or publish-and-activate.' >&2
+  exit 2
+fi
+
+if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] &&
+  [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]]; then
+  :
+elif [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+  printf '%s\n' \
+    'Both --admin-client-id and --admin-client-secret-file are required.' >&2
   exit 2
 fi
 
@@ -87,6 +140,55 @@ load_workshop_context
 }
 # shellcheck source=../../lib/common.sh
 source "$COMMON_HELPER"
+
+[[ -r "$ORGANIZER_RUNTIME" ]] || {
+  printf 'Missing organiser runtime helper: %s
+' "$ORGANIZER_RUNTIME" >&2
+  exit 2
+}
+# shellcheck source=../lib/organizer-runtime.sh
+source "$ORGANIZER_RUNTIME"
+
+[[ -x "$COHORT_WORKFLOW" ]] || {
+  printf 'Missing executable cohort workflow: %s
+' "$COHORT_WORKFLOW" >&2
+  exit 2
+}
+
+build_cohort_arguments() {
+  COHORT_ARGUMENTS=()
+
+  [[ -n "$SERVER_URL" ]] &&
+    COHORT_ARGUMENTS+=(--server-url "$SERVER_URL")
+  [[ -n "$REALM" ]] &&
+    COHORT_ARGUMENTS+=(--realm "$REALM")
+  [[ -n "$ADMIN_REALM" ]] &&
+    COHORT_ARGUMENTS+=(--admin-realm "$ADMIN_REALM")
+
+  if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+    COHORT_ARGUMENTS+=(
+      --admin-client-id "$ADMIN_CLIENT_ID"
+      --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE"
+    )
+  elif [[ -n "$ADMIN_USER" ]]; then
+    COHORT_ARGUMENTS+=(--admin-user "$ADMIN_USER")
+  fi
+}
+
+require_complete_participant_cohort() {
+  build_cohort_arguments
+  "$COHORT_WORKFLOW" "${COHORT_ARGUMENTS[@]}" require-complete
+}
+
+set_module1_workshop_state() {
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","introduction_to_ai_module":"module1","mode":"beginner","solutions_released":"false"}}'
+REMOTE
+)"
+  printf '%s
+'     'Introduction to AI module1 (beginner) is now active for subsequently spawned participant servers.'
+}
 
 require_module1_source() {
   : "${INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE:?Workshop release record must define INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE.}"
@@ -213,8 +315,16 @@ REMOTE_PUBLISH
   show_status
 }
 
+publish_and_activate_module1() {
+  require_complete_participant_cohort
+  ensure_workshop_activation_allowed introduction-to-ai
+  publish_module1
+  set_module1_workshop_state
+}
+
 case "$ACTION" in
   publish) publish_module1 ;;
+  publish-and-activate) publish_and_activate_module1 ;;
   status) show_status ;;
   check)
     status_output="$(show_status)"

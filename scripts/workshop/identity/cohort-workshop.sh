@@ -1,38 +1,29 @@
 #!/usr/bin/env bash
-# Hierarchical organiser-facing entry point for DIGITAfrica workshops.
+# Cohort workflow entry point for DIGITAfrica workshop organisers.
 #
-# This script owns top-level argument validation, participant-account access,
-# shared organiser menus, and routing to workshop-specific controllers.
-# Individual workshop helpers own their domain-specific preparation workflows.
+# This script owns participant identity provisioning, credential issuance,
+# participant-account status, and participant/workshop reset dispatch.  The
+# underlying identity and reset scripts remain lower-level helpers.
 
 set -euo pipefail
 
-# Resolve all repository-relative paths independently of the caller's directory.
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+# This helper is normally interactive. Callers that support automation may
+# override this explicitly; defining the default keeps nounset-safe direct and
+# delegated invocation.
+NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 
-# Executable helpers invoked directly by this organiser entry point.
-COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
-ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
-RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
-PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
-MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
-MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
-APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
-# Shared libraries provide deployment context and common organiser safeguards.
-WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
-ORGANIZER_RUNTIME="$SCRIPT_DIR/lib/organizer-runtime.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+WORKSHOP_SCRIPT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+REPOSITORY_ROOT="$(cd -- "$WORKSHOP_SCRIPT_DIR/../.." && pwd)"
+
+ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
+RESET_HELPER="$WORKSHOP_SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/reset-participant-environment.sh"
+WORKSHOP_CONTEXT="$WORKSHOP_SCRIPT_DIR/lib/workshop-context.sh"
 COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
-# Parsed command-line state. Destructive FL preparation requires explicit
-# non-interactive confirmation so it cannot be triggered accidentally.
 ACTION="menu"
-MODE=""
-NON_INTERACTIVE=false
-CONFIRM_COHORT_RESET=false
 
-# Keycloak connection and authentication settings may be supplied by environment
-# variables or command-line options. Passwords themselves are never stored here.
 SERVER_URL="${KEYCLOAK_SERVER_URL:-}"
 REALM="${KEYCLOAK_REALM:-digitafrica}"
 ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-}"
@@ -40,8 +31,6 @@ ADMIN_USER="${KEYCLOAK_ADMIN_USER:-}"
 ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-}"
 ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 
-# A password entered interactively is held only in an owner-readable temporary
-# file for this process and removed by the EXIT trap below.
 ADMIN_PASSWORD_SESSION_FILE=""
 ADMIN_PASSWORD_SESSION_FILE_OWNED=false
 ADMIN_PASSWORD_SESSION_VERIFIED=false
@@ -49,46 +38,28 @@ ADMIN_PASSWORD_SESSION_VERIFIED=false
 usage() {
   cat <<'USAGE'
 Usage:
-  organizer-main.sh [OPTIONS] [ACTION]
+  cohort-workshop.sh [OPTIONS] [ACTION]
 
 Actions:
-  menu                    Show the hierarchical organiser menu. Default.
+  menu                    Show the participant-cohort workflow menu. Default.
   initialise-identities   Provision participant identities and groups only.
   issue-credentials       Issue temporary passwords and write a protected TSV export.
   status                  Show expected participant-account status.
-  module1-publish         Publish Module 1 and activate Introduction to AI Module 1 for new spawns.
-  module1-check           Check Introduction to AI Module 1 publication readiness.
-  module2-publish         Activate Introduction to AI Module 2 beginner and advanced tracks.
-  module2-check           Check Introduction to AI Module 2 activation readiness.
-  module2-release-solutions
-                          Release Introduction to AI Module 2 solutions after the workshop.
-  reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
-  fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
+  require-complete        Exit successfully only when the participant cohort is complete.
   reset                   Reset the active workshop cycle and participant cohort.
   reset-participants      Remove participant identities and credential exports only.
-  release-solutions       Release advanced Federated Learning reference solutions.
-  flower                  Open the Flower lifecycle manager.
 
 Options:
-  --mode beginner|advanced
-                           Required for non-interactive fl-prepare.
-  --non-interactive       Valid only with fl-prepare.
-  --confirm-cohort-reset  Required with non-interactive fl-prepare.
-  --server-url URL        Public Keycloak base URL, or KEYCLOAK_SERVER_URL.
-  --realm NAME            Participant Keycloak realm. Default: digitafrica.
-  --admin-user USER       Keycloak administrator. Default: admin.
-  --admin-realm NAME      Keycloak administrator realm, if non-default.
+  --server-url URL
+  --realm NAME
+  --admin-user USER
+  --admin-realm NAME
   --admin-client-id ID --admin-client-secret-file FILE
-                           Service-account authentication instead of admin user.
+  -h, --help
 
-Workflow:
-  1. Provision participant identities and groups.
-  2. Prepare the selected workshop after the participant cohort exists.
-  3. Issue/export shared participant credentials when they are ready to distribute.
-  4. Distribute credentials to participants.
-
-Federated Learning preparation is independent from Introduction to AI.
-After pulling or adding a workshop or module, run reconcile-applications before publishing it.
+The Keycloak URL is derived from the active inventory when it is not supplied.
+Administrator-password authentication is requested privately only when a
+service-account credential pair is not supplied.
 USAGE
 }
 
@@ -97,7 +68,6 @@ fail() {
   exit 2
 }
 
-# Remove only temporary credential material created by this process.
 clear_admin_password_session() {
   if [[ "$ADMIN_PASSWORD_SESSION_FILE_OWNED" == true ]] &&
     [[ -n "$ADMIN_PASSWORD_SESSION_FILE" ]]; then
@@ -109,14 +79,11 @@ clear_admin_password_session() {
   ADMIN_PASSWORD_SESSION_VERIFIED=false
 }
 
-# Clear a locally created password file on normal exit and interruption.
 trap clear_admin_password_session EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Read an administrator password from the controlling terminal and expose it
-# only through a protected temporary file understood by the account helper.
 create_admin_password_session() {
   local password
 
@@ -146,8 +113,6 @@ create_admin_password_session() {
   export KEYCLOAK_ADMIN_PASSWORD_FILE="$ADMIN_PASSWORD_SESSION_FILE"
 }
 
-# Reuse a verified session where possible; otherwise allow at most three
-# interactive authentication attempts before account-changing actions stop.
 ensure_admin_password_session() {
   local attempt status
 
@@ -190,8 +155,6 @@ ensure_admin_password_session() {
   fail 'Keycloak authentication failed after 3 attempts; the participant-account operation was not performed.'
 }
 
-# Retry once with a newly entered password if a cached locally created session
-# is rejected by Keycloak. Service-account authentication does not use this path.
 run_account_helper() {
   local status
 
@@ -212,8 +175,6 @@ run_account_helper() {
   "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" "$@"
 }
 
-# Derive the single public Keycloak URL from active inventory rather than
-# relying on a host alias or an unverified manually entered default.
 derive_keycloak_public_url() {
   local discovered_url
 
@@ -280,24 +241,8 @@ prompt_for_server_url() {
     fail 'A public HTTPS Keycloak URL is required.'
 }
 
-# Parse options before loading deployment context so malformed invocations fail
-# early and without contacting Keycloak or the deployment environment.
 while (($#)); do
   case "$1" in
-    --non-interactive)
-      NON_INTERACTIVE=true
-      shift
-      ;;
-    --confirm-cohort-reset)
-      CONFIRM_COHORT_RESET=true
-      shift
-      ;;
-    --mode)
-      MODE="${2:-}"
-      [[ "$MODE" == beginner || "$MODE" == advanced ]] ||
-        fail '--mode must be beginner or advanced.'
-      shift 2
-      ;;
     --server-url)
       SERVER_URL="${2:-}"
       shift 2
@@ -322,7 +267,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|require-complete|reset|reset-participants)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -337,58 +282,24 @@ while (($#)); do
   esac
 done
 
-# Enforce the explicit confirmation contract for non-interactive destructive
-# Federated Learning preparation and reject action-specific options elsewhere.
-case "$ACTION" in
-  fl-prepare)
-    if "$NON_INTERACTIVE"; then
-      [[ -n "$MODE" ]] ||
-        fail '--non-interactive fl-prepare requires --mode beginner|advanced.'
-      "$CONFIRM_COHORT_RESET" ||
-        fail '--non-interactive fl-prepare requires --confirm-cohort-reset.'
-    elif "$CONFIRM_COHORT_RESET"; then
-      fail '--confirm-cohort-reset is valid only with --non-interactive fl-prepare.'
-    fi
-    ;;
-  *)
-    [[ -z "$MODE" ]] || fail '--mode is valid only with fl-prepare.'
-    "$NON_INTERACTIVE" && fail '--non-interactive is valid only with fl-prepare.'
-    "$CONFIRM_COHORT_RESET" &&
-      fail '--confirm-cohort-reset is valid only with --non-interactive fl-prepare.'
-    ;;
-esac
-
-# Load shared context only after command-line validation has completed.
 [[ -r "$WORKSHOP_CONTEXT" ]] ||
   fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
-# shellcheck source=lib/workshop-context.sh
+# shellcheck source=../lib/workshop-context.sh
 source "$WORKSHOP_CONTEXT"
 load_workshop_context
 
 [[ -r "$COMMON_HELPER" ]] ||
   fail "Missing shared helper: $COMMON_HELPER"
-# shellcheck source=../lib/common.sh
+# shellcheck source=../../lib/common.sh
 source "$COMMON_HELPER"
 
-[[ -r "$ORGANIZER_RUNTIME" ]] ||
-  fail "Missing organiser runtime helper: $ORGANIZER_RUNTIME"
-# shellcheck source=lib/organizer-runtime.sh
-source "$ORGANIZER_RUNTIME"
-
-# Fail early with a clear error when a routed helper is absent or not executable.
 for helper in \
-  "$COHORT_HELPER" \
   "$ACCOUNT_HELPER" \
   "$RESET_HELPER" \
-  "$PARTICIPANT_RESET_HELPER" \
-  "$MODULE1_HELPER" \
-  "$MODULE2_HELPER" \
-  "$APPLICATION_RECONCILIATION_HELPER"; do
+  "$PARTICIPANT_RESET_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
 
-# Build a single consistent argument set for all participant-account operations.
-# Password authentication and service-account authentication are mutually exclusive.
 build_account_args() {
   prompt_for_server_url
   ACCOUNT_ARGS=(--server-url "$SERVER_URL" --realm "$REALM")
@@ -419,8 +330,6 @@ participant_credentials_file() {
     "$REPOSITORY_ROOT" "$host"
 }
 
-# Capture the account helper's machine-readable status while preserving its
-# human-readable report for the organiser.
 check_participant_accounts() {
   local status_output status_file status
 
@@ -450,96 +359,122 @@ check_participant_accounts() {
   esac
 }
 
-run_status() {
+run_initialise_identities() {
   check_participant_accounts
-  check_workshop_runtime_state
+
+  case "$PARTICIPANT_ACCOUNT_STATUS" in
+    absent)
+      printf '%s\n' \
+        'Provisioning participant identities and matching groups without passwords.' \
+        'Participants cannot log in until credentials are issued explicitly.'
+      run_account_helper --provision-only
+      ;;
+    complete)
+      printf '%s\n' \
+        'Participant identities and groups are already complete.' \
+        'No change was made.'
+      ;;
+    inconsistent)
+      fail 'Participant accounts are inconsistent. Repair or reset participant identities before proceeding.'
+      ;;
+  esac
 }
 
-run_application_reconciliation() {
-  "$APPLICATION_RECONCILIATION_HELPER"
+run_issue_credentials() {
+  local credentials_output
+
+  check_participant_accounts
+  [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
+    fail 'Provision complete participant identities and groups before issuing credentials.'
+
+
+  credentials_output="$(participant_credentials_file)"
+  run_account_helper \
+    --reset-all-passwords \
+    --credentials-output "$credentials_output"
+
+  printf 'Protected participant credentials are available locally (mode 0600): %s\n' \
+    "$credentials_output"
 }
 
-# The menu only routes to controllers; the controllers implement each
-# workshop's operational steps and domain-specific confirmation checks.
-run_workshops_menu() {
+run_reset() {
+  build_account_args
+  "$RESET_HELPER" "${ACCOUNT_ARGS[@]}"
+}
+
+run_reset_participants() {
+  build_account_args
+  "$PARTICIPANT_RESET_HELPER" "${ACCOUNT_ARGS[@]}"
+}
+
+run_initialisation_menu() {
   local choice
 
   while true; do
-    printf '\nWorkshops\n\n'
-    printf '  1) Introduction to AI\n'
-    printf '  2) Federated Learning\n'
+    printf '\nManage participant cohort\n\n'
+    printf '  1) Provision participant identities and groups\n'
+    printf '  2) Issue and export participant credentials\n'
+    printf '  3) Show participant-account status\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
 
     case "$choice" in
-      1) run_introduction_to_ai_menu ;;
-      2) run_federated_learning_menu ;;
+      1) run_initialise_identities ;;
+      2) run_issue_credentials ;;
+      3) check_participant_accounts ;;
+      0) return 0 ;;
+      *) printf 'Choose 0, 1, 2, or 3.\n' >&2 ;;
+    esac
+  done
+}
+
+run_reset_menu() {
+  local choice
+
+  while true; do
+    printf '\nReset active workshop cycle\n\n'
+    printf '  1) Reset active workshop and participant cohort\n'
+    printf '  2) Remove participant identities and credential exports only\n'
+    printf '  0) Back\n\n'
+    printf 'Selection: '
+    read -r choice
+
+    case "$choice" in
+      1) run_reset ;;
+      2) run_reset_participants ;;
       0) return 0 ;;
       *) printf 'Choose 0, 1, or 2.\n' >&2 ;;
     esac
   done
 }
 
-
-
-# Top-level interactive navigation. Explicit actions are used for automation.
-run_main_menu() {
-  local choice
-
-  while true; do
-    printf '\nDIGITAfrica workshop organiser\n\n'
-    printf '  1) Manage participant cohort\n'
-    printf '  2) Reset active workshop cycle\n'
-    printf '  3) Reconcile workshop applications after adding or updating a workshop/module\n'
-    printf '  4) Workshops\n'
-    printf '  0) Exit\n\n'
-    printf 'Selection: '
-    read -r choice
-
-    case "$choice" in
-      1) run_initialisation_menu ;;
-      2) run_reset_menu ;;
-      3) run_application_reconciliation ;;
-      4) run_workshops_menu ;;
-      0) exit 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
-    esac
-  done
-}
-
-# Controllers rely on the context, authentication helpers, and menu functions
-# defined above, so they are sourced only after those shared dependencies exist.
-# Workflow controllers are loaded after shared organiser helpers.
-# shellcheck source=controllers/cohort.sh
-source "$SCRIPT_DIR/controllers/cohort.sh"
-# shellcheck source=controllers/introduction_to_ai.sh
-source "$SCRIPT_DIR/controllers/introduction_to_ai.sh"
-# shellcheck source=controllers/federated_learning.sh
-source "$SCRIPT_DIR/controllers/federated_learning.sh"
-
-# Dispatch only after all dependencies and controllers have been loaded.
-# Interactive menus require a terminal; explicit actions remain scriptable.
 case "$ACTION" in
   menu)
     [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell.'
-    run_main_menu
+    while true; do
+      printf '\nParticipant cohort\n\n'
+      printf '  1) Manage participant identities and credentials\n'
+      printf '  2) Reset active workshop cycle\n'
+      printf '  0) Back\n\n'
+      printf 'Selection: '
+      read -r choice
+      case "$choice" in
+        1) run_initialisation_menu ;;
+        2) run_reset_menu ;;
+        0) exit 0 ;;
+        *) printf 'Choose 0, 1, or 2.\n' >&2 ;;
+      esac
+    done
     ;;
   initialise-identities) run_initialise_identities ;;
   issue-credentials) run_issue_credentials ;;
-  status) run_status ;;
-  module1-publish) run_introduction_to_ai_prepare ;;
-  module1-check) "$MODULE1_HELPER" check ;;
-  module2-publish) run_introduction_to_ai_module2_publish ;;
-  module2-check) run_introduction_to_ai_module2_check ;;
-  module2-release-solutions) run_introduction_to_ai_module2_release_solutions ;;
-  reconcile-applications) run_application_reconciliation ;;
-  fl-prepare) run_fl_prepare ;;
+  status) check_participant_accounts ;;
+  require-complete)
+    check_participant_accounts
+    [[ "$PARTICIPANT_ACCOUNT_STATUS" == complete ]] ||
+      fail 'Provision complete participant identities and groups before continuing.'
+    ;;
   reset) run_reset ;;
   reset-participants) run_reset_participants ;;
-  release-solutions) "$COHORT_HELPER" release-solutions ;;
-  flower)
-    [[ -t 0 ]] || fail 'The flower action requires an interactive terminal.'
-    run_flower_manager_menu
-    ;;
 esac

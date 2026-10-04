@@ -135,12 +135,16 @@
     path: /opt/digitafrica/k8s
     state: directory
     mode: "0755"
+  tags:
+    - workshop_application_reconciliation
 
 - name: Stage Traefik middleware manifest
   ansible.builtin.template:
     src: 05-traefik-middleware.yaml.j2
     dest: /opt/digitafrica/k8s/05-traefik-middleware.yaml
     mode: "0644"
+  tags:
+    - workshop_application_reconciliation
 
 - name: Ensure tutorial asset staging directories exist
   ansible.builtin.file:
@@ -151,8 +155,15 @@
     - /opt/digitafrica/k8s-notebooks/beginner
     - /opt/digitafrica/k8s-notebooks/advanced
     - /opt/digitafrica/k8s-notebooks/solutions
+    # introduction-to-ai/module2 tracks
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
+    # ADD NEXT MODULE HERE — e.g. introduction-to-ai/module3/beginner|advanced|solutions
+    # ADD NEW WORKSHOP HERE — e.g. data-science/module1/beginner|advanced|solutions
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Stage beginner tutorial assets on central node
   ansible.builtin.copy:
@@ -161,6 +172,7 @@
     mode: "0644"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Stage advanced tutorial assets on central node
   ansible.builtin.copy:
@@ -169,6 +181,7 @@
     mode: "0644"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Stage reference-solution assets on central node
   ansible.builtin.copy:
@@ -177,6 +190,39 @@
     mode: "0644"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
+
+# ---------------------------------------------------------------------------
+# introduction-to-ai / module2 staging
+# To add module3: copy this block and replace module2 with module3.
+# To add a new workshop: copy this block and replace the workshop/module path.
+# ---------------------------------------------------------------------------
+- name: Stage introduction-to-ai module2 beginner assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/beginner/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage introduction-to-ai module2 advanced assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/advanced/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage introduction-to-ai module2 solutions assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module2/solutions/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
@@ -201,6 +247,21 @@
         "/opt/digitafrica/k8s-notebooks/solutions": (
             "01_Inspect_Local_Partition_solution.ipynb",
             "02_Run_Federated_Client_solution.ipynb",
+        ),
+        # introduction-to-ai/module2 provenance entries
+        # To add module3: copy this block and replace module2 with module3 filenames.
+        # To add a new workshop: copy this block and replace workshop/module path and filenames.
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner": (
+            "00_START_HERE.md",
+            "02_foundations_of_ml_beginner.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced": (
+            "00_START_HERE.md",
+            "02_foundations_of_ml_advanced.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions": (
+            "00_START_HERE.md",
+            "02_foundations_of_ml_solutions.ipynb",
         ),
     }
 
@@ -259,6 +320,7 @@
     executable: /bin/bash
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Ensure Tier-2 notebook runtime staging directory exists
   ansible.builtin.file:
@@ -268,6 +330,7 @@
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Stage locked Tier-2 notebook runtime requirements
   ansible.builtin.copy:
@@ -277,6 +340,20 @@
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
+
+# A tag-only application reconciliation skips the platform plays that
+# normally gather worker facts. The Helm values map workshop groups to the
+# inventory workers' Kubernetes node names, so collect only ansible_fqdn here.
+- name: Gather workshop-worker facts for JupyterHub values rendering
+  ansible.builtin.setup:
+    filter:
+      - ansible_fqdn
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups[fl_workshop_client_group] }}"
+  tags:
+    - workshop_application_reconciliation
 
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
@@ -285,6 +362,7 @@
     mode: "0600"
   tags:
     - workshop_seed
+    - workshop_application_reconciliation
 
 - name: Install helm if missing
   ansible.builtin.shell: |
@@ -303,6 +381,8 @@
     k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
   args:
     executable: /bin/bash
+  tags:
+    - workshop_application_reconciliation
 
 - name: Verify protected JupyterHub OIDC client secret record
   ansible.builtin.assert:
@@ -345,6 +425,15 @@
       path: /opt/digitafrica/k8s-notebooks/advanced
     - name: digitafrica-notebooks-solutions
       path: /opt/digitafrica/k8s-notebooks/solutions
+    # introduction-to-ai/module2 ConfigMaps
+    # To add module3: copy this block and replace module2 with module3.
+    # To add a new workshop: copy this block and replace the workshop/module path.
+    - name: digitafrica-notebooks-introduction-to-ai-module2-beginner
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner
+    - name: digitafrica-notebooks-introduction-to-ai-module2-advanced
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
+    - name: digitafrica-notebooks-introduction-to-ai-module2-solutions
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
   register: tutorial_asset_configmaps
   changed_when: >-
     'created' in tutorial_asset_configmaps.stdout or
@@ -352,6 +441,7 @@
 
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Create initial workshop tutorial state when absent
   ansible.builtin.shell: |
@@ -363,6 +453,7 @@
       k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
         create configmap digitafrica-workshop-state \
         --from-literal=workshop_type=none \
+        --from-literal=introduction_to_ai_module=module1 \
         --from-literal=mode=beginner \
         --from-literal=solutions_released=false
       echo "created"
@@ -373,6 +464,7 @@
   changed_when: "'created' in workshop_tutorial_state_configmap.stdout"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
     - workshop_state_migration
 
 - name: Add neutral workshop type to existing workshop state when absent
@@ -407,6 +499,42 @@
   changed_when: "'initialised' in workshop_type_state_configmap.stdout"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
+    - workshop_state_migration
+
+- name: Add default Introduction to AI module selector when absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    selected_module="$(
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        get configmap digitafrica-workshop-state \
+        -o jsonpath='{.data.introduction_to_ai_module}'
+    )"
+
+    case "$selected_module" in
+      '')
+        k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+          patch configmap digitafrica-workshop-state \
+          --type merge \
+          -p '{"data":{"introduction_to_ai_module":"module1"}}'
+        echo "initialised"
+        ;;
+      module1|module2)
+        echo "preserved"
+        ;;
+      *)
+        printf 'Unsupported introduction_to_ai_module in digitafrica-workshop-state: %s\n' \
+          "$selected_module" >&2
+        exit 1
+        ;;
+    esac
+  args:
+    executable: /bin/bash
+  register: introduction_to_ai_module_state_configmap
+  changed_when: "'initialised' in introduction_to_ai_module_state_configmap.stdout"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
     - workshop_state_migration
 
 - name: Create initial Introduction to AI Module 1 ConfigMap when absent
@@ -427,6 +555,7 @@
   changed_when: "'created' in introduction_to_ai_module1_configmap.stdout"
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Create/update Tier-2 notebook runtime requirements ConfigMap
   ansible.builtin.shell: |
@@ -439,6 +568,7 @@
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
+    - workshop_application_reconciliation
 
 # When servicelb is disabled, Traefik's LoadBalancer service stays <pending>.
 # Patching externalIPs makes kube-proxy route host traffic on port 80/443 to Traefik.
@@ -585,6 +715,8 @@
   args:
     executable: /bin/bash
   when: digitafrica_deployment.expose_mode == 'ingress'
+  tags:
+    - workshop_application_reconciliation
 
 - name: Install/upgrade JupyterHub via Helm (NodePort)
   ansible.builtin.shell: |
@@ -592,12 +724,16 @@
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
     helm upgrade --install jhub jupyterhub/jupyterhub \
       --namespace {{ digitafrica_deployment.digitafrica_namespace }} \
+      {% if jupyterhub_chart_version | default('') | trim | length > 0 %}
+      --version {{ jupyterhub_chart_version | quote }} \
+      {% endif %}
       --timeout 15m0s \
       -f /opt/digitafrica/k8s/jhub-values.yaml
   args:
     executable: /bin/bash
   tags:
     - workshop_seed
+    - workshop_application_reconciliation
 
 - name: List resources created by Helm release (debug)
   ansible.builtin.shell: |
@@ -630,6 +766,8 @@
   args:
     executable: /bin/bash
   become: true
+  tags:
+    - workshop_application_reconciliation
 
 - name: Show access URL (NodePort)
   ansible.builtin.debug:

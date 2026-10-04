@@ -24,6 +24,7 @@
     - applications
     - workshop_assets
     - workshop_state_migration
+    - workshop_application_reconciliation
 
 - name: Reconcile the current workshop cohort JupyterHub mapping
   ansible.builtin.include_tasks:
