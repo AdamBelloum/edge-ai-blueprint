@@ -289,6 +289,15 @@ singleuser:
       - name: digitafrica-seed-introduction-to-ai-module2-solutions
         configMap:
           name: digitafrica-notebooks-introduction-to-ai-module2-solutions
+      - name: digitafrica-seed-introduction-to-ai-module3-beginner
+        configMap:
+          name: digitafrica-notebooks-introduction-to-ai-module3-beginner
+      - name: digitafrica-seed-introduction-to-ai-module3-advanced
+        configMap:
+          name: digitafrica-notebooks-introduction-to-ai-module3-advanced
+      - name: digitafrica-seed-introduction-to-ai-module3-solutions
+        configMap:
+          name: digitafrica-notebooks-introduction-to-ai-module3-solutions
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
       - name: digitafrica-runtime-requirements
         configMap:
@@ -324,7 +333,7 @@ singleuser:
             echo "[runtime] Locked workshop dependencies are already available."
           fi
 
-          python -c "import flwr, numpy, pandas, sklearn; print('[runtime] Flower', flwr.__version__, 'is ready.')"
+          python -c "import flwr, matplotlib, numpy, pandas, sklearn; print('[runtime] Flower', flwr.__version__, 'and Matplotlib', matplotlib.__version__, 'are ready.')"
       volumeMounts:
         - name: digitafrica-runtime-requirements
           mountPath: /runtime
@@ -358,6 +367,14 @@ singleuser:
           module2_beginner_notebook=02_foundations_of_ml_beginner.ipynb
           module2_advanced_notebook=02_foundations_of_ml_advanced.ipynb
           module2_solutions_notebook=02_foundations_of_ml_solutions.ipynb
+          module3_beginner_source=/seed/introduction-to-ai/module3/beginner
+          module3_advanced_source=/seed/introduction-to-ai/module3/advanced
+          module3_solutions_source=/seed/introduction-to-ai/module3/solutions
+          module3_parent=/home/jovyan/Introduction-to-AI
+          module3_workspace="$module3_parent/Module-3"
+          module3_beginner_workspace="$module3_workspace/beginner"
+          module3_advanced_workspace="$module3_workspace/advanced"
+          module3_solutions_workspace="$module3_workspace/solutions"
           state_dir=/state
 
           workshop_type="$(tr -d '\r\n' < "$state_dir/workshop_type")"
@@ -381,7 +398,7 @@ singleuser:
           esac
 
           case "$introduction_to_ai_module" in
-            module1|module2) ;;
+            module1|module2|module3) ;;
             *)
               echo "[seed] ERROR: unsupported Introduction to AI module: $introduction_to_ai_module" >&2
               exit 1
@@ -390,7 +407,7 @@ singleuser:
 
           if [ "$workshop_type" = "federated-learning" ] || \
              {{ '{{' }} [ "$workshop_type" = "introduction-to-ai" ] && \
-               [ "$introduction_to_ai_module" = "module2" ]; {{ '}}' }}; then
+               [ "$introduction_to_ai_module" != "module1" ]; {{ '}}' }}; then
             case "$mode" in
               beginner|advanced) ;;
               *)
@@ -584,6 +601,82 @@ singleuser:
             fi
           fi
 
+
+          # Module 3 follows the same protected lifecycle as Module 2, but each
+          # track contains a start page and two notebooks.
+          if [ "$workshop_type" = "introduction-to-ai" ] && \
+             [ "$introduction_to_ai_module" = "module3" ]; then
+            mkdir -p "$module3_workspace"
+            chown 1000:100 "$module3_parent" "$module3_workspace"
+            chmod 0755 "$module3_parent" "$module3_workspace"
+
+            case "$mode" in
+              beginner)
+                mkdir -p "$module3_beginner_workspace"
+                chown 1000:100 "$module3_beginner_workspace"
+                chmod 0755 "$module3_beginner_workspace"
+
+                for filename in \
+                  00_START_HERE.md \
+                  01_from_features_to_neural_networks_beginner.ipynb \
+                  02_training_generalisation_and_architectures_beginner.ipynb; do
+                  copy_seed_file \
+                    "$module3_beginner_source/$filename" \
+                    "$module3_beginner_workspace/$filename" \
+                    false
+                done
+
+                write_receipt_if_absent \
+                  "$module3_beginner_workspace/MODULE3_BEGINNER_SEED_RECEIPT.txt" \
+                  "00_START_HERE.md and Module 3 beginner notebooks"
+                ;;
+              advanced)
+                mkdir -p "$module3_advanced_workspace"
+                chown 1000:100 "$module3_advanced_workspace"
+                chmod 0755 "$module3_advanced_workspace"
+
+                for filename in \
+                  00_START_HERE.md \
+                  01_from_features_to_neural_networks_advanced.ipynb \
+                  02_training_generalisation_and_architectures_advanced.ipynb; do
+                  copy_seed_file \
+                    "$module3_advanced_source/$filename" \
+                    "$module3_advanced_workspace/$filename" \
+                    false
+                done
+
+                write_receipt_if_absent \
+                  "$module3_advanced_workspace/MODULE3_ADVANCED_SEED_RECEIPT.txt" \
+                  "00_START_HERE.md and Module 3 advanced notebooks"
+                ;;
+            esac
+
+            if [ "$solutions_released" = "true" ]; then
+              if [ "$mode" != "advanced" ]; then
+                echo "[seed] ERROR: Module 3 solutions require mode=advanced" >&2
+                exit 1
+              fi
+
+              mkdir -p "$module3_solutions_workspace"
+              chown 1000:100 "$module3_solutions_workspace"
+              chmod 0755 "$module3_solutions_workspace"
+
+              for filename in \
+                00_START_HERE.md \
+                01_from_features_to_neural_networks_solutions.ipynb \
+                02_training_generalisation_and_architectures_solutions.ipynb; do
+                copy_seed_file \
+                  "$module3_solutions_source/$filename" \
+                  "$module3_solutions_workspace/$filename" \
+                  false
+              done
+
+              write_receipt_if_absent \
+                "$module3_solutions_workspace/MODULE3_SOLUTIONS_RELEASE_RECEIPT.txt" \
+                "00_START_HERE.md and Module 3 reference-solution notebooks"
+            fi
+          fi
+
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] Introduction to AI module: $introduction_to_ai_module"
           echo "[seed] workshop mode: $mode"
@@ -612,6 +705,15 @@ singleuser:
           readOnly: true
         - name: digitafrica-seed-introduction-to-ai-module2-solutions
           mountPath: /seed/introduction-to-ai/module2/solutions
+          readOnly: true
+        - name: digitafrica-seed-introduction-to-ai-module3-beginner
+          mountPath: /seed/introduction-to-ai/module3/beginner
+          readOnly: true
+        - name: digitafrica-seed-introduction-to-ai-module3-advanced
+          mountPath: /seed/introduction-to-ai/module3/advanced
+          readOnly: true
+        - name: digitafrica-seed-introduction-to-ai-module3-solutions
+          mountPath: /seed/introduction-to-ai/module3/solutions
           readOnly: true
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home

@@ -18,6 +18,7 @@ RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.s
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
 MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
+MODULE3_HELPER="$SCRIPT_DIR/introduction-to-ai/module3.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 # Shared libraries provide deployment context and common organiser safeguards.
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
@@ -62,6 +63,10 @@ Actions:
   module2-check           Check Introduction to AI Module 2 activation readiness.
   module2-release-solutions
                           Release Introduction to AI Module 2 solutions after the workshop.
+  module3-publish         Activate Introduction to AI Module 3 beginner and advanced tracks.
+  module3-check           Check Introduction to AI Module 3 activation readiness.
+  module3-release-solutions
+                          Release Introduction to AI Module 3 solutions after the workshop.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -322,7 +327,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -383,6 +388,7 @@ for helper in \
   "$PARTICIPANT_RESET_HELPER" \
   "$MODULE1_HELPER" \
   "$MODULE2_HELPER" \
+  "$MODULE3_HELPER" \
   "$APPLICATION_RECONCILIATION_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
@@ -533,6 +539,9 @@ case "$ACTION" in
   module2-publish) run_introduction_to_ai_module2_publish ;;
   module2-check) run_introduction_to_ai_module2_check ;;
   module2-release-solutions) run_introduction_to_ai_module2_release_solutions ;;
+  module3-publish) run_introduction_to_ai_module3_publish ;;
+  module3-check) run_introduction_to_ai_module3_check ;;
+  module3-release-solutions) run_introduction_to_ai_module3_release_solutions ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
