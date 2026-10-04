@@ -7,6 +7,11 @@
 
 set -euo pipefail
 
+# This helper is normally interactive. Callers that support automation may
+# override this explicitly; defining the default keeps nounset-safe direct and
+# delegated invocation.
+NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_SCRIPT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 REPOSITORY_ROOT="$(cd -- "$WORKSHOP_SCRIPT_DIR/../.." && pwd)"

@@ -389,8 +389,8 @@ singleuser:
           esac
 
           if [ "$workshop_type" = "federated-learning" ] || \
-             { [ "$workshop_type" = "introduction-to-ai" ] && \
-               [ "$introduction_to_ai_module" = "module2" ]; }; then
+             {{ '{{' }} [ "$workshop_type" = "introduction-to-ai" ] && \
+               [ "$introduction_to_ai_module" = "module2" ]; {{ '}}' }}; then
             case "$mode" in
               beginner|advanced) ;;
               *)
