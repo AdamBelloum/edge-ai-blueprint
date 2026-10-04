@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Hierarchical organiser-facing entry point for DIGITAfrica workshops.
+#
+# This script owns top-level argument validation, participant-account access,
+# shared organiser menus, and routing to workshop-specific controllers.
+# Individual workshop helpers own their domain-specific preparation workflows.
 
 set -euo pipefail
 
+# Resolve all repository-relative paths independently of the caller's directory.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
+# Executable helpers invoked directly by this organiser entry point.
 COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
@@ -13,15 +19,20 @@ PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
 MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
+# Shared libraries provide deployment context and common organiser safeguards.
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
 ORGANIZER_RUNTIME="$SCRIPT_DIR/lib/organizer-runtime.sh"
 COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
 
+# Parsed command-line state. Destructive FL preparation requires explicit
+# non-interactive confirmation so it cannot be triggered accidentally.
 ACTION="menu"
 MODE=""
 NON_INTERACTIVE=false
 CONFIRM_COHORT_RESET=false
 
+# Keycloak connection and authentication settings may be supplied by environment
+# variables or command-line options. Passwords themselves are never stored here.
 SERVER_URL="${KEYCLOAK_SERVER_URL:-}"
 REALM="${KEYCLOAK_REALM:-digitafrica}"
 ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-}"
@@ -29,6 +40,8 @@ ADMIN_USER="${KEYCLOAK_ADMIN_USER:-}"
 ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-}"
 ADMIN_CLIENT_SECRET_FILE="${KEYCLOAK_ADMIN_CLIENT_SECRET_FILE:-}"
 
+# A password entered interactively is held only in an owner-readable temporary
+# file for this process and removed by the EXIT trap below.
 ADMIN_PASSWORD_SESSION_FILE=""
 ADMIN_PASSWORD_SESSION_FILE_OWNED=false
 ADMIN_PASSWORD_SESSION_VERIFIED=false
@@ -84,6 +97,7 @@ fail() {
   exit 2
 }
 
+# Remove only temporary credential material created by this process.
 clear_admin_password_session() {
   if [[ "$ADMIN_PASSWORD_SESSION_FILE_OWNED" == true ]] &&
     [[ -n "$ADMIN_PASSWORD_SESSION_FILE" ]]; then
@@ -95,11 +109,14 @@ clear_admin_password_session() {
   ADMIN_PASSWORD_SESSION_VERIFIED=false
 }
 
+# Clear a locally created password file on normal exit and interruption.
 trap clear_admin_password_session EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Read an administrator password from the controlling terminal and expose it
+# only through a protected temporary file understood by the account helper.
 create_admin_password_session() {
   local password
 
@@ -129,6 +146,8 @@ create_admin_password_session() {
   export KEYCLOAK_ADMIN_PASSWORD_FILE="$ADMIN_PASSWORD_SESSION_FILE"
 }
 
+# Reuse a verified session where possible; otherwise allow at most three
+# interactive authentication attempts before account-changing actions stop.
 ensure_admin_password_session() {
   local attempt status
 
@@ -171,6 +190,8 @@ ensure_admin_password_session() {
   fail 'Keycloak authentication failed after 3 attempts; the participant-account operation was not performed.'
 }
 
+# Retry once with a newly entered password if a cached locally created session
+# is rejected by Keycloak. Service-account authentication does not use this path.
 run_account_helper() {
   local status
 
@@ -191,6 +212,8 @@ run_account_helper() {
   "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" "$@"
 }
 
+# Derive the single public Keycloak URL from active inventory rather than
+# relying on a host alias or an unverified manually entered default.
 derive_keycloak_public_url() {
   local discovered_url
 
@@ -257,6 +280,8 @@ prompt_for_server_url() {
     fail 'A public HTTPS Keycloak URL is required.'
 }
 
+# Parse options before loading deployment context so malformed invocations fail
+# early and without contacting Keycloak or the deployment environment.
 while (($#)); do
   case "$1" in
     --non-interactive)
@@ -312,6 +337,8 @@ while (($#)); do
   esac
 done
 
+# Enforce the explicit confirmation contract for non-interactive destructive
+# Federated Learning preparation and reject action-specific options elsewhere.
 case "$ACTION" in
   fl-prepare)
     if "$NON_INTERACTIVE"; then
@@ -331,6 +358,7 @@ case "$ACTION" in
     ;;
 esac
 
+# Load shared context only after command-line validation has completed.
 [[ -r "$WORKSHOP_CONTEXT" ]] ||
   fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
 # shellcheck source=lib/workshop-context.sh
@@ -347,6 +375,7 @@ source "$COMMON_HELPER"
 # shellcheck source=lib/organizer-runtime.sh
 source "$ORGANIZER_RUNTIME"
 
+# Fail early with a clear error when a routed helper is absent or not executable.
 for helper in \
   "$COHORT_HELPER" \
   "$ACCOUNT_HELPER" \
@@ -358,6 +387,8 @@ for helper in \
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
 
+# Build a single consistent argument set for all participant-account operations.
+# Password authentication and service-account authentication are mutually exclusive.
 build_account_args() {
   prompt_for_server_url
   ACCOUNT_ARGS=(--server-url "$SERVER_URL" --realm "$REALM")
@@ -388,6 +419,8 @@ participant_credentials_file() {
     "$REPOSITORY_ROOT" "$host"
 }
 
+# Capture the account helper's machine-readable status while preserving its
+# human-readable report for the organiser.
 check_participant_accounts() {
   local status_output status_file status
 
@@ -426,6 +459,8 @@ run_application_reconciliation() {
   "$APPLICATION_RECONCILIATION_HELPER"
 }
 
+# The menu only routes to controllers; the controllers implement each
+# workshop's operational steps and domain-specific confirmation checks.
 run_workshops_menu() {
   local choice
 
@@ -448,6 +483,7 @@ run_workshops_menu() {
 
 
 
+# Top-level interactive navigation. Explicit actions are used for automation.
 run_main_menu() {
   local choice
 
@@ -472,6 +508,8 @@ run_main_menu() {
   done
 }
 
+# Controllers rely on the context, authentication helpers, and menu functions
+# defined above, so they are sourced only after those shared dependencies exist.
 # Workflow controllers are loaded after shared organiser helpers.
 # shellcheck source=controllers/cohort.sh
 source "$SCRIPT_DIR/controllers/cohort.sh"
@@ -480,6 +518,8 @@ source "$SCRIPT_DIR/controllers/introduction_to_ai.sh"
 # shellcheck source=controllers/federated_learning.sh
 source "$SCRIPT_DIR/controllers/federated_learning.sh"
 
+# Dispatch only after all dependencies and controllers have been loaded.
+# Interactive menus require a terminal; explicit actions remain scriptable.
 case "$ACTION" in
   menu)
     [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell.'
