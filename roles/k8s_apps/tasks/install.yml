@@ -159,7 +159,11 @@
     - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner
     - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
     - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
-    # ADD NEXT MODULE HERE — e.g. introduction-to-ai/module3/beginner|advanced|solutions
+    # introduction-to-ai/module3 tracks
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/beginner
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/advanced
+    - /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/solutions
+    # ADD NEXT MODULE HERE — e.g. introduction-to-ai/module4/beginner|advanced|solutions
     # ADD NEW WORKSHOP HERE — e.g. data-science/module1/beginner|advanced|solutions
   tags:
     - workshop_assets
@@ -224,6 +228,36 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+# ---------------------------------------------------------------------------
+# introduction-to-ai / module3 staging
+# ---------------------------------------------------------------------------
+- name: Stage introduction-to-ai module3 beginner assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module3/beginner/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/beginner/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage introduction-to-ai module3 advanced assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module3/advanced/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/advanced/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage introduction-to-ai module3 solutions assets on central node
+  ansible.builtin.copy:
+    src: notebooks/introduction-to-ai/module3/solutions/
+    dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/solutions/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
     set -euo pipefail
@@ -262,6 +296,22 @@
         "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions": (
             "00_START_HERE.md",
             "02_foundations_of_ml_solutions.ipynb",
+        ),
+        # introduction-to-ai/module3 provenance entries
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/beginner": (
+            "00_START_HERE.md",
+            "01_from_features_to_neural_networks_beginner.ipynb",
+            "02_training_generalisation_and_architectures_beginner.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/advanced": (
+            "00_START_HERE.md",
+            "01_from_features_to_neural_networks_advanced.ipynb",
+            "02_training_generalisation_and_architectures_advanced.ipynb",
+        ),
+        "/opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/solutions": (
+            "00_START_HERE.md",
+            "01_from_features_to_neural_networks_solutions.ipynb",
+            "02_training_generalisation_and_architectures_solutions.ipynb",
         ),
     }
 
@@ -434,6 +484,13 @@
       path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced
     - name: digitafrica-notebooks-introduction-to-ai-module2-solutions
       path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions
+    # introduction-to-ai/module3 ConfigMaps
+    - name: digitafrica-notebooks-introduction-to-ai-module3-beginner
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/beginner
+    - name: digitafrica-notebooks-introduction-to-ai-module3-advanced
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/advanced
+    - name: digitafrica-notebooks-introduction-to-ai-module3-solutions
+      path: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/solutions
   register: tutorial_asset_configmaps
   changed_when: >-
     'created' in tutorial_asset_configmaps.stdout or
@@ -519,7 +576,7 @@
           -p '{"data":{"introduction_to_ai_module":"module1"}}'
         echo "initialised"
         ;;
-      module1|module2)
+      module1|module2|module3)
         echo "preserved"
         ;;
       *)
