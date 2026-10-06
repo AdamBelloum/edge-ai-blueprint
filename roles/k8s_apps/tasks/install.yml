@@ -584,7 +584,7 @@
       k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
         create configmap digitafrica-workshop-state \
         --from-literal=workshop_type=none \
-        --from-literal=introduction_to_ai_module=module1 \
+        --from-literal=workshop_module=none \
         --from-literal=mode=beginner \
         --from-literal=solutions_released=false
       echo "created"
@@ -633,36 +633,77 @@
     - workshop_application_reconciliation
     - workshop_state_migration
 
-- name: Add default Introduction to AI module selector when absent
+- name: Add generic workshop module selector when absent
   ansible.builtin.shell: |
     set -euo pipefail
-    selected_module="$(
+    workshop_type="$(
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        get configmap digitafrica-workshop-state \
+        -o jsonpath='{.data.workshop_type}'
+    )"
+    workshop_module="$(
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+        get configmap digitafrica-workshop-state \
+        -o jsonpath='{.data.workshop_module}'
+    )"
+    legacy_introduction_to_ai_module="$(
       k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
         get configmap digitafrica-workshop-state \
         -o jsonpath='{.data.introduction_to_ai_module}'
     )"
 
-    case "$selected_module" in
-      '')
-        k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
-          patch configmap digitafrica-workshop-state \
-          --type merge \
-          -p '{"data":{"introduction_to_ai_module":"module1"}}'
-        echo "initialised"
-        ;;
-      module1|module2|module3)
+    case "$workshop_module" in
+      none|module1|module2|module3)
         echo "preserved"
+        exit 0
+        ;;
+      '')
         ;;
       *)
-        printf 'Unsupported introduction_to_ai_module in digitafrica-workshop-state: %s\n' \
-          "$selected_module" >&2
+        printf 'Unsupported workshop_module in digitafrica-workshop-state: %s\n' \
+          "$workshop_module" >&2
         exit 1
         ;;
     esac
+
+    case "$workshop_type" in
+      introduction-to-ai)
+        case "$legacy_introduction_to_ai_module" in
+          module1|module2|module3)
+            workshop_module="$legacy_introduction_to_ai_module"
+            ;;
+          '')
+            workshop_module=module1
+            ;;
+          *)
+            printf 'Unsupported legacy Introduction to AI module in digitafrica-workshop-state: %s\n' \
+              "$legacy_introduction_to_ai_module" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      cloud-computing-soa)
+        workshop_module=module1
+        ;;
+      none|federated-learning)
+        workshop_module=none
+        ;;
+      *)
+        printf 'Unsupported workshop_type while migrating workshop_module: %s\n' \
+          "$workshop_type" >&2
+        exit 1
+        ;;
+    esac
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      patch configmap digitafrica-workshop-state \
+      --type merge \
+      -p "{\"data\":{\"workshop_module\":\"${workshop_module}\"}}"
+    echo "initialised"
   args:
     executable: /bin/bash
-  register: introduction_to_ai_module_state_configmap
-  changed_when: "'initialised' in introduction_to_ai_module_state_configmap.stdout"
+  register: workshop_module_state_configmap
+  changed_when: "'initialised' in workshop_module_state_configmap.stdout"
   tags:
     - workshop_assets
     - workshop_application_reconciliation

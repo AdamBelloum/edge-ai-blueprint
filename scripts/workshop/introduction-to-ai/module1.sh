@@ -183,7 +183,7 @@ require_complete_participant_cohort() {
 set_module1_workshop_state() {
   run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","introduction_to_ai_module":"module1","mode":"beginner","solutions_released":"false"}}'
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","workshop_module":"module1","mode":"beginner","solutions_released":"false"}}'
 REMOTE
 )"
   printf '%s
@@ -280,7 +280,7 @@ publish_module1() {
     'This updates material for subsequently spawned participant servers only.' \
     'Existing participant notebooks are preserved.'
 
-  if ! "$ASSUME_YES" && ! confirm 'Publish this reviewed Module 1 notebook'; then
+  if ! "${ASSUME_YES:-false}" && ! confirm 'Publish this reviewed Module 1 notebook'; then
     log 'No Module 1 publication was performed.'
     return 0
   fi

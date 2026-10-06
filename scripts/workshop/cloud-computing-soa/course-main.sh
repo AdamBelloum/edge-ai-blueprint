@@ -170,7 +170,7 @@ set -euo pipefail
 k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   patch configmap digitafrica-workshop-state \
   --type merge \
-  -p '{"data":{"workshop_type":"cloud-computing-soa","introduction_to_ai_module":"module1","mode":"${mode}","solutions_released":"false"}}'
+  -p '{"data":{"workshop_type":"cloud-computing-soa","workshop_module":"module1","mode":"${mode}","solutions_released":"false"}}'
 REMOTE
 )"
   printf '%s\n' \

@@ -421,13 +421,32 @@ singleuser:
           workshop_type="$(tr -d '\r\n' < "$state_dir/workshop_type")"
           mode="$(tr -d '\r\n' < "$state_dir/mode")"
           solutions_released="$(tr -d '\r\n' < "$state_dir/solutions_released")"
-          if [ -f "$state_dir/introduction_to_ai_module" ]; then
-            introduction_to_ai_module="$(
-              tr -d '\r\n' < "$state_dir/introduction_to_ai_module"
-            )"
+
+          if [ -f "$state_dir/workshop_module" ]; then
+            workshop_module="$(tr -d '\r\n' < "$state_dir/workshop_module")"
           else
-            # Existing ConfigMaps predate the selector; preserve Module 1 behaviour.
-            introduction_to_ai_module=module1
+            # Compatibility fallback for ConfigMaps created before workshop_module.
+            case "$workshop_type" in
+              introduction-to-ai)
+                if [ -f "$state_dir/introduction_to_ai_module" ]; then
+                  workshop_module="$(
+                    tr -d '\r\n' < "$state_dir/introduction_to_ai_module"
+                  )"
+                else
+                  workshop_module=module1
+                fi
+                ;;
+              cloud-computing-soa)
+                workshop_module=module1
+                ;;
+              none|federated-learning)
+                workshop_module=none
+                ;;
+              *)
+                echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
+                exit 1
+                ;;
+            esac
           fi
 
           case "$workshop_type" in
@@ -438,17 +457,26 @@ singleuser:
               ;;
           esac
 
-          case "$introduction_to_ai_module" in
-            module1|module2|module3) ;;
+          case "$workshop_module" in
+            none|module1|module2|module3) ;;
             *)
-              echo "[seed] ERROR: unsupported Introduction to AI module: $introduction_to_ai_module" >&2
+              echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$workshop_type:$workshop_module" in
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1)
+              ;;
+            *)
+              echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
               exit 1
               ;;
           esac
 
           if [ "$workshop_type" = "federated-learning" ] || \
              {{ '{{' }} [ "$workshop_type" = "introduction-to-ai" ] && \
-               [ "$introduction_to_ai_module" != "module1" ]; {{ '}}' }}; then
+               [ "$workshop_module" != "module1" ]; {{ '}}' }}; then
             case "$mode" in
               beginner|advanced) ;;
               *)
@@ -466,7 +494,7 @@ singleuser:
             esac
           fi
 
-          if [ "$workshop_type" = "cloud-computing-soa" ]; then
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module1" ]; then
             case "$mode" in
               beginner|advanced) ;;
               *)
@@ -588,7 +616,7 @@ singleuser:
           # Module 1 is copied only for an active Introduction to AI workshop
           # and only when a participant does not already have a personal copy.
           if [ "$workshop_type" = "introduction-to-ai" ] && \
-             [ "$introduction_to_ai_module" = "module1" ] && \
+             [ "$workshop_module" = "module1" ] && \
              [ -f "$module1_source/$module1_notebook" ]; then
             mkdir -p "$module1_workspace"
             chown 1000:100 "$module1_parent" "$module1_workspace"
@@ -608,7 +636,7 @@ singleuser:
           # Reference solutions are available only for the Advanced track and only
           # after an explicit organiser release.
           if [ "$workshop_type" = "introduction-to-ai" ] && \
-             [ "$introduction_to_ai_module" = "module2" ]; then
+             [ "$workshop_module" = "module2" ]; then
             mkdir -p "$module2_workspace"
             chown 1000:100 "$module2_parent" "$module2_workspace"
             chmod 0755 "$module2_parent" "$module2_workspace"
@@ -664,7 +692,7 @@ singleuser:
           # Module 3 follows the same protected lifecycle as Module 2, but each
           # track contains a start page and two notebooks.
           if [ "$workshop_type" = "introduction-to-ai" ] && \
-             [ "$introduction_to_ai_module" = "module3" ]; then
+             [ "$workshop_module" = "module3" ]; then
             mkdir -p "$module3_workspace"
             chown 1000:100 "$module3_parent" "$module3_workspace"
             chmod 0755 "$module3_parent" "$module3_workspace"
@@ -739,7 +767,7 @@ singleuser:
           # Cloud Module 1: seed only the selected teaching track, preserve
           # participant changes, and release the reference implementation only
           # for the advanced TODO track.
-          if [ "$workshop_type" = "cloud-computing-soa" ]; then
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module1" ]; then
             mkdir -p "$cloud_module1_workspace"
             chown 1000:100 "$cloud_module1_parent" "$cloud_module1_workspace"
             chmod 0755 "$cloud_module1_parent" "$cloud_module1_workspace"
@@ -816,7 +844,7 @@ singleuser:
           fi
 
           echo "[seed] workshop type: $workshop_type"
-          echo "[seed] Introduction to AI module: $introduction_to_ai_module"
+          echo "[seed] workshop module: $workshop_module"
           echo "[seed] workshop mode: $mode"
           echo "[seed] solutions released: $solutions_released"
       volumeMounts:

@@ -281,7 +281,7 @@ set_module3_workshop_state() {
 
   run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","introduction_to_ai_module":"module3","mode":"${mode}","solutions_released":"false"}}'
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}"   patch configmap digitafrica-workshop-state   --type merge   -p '{"data":{"workshop_type":"introduction-to-ai","workshop_module":"module3","mode":"${mode}","solutions_released":"false"}}'
 REMOTE
 )"
   printf '%s
@@ -351,7 +351,7 @@ check_track solutions \
   02_training_generalisation_and_architectures_solutions.ipynb
 
 printf 'workshop_type=%s\n' "$(state_value workshop_type)"
-printf 'introduction_to_ai_module=%s\n' "$(state_value introduction_to_ai_module)"
+printf 'workshop_module=%s\n' "$(state_value workshop_module)"
 printf 'workshop_mode=%s\n' "$(state_value mode)"
 printf 'solutions_released=%s\n' "$(state_value solutions_released)"
 REMOTE_STATUS
@@ -411,7 +411,7 @@ release_module3_solutions() {
     'Existing participant servers and notebooks are not modified.' \
     'It is available only while Introduction to AI Module 3 advanced mode is active.'
 
-  if ! "$ASSUME_YES" &&
+  if ! "${ASSUME_YES:-false}" &&
     ! confirm "Release Module 3 reference solutions after the workshop"; then
     log 'No Module 3 solution release was performed.'
     return 0
@@ -425,7 +425,7 @@ workshop_type="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   -o jsonpath='{.data.workshop_type}')"
 module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
-  -o jsonpath='{.data.introduction_to_ai_module}')"
+  -o jsonpath='{.data.workshop_module}')"
 mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.mode}')"
