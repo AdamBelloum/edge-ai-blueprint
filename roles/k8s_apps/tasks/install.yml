@@ -168,6 +168,8 @@
     - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/advanced
     - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/solutions
     - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/tests
+    # cloud-computing-soa/module2 microservices source staging
+    - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module2/source
     # ADD NEXT MODULE HERE — e.g. introduction-to-ai/module4/beginner|advanced|solutions
     # ADD NEW WORKSHOP HERE — e.g. data-science/module1/beginner|advanced|solutions
   tags:
@@ -301,6 +303,86 @@
     src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/shared/tests/"
     dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/tests/
     mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+
+# ---------------------------------------------------------------------------
+# cloud-computing-soa / module2 Microservices and JWT Authentication staging
+#
+# The nested source tree remains canonical under workshop_assets/. Kubernetes
+# ConfigMaps are flat, so the ConfigMap task below assigns explicit flat keys.
+# JupyterHub reconstructs the participant-facing directory layout at spawn time.
+# ---------------------------------------------------------------------------
+- name: Stage Cloud Computing SOA Module 2 source assets on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module2_microservices/"
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module2/source/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Remove runtime artefacts from staged Cloud Computing SOA Module 2 assets
+  ansible.builtin.shell: |
+    set -euo pipefail
+    find /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module2/source \
+      \( -type d -name keys -o -type d -name __pycache__ \) \
+      -prune -exec rm -rf {} +
+    find /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module2/source \
+      -type f -name '*.py[cod]' -delete
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Create/update Cloud Computing SOA Module 2 asset ConfigMaps
+  ansible.builtin.shell: |
+    set -euo pipefail
+    root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module2/source
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create configmap digitafrica-notebooks-cloud-computing-soa-module2-beginner \
+      --from-file=module2_readme_md="$root/README.md" \
+      --from-file=module2_requirements_lock="$root/requirements.lock" \
+      --from-file=module2_gitignore="$root/.gitignore" \
+      --from-file=setup_local_keys_sh="$root/beginner/setup_local_keys.sh" \
+      --from-file=auth_service_auth_py="$root/beginner/auth_service/auth.py" \
+      --from-file=shortener_service_shortener_py="$root/beginner/shortener_service/shortener.py" \
+      --from-file=upstream_participants_guide_md="$root/beginner/upstream-participants-guide.md" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create configmap digitafrica-notebooks-cloud-computing-soa-module2-advanced \
+      --from-file=module2_readme_md="$root/README.md" \
+      --from-file=module2_requirements_lock="$root/requirements.lock" \
+      --from-file=module2_gitignore="$root/.gitignore" \
+      --from-file=setup_local_keys_sh="$root/advanced/setup_local_keys.sh" \
+      --from-file=auth_service_auth_py="$root/advanced/auth_service/auth.py" \
+      --from-file=shortener_service_shortener_py="$root/advanced/shortener_service/shortener.py" \
+      --from-file=upstream_participants_guide_md="$root/advanced/upstream-participants-guide.md" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create configmap digitafrica-notebooks-cloud-computing-soa-module2-solutions \
+      --from-file=module2_readme_md="$root/README.md" \
+      --from-file=module2_requirements_lock="$root/requirements.lock" \
+      --from-file=module2_gitignore="$root/.gitignore" \
+      --from-file=setup_local_keys_sh="$root/solutions/setup_local_keys.sh" \
+      --from-file=auth_service_auth_py="$root/solutions/auth_service/auth.py" \
+      --from-file=shortener_service_shortener_py="$root/solutions/shortener_service/shortener.py" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create configmap digitafrica-notebooks-cloud-computing-soa-module2-tests \
+      --from-file=read_from_csv="$root/shared/tests/read_from.csv" \
+      --from-file=test_microservices_py="$root/shared/tests/test_microservices.py" \
+      --from-file=test_ownership_isolation_py="$root/shared/tests/test_ownership_isolation.py" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
   tags:
     - workshop_assets
     - workshop_application_reconciliation

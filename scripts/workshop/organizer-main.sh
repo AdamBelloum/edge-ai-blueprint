@@ -68,6 +68,10 @@ Actions:
   cloud-module1-check     Check Cloud Computing SOA Module 1 activation readiness.
   cloud-module1-release-solutions
                           Release Cloud Computing SOA Module 1 advanced reference solution.
+  cloud-module2-publish   Activate Cloud Computing SOA Module 2 for new participant spawns.
+  cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
+  cloud-module2-release-solutions
+                          Release Cloud Computing SOA Module 2 advanced reference solution.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -328,7 +332,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -557,6 +561,12 @@ case "$ACTION" in
     cloud_module1_check_activation_readiness "$(cloud_module1_select_mode)"
     ;;
   cloud-module1-release-solutions) cloud_module1_release_solutions ;;
+  cloud-module2-publish) cloud_module2_activate ;;
+  cloud-module2-check)
+    [[ -t 0 ]] || fail 'The cloud-module2-check action requires an interactive terminal.'
+    cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)"
+    ;;
+  cloud-module2-release-solutions) cloud_module2_release_solutions ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
