@@ -27,7 +27,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   module3.sh status
-  module3.sh check --mode beginner|advanced
+  module3.sh check [--mode beginner|advanced]
   module3.sh activate [--mode beginner|advanced] [identity options]
   module3.sh release-solutions [--yes]
 
@@ -441,7 +441,7 @@ fi
 
 solution_notebook="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-notebooks-introduction-to-ai-module3-solutions \
-  -o jsonpath='{.data.02_foundations_of_ml_solutions\.ipynb}')"
+  -o jsonpath='{.data.01_from_features_to_neural_networks_solutions\.ipynb}')"
 if [ -z "\$solution_notebook" ]; then
   printf '%s\n' \
     'Module 3 solutions ConfigMap does not contain the expected notebook.' \
@@ -463,7 +463,10 @@ REMOTE
 
 case "$ACTION" in
   status) show_status ;;
-  check) check_activation_readiness "$TRACK" ;;
+  check)
+    [[ -n "$TRACK" ]] || TRACK="$(select_module3_mode)"
+    check_activation_readiness "$TRACK"
+    ;;
   activate) activate_module3 ;;
   release-solutions) release_module3_solutions ;;
 esac

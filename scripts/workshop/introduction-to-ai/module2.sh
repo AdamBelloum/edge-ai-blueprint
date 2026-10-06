@@ -27,7 +27,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   module2.sh status
-  module2.sh check --mode beginner|advanced
+  module2.sh check [--mode beginner|advanced]
   module2.sh activate [--mode beginner|advanced] [identity options]
   module2.sh release-solutions [--yes]
 
@@ -448,7 +448,10 @@ REMOTE
 
 case "$ACTION" in
   status) show_status ;;
-  check) check_activation_readiness "$TRACK" ;;
+  check)
+    [[ -n "$TRACK" ]] || TRACK="$(select_module2_mode)"
+    check_activation_readiness "$TRACK"
+    ;;
   activate) activate_module2 ;;
   release-solutions) release_module2_solutions ;;
 esac
