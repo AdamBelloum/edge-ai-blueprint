@@ -6,6 +6,19 @@
 # loaded shared context, common helpers, and organizer-runtime.sh.
 
 CLOUD_COMPUTING_SOA_MODULE1_NAME="Cloud Computing SOA — Module 1: REST API"
+CLOUD_COMPUTING_SOA_COHORT_WORKFLOW="${CLOUD_COMPUTING_SOA_COHORT_WORKFLOW:-$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd
+)/identity/cohort-workshop.sh}"
+
+cloud_module1_require_complete_participant_cohort() {
+  if [[ ! -x "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" ]]; then
+    printf 'Missing executable participant cohort workflow: %s\n' \
+      "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" >&2
+    return 1
+  fi
+
+  "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" require-complete
+}
 
 cloud_module1_select_mode() {
   local choice
@@ -164,14 +177,20 @@ REMOTE
     "Cloud Module 1 (${mode}) is now active for subsequently spawned participant servers."
 }
 
+cloud_module1_activate_selected_mode() {
+  local mode="$1"
+
+  cloud_module1_require_complete_participant_cohort || return $?
+  ensure_workshop_activation_allowed cloud-computing-soa || return $?
+  cloud_module1_check_activation_readiness "$mode" || return $?
+  cloud_module1_set_workshop_state "$mode"
+}
+
 cloud_module1_activate() {
   local mode
 
-  mode="$(cloud_module1_select_mode)"
-  require_complete_participant_cohort
-  ensure_workshop_activation_allowed cloud-computing-soa
-  cloud_module1_check_activation_readiness "$mode"
-  cloud_module1_set_workshop_state "$mode"
+  mode="$(cloud_module1_select_mode)" || return $?
+  cloud_module1_activate_selected_mode "$mode"
 }
 
 cloud_module1_release_solutions() {
@@ -243,23 +262,34 @@ run_cloud_computing_soa_menu() {
 
     case "$choice" in
       1)
-        cloud_module1_check_activation_readiness \
-          "$(cloud_module1_select_mode)"
+        if ! cloud_module1_check_activation_readiness \
+          "$(cloud_module1_select_mode)"; then
+          printf '%s\n' \
+            'Readiness check did not pass. No workshop state was changed; returning to the Cloud menu.' >&2
+        fi
         ;;
       2)
-        require_complete_participant_cohort
-        ensure_workshop_activation_allowed cloud-computing-soa
-        cloud_module1_check_activation_readiness beginner
-        cloud_module1_set_workshop_state beginner
+        if ! cloud_module1_activate_selected_mode beginner; then
+          printf '%s\n' \
+            'Beginner activation did not complete. No workshop state was changed; returning to the Cloud menu.' >&2
+        fi
         ;;
       3)
-        require_complete_participant_cohort
-        ensure_workshop_activation_allowed cloud-computing-soa
-        cloud_module1_check_activation_readiness advanced
-        cloud_module1_set_workshop_state advanced
+        if ! cloud_module1_activate_selected_mode advanced; then
+          printf '%s\n' \
+            'Advanced activation did not complete. No workshop state was changed; returning to the Cloud menu.' >&2
+        fi
         ;;
-      4) cloud_module1_release_solutions ;;
-      5) cloud_module1_show_status ;;
+      4)
+        if ! cloud_module1_release_solutions; then
+          printf '%s\n' 'Solution release did not complete; returning to the Cloud menu.' >&2
+        fi
+        ;;
+      5)
+        if ! cloud_module1_show_status; then
+          printf '%s\n' 'Status retrieval did not complete; returning to the Cloud menu.' >&2
+        fi
+        ;;
       0) return 0 ;;
       *) printf 'Choose 0, 1, 2, 3, 4, or 5.\n' >&2 ;;
     esac

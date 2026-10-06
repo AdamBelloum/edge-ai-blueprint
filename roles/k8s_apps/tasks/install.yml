@@ -263,47 +263,47 @@
     - workshop_assets
     - workshop_application_reconciliation
 
-  # ---------------------------------------------------------------------------
-  # cloud-computing-soa / module1 REST API staging
-  #
-  # Cloud workshop source remains canonical under workshop_assets/. Unlike the
-  # legacy notebook files, do not duplicate it under this Ansible role.
-  # ---------------------------------------------------------------------------
-  - name: Stage Cloud Computing SOA Module 1 beginner assets on central node
-    ansible.builtin.copy:
-      src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/beginner/"
-      dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/beginner/
-      mode: "0644"
-    tags:
-      - workshop_assets
-      - workshop_application_reconciliation
+# ---------------------------------------------------------------------------
+# cloud-computing-soa / module1 REST API staging
+#
+# Cloud workshop source remains canonical under workshop_assets/. Unlike the
+# legacy notebook files, do not duplicate it under this Ansible role.
+# ---------------------------------------------------------------------------
+- name: Stage Cloud Computing SOA Module 1 beginner assets on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/beginner/"
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/beginner/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
 
-  - name: Stage Cloud Computing SOA Module 1 advanced assets on central node
-    ansible.builtin.copy:
-      src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/advanced/"
-      dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/advanced/
-      mode: "0644"
-    tags:
-      - workshop_assets
-      - workshop_application_reconciliation
+- name: Stage Cloud Computing SOA Module 1 advanced assets on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/advanced/"
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/advanced/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
 
-  - name: Stage Cloud Computing SOA Module 1 reference solutions on central node
-    ansible.builtin.copy:
-      src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/solutions/"
-      dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/solutions/
-      mode: "0644"
-    tags:
-      - workshop_assets
-      - workshop_application_reconciliation
+- name: Stage Cloud Computing SOA Module 1 reference solutions on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/solutions/"
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/solutions/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
 
-  - name: Stage Cloud Computing SOA Module 1 shared tests on central node
-    ansible.builtin.copy:
-      src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/shared/tests/"
-      dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/tests/
-      mode: "0644"
-    tags:
-      - workshop_assets
-      - workshop_application_reconciliation
+- name: Stage Cloud Computing SOA Module 1 shared tests on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module1_rest_api/shared/tests/"
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/tests/
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
 
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
