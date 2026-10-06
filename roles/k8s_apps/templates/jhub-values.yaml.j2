@@ -299,9 +299,11 @@ singleuser:
         configMap:
           name: digitafrica-notebooks-introduction-to-ai-module3-solutions
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
-      - name: digitafrica-runtime-requirements
+{% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
+      - name: digitafrica-runtime-{{ profile_name }}
         configMap:
-          name: digitafrica-runtime-requirements
+          name: {{ profile.configmap_name }}
+{% endfor %}
 {% endif %}
 
     extraVolumeMounts:
@@ -311,33 +313,50 @@ singleuser:
 
   initContainers:
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
-    # Install once per group PVC, before the participant reaches JupyterLab.
-    # The marker ties the cached environment to the exact locked requirements.
+    # Select and cache the pinned runtime profile for the active workshop.
+    # Workshops without a profile are dependency-free and require no install.
     - name: prepare-workshop-runtime
       image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
       command: ["bash", "-lc"]
       args:
         - |
           set -euo pipefail
-          requirements=/runtime/requirements.lock
-          runtime_dir=/home/jovyan/.local/share/digitafrica
+
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" = "none" ]; then
+            echo "[runtime] No active workshop; dependency installation skipped."
+            exit 0
+          fi
+
+          requirements="/runtime/$workshop_type/requirements.lock"
+          if [ ! -f "$requirements" ]; then
+            echo "[runtime] No dependency profile for $workshop_type; installation skipped."
+            exit 0
+          fi
+
+          runtime_dir="/home/jovyan/.local/share/digitafrica/runtime/$workshop_type"
           marker="$runtime_dir/requirements.sha256"
           expected="$(sha256sum "$requirements" | cut -d " " -f1)"
 
           if [ "$(cat "$marker" 2>/dev/null || true)" != "$expected" ]; then
-            echo "[runtime] Installing locked workshop dependencies."
+            echo "[runtime] Installing locked $workshop_type dependencies."
             python -m pip install --user --no-cache-dir --requirement "$requirements"
             mkdir -p "$runtime_dir"
             printf "%s\n" "$expected" > "$marker"
           else
-            echo "[runtime] Locked workshop dependencies are already available."
+            echo "[runtime] Locked $workshop_type dependencies are already available."
           fi
 
-          python -c "import flwr, matplotlib, numpy, pandas, sklearn; print('[runtime] Flower', flwr.__version__, 'and Matplotlib', matplotlib.__version__, 'are ready.')"
+          python -m pip check
       volumeMounts:
-        - name: digitafrica-runtime-requirements
-          mountPath: /runtime
+        - name: digitafrica-workshop-state
+          mountPath: /state
           readOnly: true
+{% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
+        - name: digitafrica-runtime-{{ profile_name }}
+          mountPath: /runtime/{{ profile_name }}
+          readOnly: true
+{% endfor %}
         - name: home
           mountPath: /home/jovyan
 {% endif %}

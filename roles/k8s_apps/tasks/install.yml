@@ -435,21 +435,23 @@
     - workshop_assets
     - workshop_application_reconciliation
 
-- name: Ensure Tier-2 notebook runtime staging directory exists
+- name: Ensure workshop runtime profile staging directories exist
   ansible.builtin.file:
-    path: /opt/digitafrica/k8s-runtime
+    path: "/opt/digitafrica/k8s-runtime/{{ item.key }}"
     state: directory
     mode: "0755"
+  loop: "{{ workshop_notebook_runtime_profiles | dict2items }}"
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
     - workshop_application_reconciliation
 
-- name: Stage locked Tier-2 notebook runtime requirements
+- name: Stage locked workshop runtime requirement profiles
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../workshop_assets/federated_learning/requirements.lock"
-    dest: /opt/digitafrica/k8s-runtime/requirements.lock
+    src: "{{ playbook_dir }}/../{{ item.value.requirements_source }}"
+    dest: "/opt/digitafrica/k8s-runtime/{{ item.key }}/requirements.lock"
     mode: "0644"
+  loop: "{{ workshop_notebook_runtime_profiles | dict2items }}"
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
@@ -686,14 +688,15 @@
     - workshop_assets
     - workshop_application_reconciliation
 
-- name: Create/update Tier-2 notebook runtime requirements ConfigMap
+- name: Create/update workshop runtime requirements ConfigMaps
   ansible.builtin.shell: |
-    set -e
-    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap digitafrica-runtime-requirements \
-      --from-file=requirements.lock=/opt/digitafrica/k8s-runtime/requirements.lock \
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} create configmap {{ item.value.configmap_name }} \
+      --from-file=requirements.lock=/opt/digitafrica/k8s-runtime/{{ item.key }}/requirements.lock \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash
+  loop: "{{ workshop_notebook_runtime_profiles | dict2items }}"
   when: workshop_notebook_runtime.enabled | default(false) | bool
   tags:
     - workshop_assets
