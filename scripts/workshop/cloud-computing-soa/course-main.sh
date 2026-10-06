@@ -200,7 +200,7 @@ cloud_module1_release_solutions() {
     'Existing participant servers and files are not modified.' \
     'It is available only while Cloud Module 1 advanced mode is active.'
 
-  if ! "$ASSUME_YES" &&
+  if ! "${ASSUME_YES:-false}" &&
     ! confirm "Release Cloud Module 1 reference solution after the workshop"; then
     log 'No Cloud Module 1 solution release was performed.'
     return 0
