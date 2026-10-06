@@ -654,9 +654,9 @@ done
 if [[ -n "\$mode" ]]; then
   k3s kubectl -n "\$namespace" patch configmap digitafrica-workshop-state \
     --type merge \
-    -p "{\"data\":{\"workshop_type\":\"federated-learning\",\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
+    -p "{\"data\":{\"workshop_type\":\"federated-learning\",\"workshop_module\":\"none\",\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
 
-  printf 'Fresh cohort state applied: workshop_type=federated-learning, mode=%s, solutions_released=false\n' "\$mode"
+  printf 'Fresh cohort state applied: workshop_type=federated-learning, workshop_module=none, mode=%s, solutions_released=false\n' "\$mode"
 fi
 REMOTE
 )"
