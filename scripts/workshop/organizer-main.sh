@@ -16,9 +16,6 @@ COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
-MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
-MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
-MODULE3_HELPER="$SCRIPT_DIR/introduction-to-ai/module3.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 # Shared libraries provide deployment context and common organiser safeguards.
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
@@ -380,15 +377,19 @@ source "$COMMON_HELPER"
 # shellcheck source=lib/organizer-runtime.sh
 source "$ORGANIZER_RUNTIME"
 
+INTRODUCTION_TO_AI_COURSE_MAIN="$SCRIPT_DIR/introduction-to-ai/course-main.sh"
+[[ -r "$INTRODUCTION_TO_AI_COURSE_MAIN" ]] ||
+  fail "Missing Introduction to AI course workflow: $INTRODUCTION_TO_AI_COURSE_MAIN"
+# shellcheck source=introduction-to-ai/course-main.sh
+source "$INTRODUCTION_TO_AI_COURSE_MAIN"
+check_introduction_to_ai_course_helpers
+
 # Fail early with a clear error when a routed helper is absent or not executable.
 for helper in \
   "$COHORT_HELPER" \
   "$ACCOUNT_HELPER" \
   "$RESET_HELPER" \
   "$PARTICIPANT_RESET_HELPER" \
-  "$MODULE1_HELPER" \
-  "$MODULE2_HELPER" \
-  "$MODULE3_HELPER" \
   "$APPLICATION_RECONCILIATION_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
@@ -535,7 +536,7 @@ case "$ACTION" in
   issue-credentials) run_issue_credentials ;;
   status) run_status ;;
   module1-publish) run_introduction_to_ai_prepare ;;
-  module1-check) "$MODULE1_HELPER" check ;;
+  module1-check) run_introduction_to_ai_module1_check ;;
   module2-publish) run_introduction_to_ai_module2_publish ;;
   module2-check) run_introduction_to_ai_module2_check ;;
   module2-release-solutions) run_introduction_to_ai_module2_release_solutions ;;
