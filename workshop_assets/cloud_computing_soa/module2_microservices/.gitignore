@@ -1,0 +1,4 @@
+# Runtime-generated workshop key material: never commit or seed it as a source asset.
+**/keys/
+**/__pycache__/
+*.py[cod]
