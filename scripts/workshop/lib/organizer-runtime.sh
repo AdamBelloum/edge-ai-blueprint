@@ -23,7 +23,7 @@ workshop_type="$(k3s kubectl -n "$namespace" \
   -o jsonpath='{.data.workshop_type}')"
 
 case "$workshop_type" in
-  none|introduction-to-ai|federated-learning) ;;
+  none|introduction-to-ai|federated-learning|cloud-computing-soa) ;;
   *)
     printf 'workshop_type=invalid\n'
     printf 'participant_workspace_status=unknown\n'
@@ -54,7 +54,7 @@ REMOTE
   )"
 
   case "$WORKSHOP_TYPE" in
-    none|introduction-to-ai|federated-learning) ;;
+    none|introduction-to-ai|federated-learning|cloud-computing-soa) ;;
     *)
       workshop_runtime_fail \
         'Could not determine the active workshop type. Deploy the current workshop state migration first.'
@@ -76,7 +76,7 @@ ensure_workshop_activation_allowed() {
   local requested_type="$1"
 
   case "$requested_type" in
-    introduction-to-ai|federated-learning) ;;
+    introduction-to-ai|federated-learning|cloud-computing-soa) ;;
     *)
       workshop_runtime_fail "Unsupported workshop type: $requested_type"
       return $?

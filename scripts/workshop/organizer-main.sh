@@ -16,9 +16,6 @@ COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
 RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
-MODULE1_HELPER="$SCRIPT_DIR/introduction-to-ai/module1.sh"
-MODULE2_HELPER="$SCRIPT_DIR/introduction-to-ai/module2.sh"
-MODULE3_HELPER="$SCRIPT_DIR/introduction-to-ai/module3.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 # Shared libraries provide deployment context and common organiser safeguards.
 WORKSHOP_CONTEXT="$SCRIPT_DIR/lib/workshop-context.sh"
@@ -67,6 +64,10 @@ Actions:
   module3-check           Check Introduction to AI Module 3 activation readiness.
   module3-release-solutions
                           Release Introduction to AI Module 3 solutions after the workshop.
+  cloud-module1-publish   Activate Cloud Computing SOA Module 1 for new participant spawns.
+  cloud-module1-check     Check Cloud Computing SOA Module 1 activation readiness.
+  cloud-module1-release-solutions
+                          Release Cloud Computing SOA Module 1 advanced reference solution.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -327,7 +328,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -380,15 +381,19 @@ source "$COMMON_HELPER"
 # shellcheck source=lib/organizer-runtime.sh
 source "$ORGANIZER_RUNTIME"
 
+INTRODUCTION_TO_AI_COURSE_MAIN="$SCRIPT_DIR/introduction-to-ai/course-main.sh"
+[[ -r "$INTRODUCTION_TO_AI_COURSE_MAIN" ]] ||
+  fail "Missing Introduction to AI course workflow: $INTRODUCTION_TO_AI_COURSE_MAIN"
+# shellcheck source=introduction-to-ai/course-main.sh
+source "$INTRODUCTION_TO_AI_COURSE_MAIN"
+check_introduction_to_ai_course_helpers
+
 # Fail early with a clear error when a routed helper is absent or not executable.
 for helper in \
   "$COHORT_HELPER" \
   "$ACCOUNT_HELPER" \
   "$RESET_HELPER" \
   "$PARTICIPANT_RESET_HELPER" \
-  "$MODULE1_HELPER" \
-  "$MODULE2_HELPER" \
-  "$MODULE3_HELPER" \
   "$APPLICATION_RECONCILIATION_HELPER"; do
   [[ -x "$helper" ]] || fail "Missing executable helper: $helper"
 done
@@ -474,6 +479,7 @@ run_workshops_menu() {
     printf '\nWorkshops\n\n'
     printf '  1) Introduction to AI\n'
     printf '  2) Federated Learning\n'
+    printf '  3) Cloud Computing SOA\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
@@ -481,8 +487,9 @@ run_workshops_menu() {
     case "$choice" in
       1) run_introduction_to_ai_menu ;;
       2) run_federated_learning_menu ;;
+      3) run_cloud_computing_soa_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, or 2.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, or 3.\n' >&2 ;;
     esac
   done
 }
@@ -523,6 +530,8 @@ source "$SCRIPT_DIR/controllers/cohort.sh"
 source "$SCRIPT_DIR/controllers/introduction_to_ai.sh"
 # shellcheck source=controllers/federated_learning.sh
 source "$SCRIPT_DIR/controllers/federated_learning.sh"
+# shellcheck source=controllers/cloud_computing_soa.sh
+source "$SCRIPT_DIR/controllers/cloud_computing_soa.sh"
 
 # Dispatch only after all dependencies and controllers have been loaded.
 # Interactive menus require a terminal; explicit actions remain scriptable.
@@ -535,13 +544,19 @@ case "$ACTION" in
   issue-credentials) run_issue_credentials ;;
   status) run_status ;;
   module1-publish) run_introduction_to_ai_prepare ;;
-  module1-check) "$MODULE1_HELPER" check ;;
+  module1-check) run_introduction_to_ai_module1_check ;;
   module2-publish) run_introduction_to_ai_module2_publish ;;
   module2-check) run_introduction_to_ai_module2_check ;;
   module2-release-solutions) run_introduction_to_ai_module2_release_solutions ;;
   module3-publish) run_introduction_to_ai_module3_publish ;;
   module3-check) run_introduction_to_ai_module3_check ;;
   module3-release-solutions) run_introduction_to_ai_module3_release_solutions ;;
+  cloud-module1-publish) cloud_module1_activate ;;
+  cloud-module1-check)
+    [[ -t 0 ]] || fail 'The cloud-module1-check action requires an interactive terminal.'
+    cloud_module1_check_activation_readiness "$(cloud_module1_select_mode)"
+    ;;
+  cloud-module1-release-solutions) cloud_module1_release_solutions ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
