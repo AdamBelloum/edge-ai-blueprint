@@ -298,6 +298,18 @@ singleuser:
       - name: digitafrica-seed-introduction-to-ai-module3-solutions
         configMap:
           name: digitafrica-notebooks-introduction-to-ai-module3-solutions
+      - name: digitafrica-seed-cloud-computing-soa-module1-beginner
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module1-beginner
+      - name: digitafrica-seed-cloud-computing-soa-module1-advanced
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module1-advanced
+      - name: digitafrica-seed-cloud-computing-soa-module1-solutions
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module1-solutions
+      - name: digitafrica-seed-cloud-computing-soa-module1-tests
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module1-tests
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
 {% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
       - name: digitafrica-runtime-{{ profile_name }}
@@ -394,6 +406,16 @@ singleuser:
           module3_beginner_workspace="$module3_workspace/beginner"
           module3_advanced_workspace="$module3_workspace/advanced"
           module3_solutions_workspace="$module3_workspace/solutions"
+          cloud_module1_beginner_source=/seed/cloud-computing-soa/module1/beginner
+          cloud_module1_advanced_source=/seed/cloud-computing-soa/module1/advanced
+          cloud_module1_solutions_source=/seed/cloud-computing-soa/module1/solutions
+          cloud_module1_tests_source=/seed/cloud-computing-soa/module1/tests
+          cloud_module1_parent=/home/jovyan/Cloud-Computing-SOA
+          cloud_module1_workspace="$cloud_module1_parent/Module-1"
+          cloud_module1_beginner_workspace="$cloud_module1_workspace/beginner"
+          cloud_module1_advanced_workspace="$cloud_module1_workspace/advanced"
+          cloud_module1_solutions_workspace="$cloud_module1_workspace/solutions"
+          cloud_module1_tests_workspace="$cloud_module1_workspace/tests"
           state_dir=/state
 
           workshop_type="$(tr -d '\r\n' < "$state_dir/workshop_type")"
@@ -409,7 +431,7 @@ singleuser:
           fi
 
           case "$workshop_type" in
-            none|introduction-to-ai|federated-learning) ;;
+            none|introduction-to-ai|federated-learning|cloud-computing-soa) ;;
             *)
               echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
               exit 1
@@ -439,6 +461,24 @@ singleuser:
               true|false) ;;
               *)
                 echo "[seed] ERROR: invalid solutions_released state: $solutions_released" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [ "$workshop_type" = "cloud-computing-soa" ]; then
+            case "$mode" in
+              beginner|advanced) ;;
+              *)
+                echo "[seed] ERROR: Cloud Module 1 requires mode=beginner or mode=advanced" >&2
+                exit 1
+                ;;
+            esac
+
+            case "$solutions_released" in
+              true|false) ;;
+              *)
+                echo "[seed] ERROR: invalid Cloud Module 1 solutions_released state: $solutions_released" >&2
                 exit 1
                 ;;
             esac
@@ -696,6 +736,85 @@ singleuser:
             fi
           fi
 
+          # Cloud Module 1: seed only the selected teaching track, preserve
+          # participant changes, and release the reference implementation only
+          # for the advanced TODO track.
+          if [ "$workshop_type" = "cloud-computing-soa" ]; then
+            mkdir -p "$cloud_module1_workspace"
+            chown 1000:100 "$cloud_module1_parent" "$cloud_module1_workspace"
+            chmod 0755 "$cloud_module1_parent" "$cloud_module1_workspace"
+
+            case "$mode" in
+              beginner)
+                mkdir -p "$cloud_module1_beginner_workspace"
+                chown 1000:100 "$cloud_module1_beginner_workspace"
+                chmod 0755 "$cloud_module1_beginner_workspace"
+
+                for filename in app.py upstream-participants-guide.md; do
+                  copy_seed_file \
+                    "$cloud_module1_beginner_source/$filename" \
+                    "$cloud_module1_beginner_workspace/$filename" \
+                    false
+                done
+
+                write_receipt_if_absent \
+                  "$cloud_module1_beginner_workspace/MODULE1_BEGINNER_SEED_RECEIPT.txt" \
+                  "app.py and upstream-participants-guide.md"
+                ;;
+              advanced)
+                mkdir -p "$cloud_module1_advanced_workspace"
+                chown 1000:100 "$cloud_module1_advanced_workspace"
+                chmod 0755 "$cloud_module1_advanced_workspace"
+
+                for filename in app.py upstream-participants-guide.md; do
+                  copy_seed_file \
+                    "$cloud_module1_advanced_source/$filename" \
+                    "$cloud_module1_advanced_workspace/$filename" \
+                    false
+                done
+
+                write_receipt_if_absent \
+                  "$cloud_module1_advanced_workspace/MODULE1_ADVANCED_SEED_RECEIPT.txt" \
+                  "app.py and upstream-participants-guide.md"
+                ;;
+            esac
+
+            mkdir -p "$cloud_module1_tests_workspace"
+            chown 1000:100 "$cloud_module1_tests_workspace"
+            chmod 0755 "$cloud_module1_tests_workspace"
+
+            for filename in read_from.csv test_api.py; do
+              copy_seed_file \
+                "$cloud_module1_tests_source/$filename" \
+                "$cloud_module1_tests_workspace/$filename" \
+                false
+            done
+
+            write_receipt_if_absent \
+              "$cloud_module1_tests_workspace/MODULE1_TESTS_SEED_RECEIPT.txt" \
+              "read_from.csv and test_api.py"
+
+            if [ "$solutions_released" = "true" ]; then
+              if [ "$mode" != "advanced" ]; then
+                echo "[seed] ERROR: Cloud Module 1 solutions require mode=advanced" >&2
+                exit 1
+              fi
+
+              mkdir -p "$cloud_module1_solutions_workspace"
+              chown 1000:100 "$cloud_module1_solutions_workspace"
+              chmod 0755 "$cloud_module1_solutions_workspace"
+
+              copy_seed_file \
+                "$cloud_module1_solutions_source/app.py" \
+                "$cloud_module1_solutions_workspace/app.py" \
+                false
+
+              write_receipt_if_absent \
+                "$cloud_module1_solutions_workspace/MODULE1_SOLUTIONS_RELEASE_RECEIPT.txt" \
+                "app.py"
+            fi
+          fi
+
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] Introduction to AI module: $introduction_to_ai_module"
           echo "[seed] workshop mode: $mode"
@@ -733,6 +852,18 @@ singleuser:
           readOnly: true
         - name: digitafrica-seed-introduction-to-ai-module3-solutions
           mountPath: /seed/introduction-to-ai/module3/solutions
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module1-beginner
+          mountPath: /seed/cloud-computing-soa/module1/beginner
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module1-advanced
+          mountPath: /seed/cloud-computing-soa/module1/advanced
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module1-solutions
+          mountPath: /seed/cloud-computing-soa/module1/solutions
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module1-tests
+          mountPath: /seed/cloud-computing-soa/module1/tests
           readOnly: true
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home

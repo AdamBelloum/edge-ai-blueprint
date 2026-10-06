@@ -615,7 +615,7 @@
           -p '{"data":{"workshop_type":"none"}}'
         echo "initialised"
         ;;
-      none|introduction-to-ai|federated-learning)
+      none|introduction-to-ai|federated-learning|cloud-computing-soa)
         echo "preserved"
         ;;
       *)
