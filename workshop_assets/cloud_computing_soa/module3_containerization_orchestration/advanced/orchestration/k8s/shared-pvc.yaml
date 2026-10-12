@@ -1,0 +1,23 @@
+# TODO:
+# Define a PersistentVolumeClaim in namespace websvc and bind it to websvc-shared-pv.
+# Requirements:
+# - name: websvc-shared-pvc
+# - namespace: websvc
+# - storageClassName: ""
+# - volumeName: websvc-shared-pv
+# - accessModes: ReadWriteMany
+# - request: 1Gi
+
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: websvc-shared-pvc
+#   namespace: websvc
+# spec:
+#   storageClassName: ""
+#   volumeName: websvc-shared-pv
+#   accessModes:
+#     - ReadWriteMany
+#   resources:
+#     requests:
+#       storage: 1Gi

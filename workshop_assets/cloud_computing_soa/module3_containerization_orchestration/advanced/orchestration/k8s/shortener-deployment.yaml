@@ -1,0 +1,45 @@
+# TODO:
+# Create Deployment for shortener service.
+# Requirements:
+# - name: shortener, namespace: websvc
+# - replicas: 3
+# - label selector app=shortener
+# - container image: <YOUR_DOCKERHUB_USERNAME>/shortener-service:3.2
+# - containerPort: 5000
+# - mount same PVC at /app/data
+# - mount ConfigMap shortener-public-key at /app/keys (readOnly)
+
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: shortener
+#   namespace: websvc
+# spec:
+#   replicas: 3
+#   selector:
+#     matchLabels:
+#       app: shortener
+#   template:
+#     metadata:
+#       labels:
+#         app: shortener
+#     spec:
+#       containers:
+#         - name: shortener
+#           image: <YOUR_DOCKERHUB_USERNAME>/shortener-service:3.2
+#           imagePullPolicy: Always
+#           ports:
+#             - containerPort: 5000
+#           volumeMounts:
+#             - name: shared-data
+#               mountPath: /app/data
+#             - name: shortener-public-key
+#               mountPath: /app/keys
+#               readOnly: true
+#       volumes:
+#         - name: shared-data
+#           persistentVolumeClaim:
+#             claimName: websvc-shared-pvc
+#         - name: shortener-public-key
+#           configMap:
+#             name: shortener-public-key

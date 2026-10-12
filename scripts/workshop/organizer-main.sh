@@ -50,6 +50,12 @@ Usage:
   organizer-main.sh [OPTIONS] [ACTION]
 
 Actions:
+  cloud-module3-local-check MODE
+                          Validate local assets; MODE: beginner, advanced, or solutions.
+  cloud-module3-local-export MODE ARCHIVE.tar.gz [--confirm-solutions]
+                          Export selected assets plus tests without platform access.
+                          Solutions require --confirm-solutions.
+                          Local actions must come first; use positional MODE, not --mode.
   menu                    Show the hierarchical organiser menu. Default.
   initialise-identities   Provision participant identities and groups only.
   issue-credentials       Issue temporary passwords and write a protected TSV export.
@@ -289,6 +295,26 @@ prompt_for_server_url() {
   [[ "$SERVER_URL" =~ ^https:// ]] ||
     fail 'A public HTTPS Keycloak URL is required.'
 }
+
+# Standalone Module 3 actions bypass deployment-context loading.
+# Local actions must come first; remaining arguments go to the local helper.
+case "${1:-}" in
+  cloud-module3-publish|cloud-module3-check|cloud-module3-release-solutions)
+    fail 'Cloud SOA Module 3 platform actions are retired. Use cloud-module3-local-check MODE or cloud-module3-local-export MODE ARCHIVE.tar.gz; solutions require --confirm-solutions.'
+    ;;
+  cloud-module3-local-check|cloud-module3-local-export)
+    module3_local_action="$1"
+    shift
+    module3_local_helper="$SCRIPT_DIR/cloud-computing-soa/module3-local.sh"
+    [[ -x "$module3_local_helper" ]] ||
+      fail "Missing executable local Module 3 helper: $module3_local_helper"
+    case "$module3_local_action" in
+      cloud-module3-local-check) "$module3_local_helper" check "$@" ;;
+      cloud-module3-local-export) "$module3_local_helper" export "$@" ;;
+    esac
+    exit $?
+    ;;
+esac
 
 # Parse options before loading deployment context so malformed invocations fail
 # early and without contacting Keycloak or the deployment environment.

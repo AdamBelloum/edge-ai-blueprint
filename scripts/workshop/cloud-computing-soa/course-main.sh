@@ -501,8 +501,103 @@ REMOTE
   cloud_module2_show_status
 }
 
-run_cloud_computing_soa_menu() {
+CLOUD_COMPUTING_SOA_MODULE3_NAME="Cloud Computing SOA — Module 3: Containerization and Orchestration"
+
+cloud_module3_select_mode() {
   local choice
+
+  if [[ -n "${CLOUD_COMPUTING_SOA_MODE:-}" ]]; then
+    case "$CLOUD_COMPUTING_SOA_MODE" in
+      beginner|advanced)
+        printf '%s\n' "$CLOUD_COMPUTING_SOA_MODE"
+        return 0
+        ;;
+      *)
+        printf '%s\n' \
+          'CLOUD_COMPUTING_SOA_MODE must be either beginner or advanced.' >&2
+        return 2
+        ;;
+    esac
+  fi
+
+  [[ -t 0 ]] || {
+    printf '%s\n' \
+      'Cloud Module 3 local validation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|advanced.' >&2
+    return 2
+  }
+
+  while true; do
+    printf '\n%s\n\n' "$CLOUD_COMPUTING_SOA_MODULE3_NAME" >&2
+    printf '%s\n' \
+      '  1) Beginner — guided containerization and orchestration implementation' \
+      '  2) Advanced — TODO-based containerization and orchestration implementation' >&2
+    printf 'Selection: ' >&2
+    read -r choice
+
+    case "$choice" in
+      1) printf '%s\n' beginner; return 0 ;;
+      2) printf '%s\n' advanced; return 0 ;;
+      *) printf 'Choose 1 or 2.\n' >&2 ;;
+    esac
+  done
+}
+
+# Module 3 local menu adapters; no deployment operations.
+CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
+)/module3-local.sh"
+
+cloud_module3_local_check_menu() {
+  local mode
+  mode="$(cloud_module3_select_mode)" || return $?
+  [[ -x "$CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER" ]] || {
+    printf '%s\n' 'Missing executable Module 3 local helper.' >&2
+    return 1
+  }
+  "$CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER" check "$mode"
+}
+
+cloud_module3_local_export_menu() {
+  local mode="$1" destination confirmation
+  local -a extra=()
+  [[ -x "$CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER" ]] || {
+    printf '%s\n' 'Missing executable Module 3 local helper.' >&2
+    return 1
+  }
+  if [[ "$mode" == solutions ]]; then
+    printf '%s\n' 'Reference solutions are for organiser-controlled release.'
+    printf 'Type RELEASE to authorise solution export (anything else cancels): '
+    IFS= read -r confirmation || return 1
+    if [[ "$confirmation" != RELEASE ]]; then
+      printf '%s\n' 'Solution export cancelled.'
+      return 0
+    fi
+    extra=(--confirm-solutions)
+  fi
+  printf 'New .tar.gz destination (existing parent directory; blank cancels): '
+  IFS= read -r destination || return 1
+  if [[ -z "$destination" ]]; then
+    printf '%s\n' 'Export cancelled.'
+    return 0
+  fi
+  "$CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER" export \
+    "$mode" "$destination" "${extra[@]}"
+}
+
+cloud_module3_local_information() {
+  printf '%s\n' \
+    'Module 3 is a standalone containerization/orchestration practical.' \
+    'Local checks validate mapped files and Python/Bash syntax only.' \
+    'Exports include one track plus shared tests, not generated keys.' \
+    'Participant guides and functional container validation remain pending.' \
+    'These menu actions do not change workshop state or participant servers.' \
+    'The organiser menu still loads platform context; direct local actions bypass it:' \
+    '  bash scripts/workshop/organizer-main.sh cloud-module3-local-check beginner' \
+    '  bash scripts/workshop/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz'
+}
+
+run_cloud_computing_soa_menu() {
+  local choice mode
 
   while true; do
     printf '\nCloud Computing SOA workshop menu\n\n'
@@ -517,6 +612,11 @@ run_cloud_computing_soa_menu() {
       '  8) Module 2 — activate advanced TODO track' \
       '  9) Module 2 — release advanced reference solution' \
       ' 10) Module 2 — show deployment status' \
+      ' 11) Module 3 — validate local assets' \
+      ' 12) Module 3 — export beginner bundle' \
+      ' 13) Module 3 — export advanced TODO bundle' \
+      ' 14) Module 3 — export reference solutions (confirmation required)' \
+      ' 15) Module 3 — local workflow information' \
       '  0) Back'
     printf '\nSelection: '
     read -r choice
@@ -538,8 +638,25 @@ run_cloud_computing_soa_menu() {
       8) cloud_module2_activate_selected_mode advanced ;;
       9) cloud_module2_release_solutions ;;
       10) cloud_module2_show_status ;;
+      11)
+        cloud_module3_local_check_menu ||
+          printf '%s\n' 'Module 3 local validation did not complete successfully.' >&2
+        ;;
+      12)
+        cloud_module3_local_export_menu beginner ||
+          printf '%s\n' 'Module 3 beginner export failed.' >&2
+        ;;
+      13)
+        cloud_module3_local_export_menu advanced ||
+          printf '%s\n' 'Module 3 advanced export failed.' >&2
+        ;;
+      14)
+        cloud_module3_local_export_menu solutions ||
+          printf '%s\n' 'Module 3 solution export failed.' >&2
+        ;;
+      15) cloud_module3_local_information ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 10.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 15.\n' >&2 ;;
     esac
   done
 }

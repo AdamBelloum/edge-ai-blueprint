@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener
+  namespace: websvc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shortener
+  template:
+    metadata:
+      labels:
+        app: shortener
+    spec:
+      containers:
+        - name: shortener
+          image: YOUR_DOCKERHUB_USERNAME/shortener-service:3.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/data
+            - name: shortener-public-key
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: websvc-shared-pvc
+        - name: shortener-public-key
+          configMap:
+            name: shortener-public-key
