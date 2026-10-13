@@ -597,7 +597,7 @@ cloud_module3_local_information() {
     'Module 3 is a standalone containerization/orchestration practical.' \
     'Local checks validate mapped files and Python/Bash syntax only.' \
     'Exports include one track plus shared tests, not generated keys.' \
-    'Participant guides and functional container validation remain pending.' \
+    'Beginner and advanced entry guides are included; detailed practical guidance and runtime validation remain pending.' \
     'These menu actions do not change workshop state or participant servers.' \
     'The organiser menu still loads platform context; direct local actions bypass it:' \
     '  bash scripts/workshop/organizer-main.sh cloud-module3-local-check beginner' \

@@ -94,3 +94,5 @@ solutions	asset_orchestration_shortener_service_shortener_py	orchestration/short
 tests	asset_read_from_csv	read_from.csv
 tests	asset_test_microservices_py	test_microservices.py
 tests	asset_test_ownership_isolation_py	test_ownership_isolation.py
+beginner	asset_workshop_README_md	README.md
+advanced	asset_workshop_README_md	README.md

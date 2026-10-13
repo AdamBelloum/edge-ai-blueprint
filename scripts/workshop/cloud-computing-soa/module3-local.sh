@@ -137,7 +137,7 @@ def export_bundle(selected):
         "The source map and selected Python/Bash syntax were checked at export time.\n"
         "Container builds, dependency installation, YAML semantics, service execution,\n"
         "and functional tests are NOT validated by this helper.\n\n"
-        "Participant setup guides are not yet included. This is an asset bundle,\n"
+        "Beginner and advanced entry guidelines are mapped. This is an asset bundle,\n"
         "not a verified ready-to-run workshop release.\n\n"
         "## Important lab assumptions\n\n"
         "- Compose defaults: auth port 5001, shortener port 5000.\n"
