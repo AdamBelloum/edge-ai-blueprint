@@ -524,45 +524,82 @@ REMOTE
   cloud_module2_show_status
 }
 
+# Select actions for one module while reusing its existing operational handlers.
+run_cloud_computing_soa_module_menu() {
+  local module="$1"
+  local title prefix choice mode
+
+  case "$module" in
+    1)
+      title="$CLOUD_COMPUTING_SOA_MODULE1_NAME"
+      prefix=cloud_module1
+      ;;
+    2)
+      title="$CLOUD_COMPUTING_SOA_MODULE2_NAME"
+      prefix=cloud_module2
+      ;;
+    *) printf 'Unknown Cloud Computing SOA module: %s\n' "$module" >&2; return 2 ;;
+  esac
+
+  while true; do
+    printf '\n%s\n\n' "$title"
+    printf '%s\n' \
+      '  1) Check activation readiness' \
+      '  2) Activate beginner track' \
+      '  3) Activate advanced TODO track' \
+      '  4) Release advanced reference solution' \
+      '  5) Show deployment status' \
+      '  0) Back to modules'
+    printf '\nSelection: '
+    read -r choice || return 0
+
+    case "$choice" in
+      1)
+        if mode="$("${prefix}_select_mode")"; then
+          "${prefix}_check_activation_readiness" "$mode" ||
+            printf 'Module %s readiness check did not pass.\n' "$module" >&2
+        else
+          printf 'Module %s mode selection did not complete.\n' "$module" >&2
+        fi
+        ;;
+      2)
+        "${prefix}_activate_selected_mode" beginner ||
+          printf 'Module %s beginner activation did not complete.\n' "$module" >&2
+        ;;
+      3)
+        "${prefix}_activate_selected_mode" advanced ||
+          printf 'Module %s advanced activation did not complete.\n' "$module" >&2
+        ;;
+      4)
+        "${prefix}_release_solutions" ||
+          printf 'Module %s solution release did not complete.\n' "$module" >&2
+        ;;
+      5)
+        "${prefix}_show_status" ||
+          printf 'Module %s deployment status could not be retrieved.\n' "$module" >&2
+        ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
+    esac
+  done
+}
+
 run_cloud_computing_soa_menu() {
   local choice
 
   while true; do
-    printf '\nCloud Computing SOA workshop menu\n\n'
+    printf '\nCloud Computing SOA modules\n\n'
     printf '%s\n' \
-      '  1) Module 1 — check activation readiness' \
-      '  2) Module 1 — activate beginner track' \
-      '  3) Module 1 — activate advanced TODO track' \
-      '  4) Module 1 — release advanced reference solution' \
-      '  5) Module 1 — show deployment status' \
-      '  6) Module 2 — check activation readiness' \
-      '  7) Module 2 — activate beginner track' \
-      '  8) Module 2 — activate advanced TODO track' \
-      '  9) Module 2 — release advanced reference solution' \
-      ' 10) Module 2 — show deployment status' \
-      '  0) Back'
+      '  1) Module 1 — REST API' \
+      '  2) Module 2 — Microservices and JWT Authentication' \
+      '  0) Back to workshops'
     printf '\nSelection: '
-    read -r choice
+    read -r choice || return 0
 
     case "$choice" in
-      1)
-        cloud_module1_check_activation_readiness "$(cloud_module1_select_mode)" ||
-          printf '%s\n' 'Module 1 readiness check did not pass.' >&2
-        ;;
-      2) cloud_module1_activate_selected_mode beginner ;;
-      3) cloud_module1_activate_selected_mode advanced ;;
-      4) cloud_module1_release_solutions ;;
-      5) cloud_module1_show_status ;;
-      6)
-        cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)" ||
-          printf '%s\n' 'Module 2 readiness check did not pass.' >&2
-        ;;
-      7) cloud_module2_activate_selected_mode beginner ;;
-      8) cloud_module2_activate_selected_mode advanced ;;
-      9) cloud_module2_release_solutions ;;
-      10) cloud_module2_show_status ;;
+      1|2) run_cloud_computing_soa_module_menu "$choice" ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 10.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 2.\n' >&2 ;;
     esac
   done
 }
