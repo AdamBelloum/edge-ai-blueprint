@@ -216,7 +216,11 @@ mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.mode}')"
 
-if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$mode" != "advanced" ]; then
+workshop_module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_module}')"
+
+if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$workshop_module" != "module1" ] || [ "\$mode" != "advanced" ]; then
   printf '%s\n' \
     'Cloud Module 1 solutions can be released only while advanced mode is active.' \
     "Current state: workshop_type=\${workshop_type:-unset}, mode=\${mode:-unset}" >&2
@@ -240,7 +244,7 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
 
 printf '%s\n' 'Cloud Module 1 solutions released for subsequently spawned participant servers.'
 REMOTE
-)"
+)" || return $?
 
   cloud_module1_show_status
 }
@@ -472,7 +476,11 @@ mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.mode}')"
 
-if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$mode" != "advanced" ]; then
+workshop_module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_module}')"
+
+if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$workshop_module" != "module2" ] || [ "\$mode" != "advanced" ]; then
   printf '%s\n' \
     'Cloud Module 2 solutions can be released only while advanced mode is active.' \
     "Current state: workshop_type=\${workshop_type:-unset}, mode=\${mode:-unset}" >&2
@@ -496,7 +504,7 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
 
 printf '%s\n' 'Cloud Module 2 solutions released for subsequently spawned participant servers.'
 REMOTE
-)"
+)" || return $?
 
   cloud_module2_show_status
 }
@@ -522,7 +530,7 @@ cloud_module3_select_mode() {
 
   [[ -t 0 ]] || {
     printf '%s\n' \
-      'Cloud Module 3 local validation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|advanced.' >&2
+      'Cloud Module 3 mode selection requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|advanced.' >&2
     return 2
   }
 
@@ -596,6 +604,189 @@ cloud_module3_local_information() {
     '  bash scripts/workshop/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz'
 }
 
+# Platform delivery checks; standalone local helpers remain available.
+cloud_module3_remote_status_script() {
+  local map_file
+  map_file="${CLOUD_COMPUTING_SOA_MODULE3_LOCAL_HELPER%/*}/../../../workshop_assets/cloud_computing_soa/module3_containerization_orchestration/asset-map.tsv"
+  [[ -f "$map_file" ]] || {
+    printf 'Missing Module 3 asset map: %s\n' "$map_file" >&2
+    return 1
+  }
+
+  printf 'namespace=%q\n' "$DIGITAFRICA_NAMESPACE"
+  printf 'expected_map=%q\n' "$(cat "$map_file")"
+  cat <<'REMOTE_STATUS'
+set -euo pipefail
+python3 - "$namespace" "$expected_map" <<'PY_STATUS'
+import csv
+import io
+import json
+import subprocess
+import sys
+
+namespace, expected_map = sys.argv[1:]
+rows = list(csv.reader(io.StringIO(expected_map), delimiter="\t"))
+
+for track in ("beginner", "advanced", "solutions", "tests"):
+    name = f"digitafrica-notebooks-cloud-computing-soa-module3-{track}"
+    result = subprocess.run(
+        ["k3s", "kubectl", "-n", namespace,
+         "get", "configmap", name, "-o", "json"],
+        capture_output=True, text=True,
+    )
+    prefix = f"cloud_module3_{track}"
+    if result.returncode:
+        print(f"{prefix}_configmap_status=unavailable")
+        print(result.stderr.strip(), file=sys.stderr)
+        continue
+
+    data = json.loads(result.stdout).get("data", {})
+    required = [row[1] for row in rows if row[0] == track]
+    missing = [key for key in required if key not in data]
+    actual_map = data.get("asset_map_tsv", "").rstrip("\r\n")
+    map_matches = actual_map == expected_map.rstrip("\r\n")
+    ready = bool(required) and not missing and map_matches
+
+    print(f"{prefix}_configmap_status={'deployed' if ready else 'incomplete'}")
+    print(f"{prefix}_mapped_asset_count={len(required)}")
+    if missing:
+        print(f"{prefix}_missing_keys={','.join(missing)}")
+    if not map_matches:
+        print(f"{prefix}_asset_map_status=mismatch")
+
+result = subprocess.run(
+    ["k3s", "kubectl", "-n", namespace,
+     "get", "configmap", "digitafrica-workshop-state", "-o", "json"],
+    capture_output=True, text=True,
+)
+if result.returncode:
+    print(result.stderr.strip(), file=sys.stderr)
+    sys.exit(result.returncode)
+state = json.loads(result.stdout).get("data", {})
+for key in ("workshop_type", "workshop_module", "mode", "solutions_released"):
+    print(f"{key}={state.get(key, 'unset')}")
+PY_STATUS
+REMOTE_STATUS
+}
+
+cloud_module3_show_status() {
+  local remote_script
+  remote_script="$(cloud_module3_remote_status_script)" || return $?
+  run_deployment_remote "$remote_script"
+}
+
+cloud_module3_check_activation_readiness() {
+  local mode="$1" status_output
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *) printf 'Module 3 requires beginner or advanced mode.\n' >&2; return 2 ;;
+  esac
+
+  status_output="$(cloud_module3_show_status)" || return $?
+  printf '%s\n' "$status_output"
+
+  if ! grep -Fxq "cloud_module3_${mode}_configmap_status=deployed" <<<"$status_output" ||
+     ! grep -Fxq "cloud_module3_tests_configmap_status=deployed" <<<"$status_output"; then
+    printf '%s\n' \
+      'Module 3 activation is not ready.' \
+      'Reconcile applications before activating Module 3.' >&2
+    return 1
+  fi
+
+  printf '%s\n' \
+    "Module 3 ${mode} file-delivery readiness passed." \
+    'Containers and services are not validated by this check.'
+}
+
+cloud_module3_activate_selected_mode() {
+  local mode="$1"
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *) printf 'Module 3 requires beginner or advanced mode.\n' >&2; return 2 ;;
+  esac
+
+  cloud_module2_require_complete_participant_cohort || return $?
+  ensure_workshop_activation_allowed cloud-computing-soa || return $?
+  cloud_module3_check_activation_readiness "$mode" || return $?
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"workshop_type":"cloud-computing-soa","workshop_module":"module3","mode":"${mode}","solutions_released":"false"}}'
+REMOTE
+)" || return $?
+
+  printf '%s\n' \
+    "Cloud Module 3 (${mode}) is active for subsequently spawned participant servers." \
+    'Existing servers and participant files are not modified.'
+}
+
+cloud_module3_activate() {
+  local mode
+  mode="$(cloud_module3_select_mode)" || return $?
+  cloud_module3_activate_selected_mode "$mode"
+}
+
+cloud_module3_release_solutions() {
+  local status_output
+
+  print_heading "Release $CLOUD_COMPUTING_SOA_MODULE3_NAME solutions"
+  printf '%s\n' \
+    'Solutions will be copied only on subsequent participant server spawns.' \
+    'Existing servers are not modified; previously delivered solutions are not revoked.' \
+    'Release requires Cloud Module 3 advanced mode to be active.'
+
+  if ! "${ASSUME_YES:-false}" &&
+     ! confirm "Release Cloud Module 3 reference solutions after the workshop"; then
+    printf '%s\n' 'No Module 3 solution release was performed.'
+    return 0
+  fi
+
+  status_output="$(cloud_module3_show_status)" || return $?
+  printf '%s\n' "$status_output"
+  if ! grep -Fxq 'cloud_module3_solutions_configmap_status=deployed' <<<"$status_output"; then
+    printf '%s\n' \
+      'Module 3 solution assets are not ready.' \
+      'Reconcile applications before releasing solutions.' >&2
+    return 1
+  fi
+
+  run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+namespace="${DIGITAFRICA_NAMESPACE}"
+
+workshop_type="\$(k3s kubectl -n "\$namespace" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_type}')"
+workshop_module="\$(k3s kubectl -n "\$namespace" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_module}')"
+mode="\$(k3s kubectl -n "\$namespace" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.mode}')"
+
+if [ "\$workshop_type" != "cloud-computing-soa" ] ||
+   [ "\$workshop_module" != "module3" ] ||
+   [ "\$mode" != "advanced" ]; then
+  printf '%s\n' \
+    'Module 3 solutions can be released only while Cloud Module 3 advanced mode is active.' >&2
+  exit 1
+fi
+
+k3s kubectl -n "\$namespace" \
+  patch configmap digitafrica-workshop-state \
+  --type merge \
+  -p '{"data":{"solutions_released":"true"}}'
+REMOTE
+)" || return $?
+
+  cloud_module3_show_status
+}
+
 run_cloud_computing_soa_menu() {
   local choice mode
 
@@ -617,6 +808,11 @@ run_cloud_computing_soa_menu() {
       ' 13) Module 3 — export advanced TODO bundle' \
       ' 14) Module 3 — export reference solutions (confirmation required)' \
       ' 15) Module 3 — local workflow information' \
+      ' 16) Module 3 — check file-delivery readiness' \
+      ' 17) Module 3 — activate beginner track' \
+      ' 18) Module 3 — activate advanced TODO track' \
+      ' 19) Module 3 — release advanced reference solutions' \
+      ' 20) Module 3 — show deployment status' \
       '  0) Back'
     printf '\nSelection: '
     read -r choice
@@ -655,8 +851,18 @@ run_cloud_computing_soa_menu() {
           printf '%s\n' 'Module 3 solution export failed.' >&2
         ;;
       15) cloud_module3_local_information ;;
+      16)
+        if mode="$(cloud_module3_select_mode)"; then
+          cloud_module3_check_activation_readiness "$mode" ||
+            printf '%s\n' 'Module 3 readiness check did not pass.' >&2
+        fi
+        ;;
+      17) cloud_module3_activate_selected_mode beginner ;;
+      18) cloud_module3_activate_selected_mode advanced ;;
+      19) cloud_module3_release_solutions ;;
+      20) cloud_module3_show_status ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 15.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 20.\n' >&2 ;;
     esac
   done
 }

@@ -387,6 +387,22 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+- name: Ensure namespace exists
+  ansible.builtin.shell: |
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_application_reconciliation
+
+- name: Deploy Cloud Computing SOA Module 3 mapped assets
+  ansible.builtin.import_tasks: cloud-soa-module3-assets.yml
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
     set -euo pipefail
@@ -570,16 +586,6 @@
     helm version
   args:
     executable: /bin/bash
-
-- name: Ensure namespace exists
-  ansible.builtin.shell: |
-    set -e
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
-  args:
-    executable: /bin/bash
-  tags:
-    - workshop_application_reconciliation
 
 - name: Verify protected JupyterHub OIDC client secret record
   ansible.builtin.assert:

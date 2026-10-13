@@ -1,0 +1,114 @@
+---
+# Cloud SOA Module 3 asset deployment.
+# Asset staging and ConfigMap creation belong to application reconciliation;
+# participant activation remains an organiser action.
+
+- name: Create Cloud Computing SOA Module 3 source staging directory
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    state: directory
+    mode: "0755"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Validate and stage mapped Cloud Computing SOA Module 3 assets
+  vars:
+    cloud_module3_local_root: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+    cloud_module3_stage_root: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    cloud_module3_map_rows: "{{ lookup('ansible.builtin.file', cloud_module3_local_root ~ '/asset-map.tsv').splitlines() | map('split', '\t') | list }}"
+  block:
+    - name: Validate Module 3 map and all track syntax on the control host
+      ansible.builtin.command:
+        argv:
+          - bash
+          - "{{ playbook_dir }}/../scripts/workshop/cloud-computing-soa/module3-local.sh"
+          - check
+          - "{{ item }}"
+      loop:
+        - beginner
+        - advanced
+        - solutions
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      changed_when: false
+
+    - name: Create Module 3 mapped asset staging directories
+      ansible.builtin.file:
+        path: "{{ cloud_module3_stage_root }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - beginner
+        - advanced
+        - solutions
+        - tests
+
+    - name: Stage only mapped Module 3 files using their ConfigMap keys
+      ansible.builtin.copy:
+        src: "{{ cloud_module3_local_root }}/{{ 'shared/tests' if item[0] == 'tests' else item[0] }}/{{ item[2] }}"
+        dest: "{{ cloud_module3_stage_root }}/{{ item[0] }}/{{ item[1] }}"
+        mode: "0644"
+      loop: "{{ cloud_module3_map_rows }}"
+      loop_control:
+        label: "{{ item[0] }}/{{ item[2] }}"
+
+    - name: Stage Module 3 asset map for directory reconstruction
+      ansible.builtin.copy:
+        src: "{{ cloud_module3_local_root }}/asset-map.tsv"
+        dest: "{{ cloud_module3_stage_root }}/asset-map.tsv"
+        mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Create/update Cloud Computing SOA Module 3 asset ConfigMaps
+  ansible.builtin.shell: |
+    set -euo pipefail
+    root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    namespace={{ digitafrica_deployment.digitafrica_namespace | quote }}
+    tab="$(printf '\t')"
+
+    # Prepare every manifest before applying any ConfigMap.
+    temporary="$(mktemp -d)"
+    trap 'rm -rf -- "$temporary"' EXIT
+
+    for track in beginner advanced solutions tests; do
+      arguments=()
+      while IFS="$tab" read -r mapped_track key relative; do
+        [[ "$mapped_track" == "$track" ]] || continue
+        [[ "$key" =~ ^[A-Za-z0-9._-]+$ ]] || {
+          printf 'Invalid ConfigMap key: %s\n' "$key" >&2
+          exit 1
+        }
+        [[ -f "$root/$track/$key" ]] || {
+          printf 'Missing staged asset: %s/%s\n' "$track" "$key" >&2
+          exit 1
+        }
+        arguments+=("--from-file=$key=$root/$track/$key")
+      done < "$root/asset-map.tsv"
+
+      [[ -n "${arguments[*]}" ]] || {
+        printf 'No mapped assets for track: %s\n' "$track" >&2
+        exit 1
+      }
+
+      k3s kubectl -n "$namespace" create configmap \
+        "digitafrica-notebooks-cloud-computing-soa-module3-$track" \
+        "${arguments[@]}" \
+        --from-file=asset_map_tsv="$root/asset-map.tsv" \
+        --dry-run=client -o yaml > "$temporary/$track.yaml"
+    done
+
+    for track in beginner advanced solutions tests; do
+      k3s kubectl -n "$namespace" apply -f "$temporary/$track.yaml"
+    done
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation

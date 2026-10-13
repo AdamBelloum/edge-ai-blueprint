@@ -85,12 +85,6 @@ hub:
   # assigned client VMs by the pre-spawn hook below.
   baseUrl: /jupyter
 
-  # Recheck the participant PVC on every spawn. This permits a workshop reset
-  # to remove workspace claims without leaving stale KubeSpawner PVC state.
-  config:
-    KubeSpawner:
-      remember_pvc_name: false
-
   extraConfig:
 {% if oidc.oidc_enabled %}
     05-digitafrica-oidc-secret: |
@@ -195,6 +189,10 @@ hub:
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
   config:
+    # Recheck participant PVCs after workshop resets.
+    KubeSpawner:
+      remember_pvc_name: false
+
     JupyterHub:
 {% if oidc.oidc_enabled %}
       authenticator_class: generic-oauth
@@ -322,6 +320,18 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-tests
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
+      - name: digitafrica-seed-cloud-computing-soa-module3-beginner
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module3-beginner
+      - name: digitafrica-seed-cloud-computing-soa-module3-advanced
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module3-advanced
+      - name: digitafrica-seed-cloud-computing-soa-module3-solutions
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module3-solutions
+      - name: digitafrica-seed-cloud-computing-soa-module3-tests
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module3-tests
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
 {% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
       - name: digitafrica-runtime-{{ profile_name }}
@@ -488,7 +498,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module3)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -552,6 +562,30 @@ singleuser:
             esac
           fi
 
+          # Cloud Module 3 state validation.
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module3" ]; then
+            case "$mode" in
+              beginner|advanced) ;;
+              *)
+                echo "[seed] ERROR: Cloud Module 3 requires mode=beginner or mode=advanced" >&2
+                exit 1
+                ;;
+            esac
+
+            case "$solutions_released" in
+              true|false) ;;
+              *)
+                echo "[seed] ERROR: invalid Cloud Module 3 solutions_released state: $solutions_released" >&2
+                exit 1
+                ;;
+            esac
+
+            if [ "$solutions_released" = "true" ] && [ "$mode" != "advanced" ]; then
+              echo "[seed] ERROR: Cloud Module 3 solutions require mode=advanced" >&2
+              exit 1
+            fi
+          fi
+
           copy_seed_file() {{ '{{' }}
             source_file="$1"
             destination_file="$2"
@@ -571,7 +605,7 @@ singleuser:
             cp -L "$source_file" "$destination_file"
             chown 1000:100 "$destination_file"
             chmod 0644 "$destination_file"
-          }}
+          {{ '}}' }}
 
           write_receipt_if_absent() {{ '{{' }}
             receipt="$1"
@@ -587,7 +621,7 @@ singleuser:
             ) > "$receipt"
             chown 1000:100 "$receipt"
             chmod 0644 "$receipt"
-          }}
+          {{ '}}' }}
 
           mkdir -p "$workspace"
 
@@ -1020,6 +1054,97 @@ singleuser:
             fi
           fi
 
+          # Cloud Module 3: reconstruct mapped participant directories.
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module3" ]; then
+            cloud_module3_parent=/home/jovyan/Cloud-Computing-SOA
+            cloud_module3_workspace="$cloud_module3_parent/Module-3"
+            mkdir -p "$cloud_module3_workspace"
+            chown 1000:100 "$cloud_module3_parent" "$cloud_module3_workspace"
+            chmod 0755 "$cloud_module3_parent" "$cloud_module3_workspace"
+
+            selected_tracks="$mode tests"
+            if [ "$solutions_released" = "true" ]; then
+              selected_tracks="$selected_tracks solutions"
+            fi
+
+            tab="$(printf '\t')"
+            for track in $selected_tracks; do
+              source_root="/seed/cloud-computing-soa/module3/$track"
+              destination_root="$cloud_module3_workspace/$track"
+              map_file="$source_root/asset_map_tsv"
+              if [ ! -f "$map_file" ]; then
+                echo "[seed] ERROR: missing Module 3 asset map: $map_file" >&2
+                exit 1
+              fi
+
+              mkdir -p "$destination_root"
+              chown 1000:100 "$destination_root"
+              chmod 0755 "$destination_root"
+              asset_count=0
+
+              while IFS="$tab" read -r mapped_track key relative; do
+                [ "$mapped_track" = "$track" ] || continue
+                case "$key" in
+                  ""|*[!A-Za-z0-9._-]*)
+                    echo "[seed] ERROR: invalid Module 3 asset key" >&2
+                    exit 1
+                    ;;
+                esac
+                case "$relative" in
+                  ""|/*)
+                    echo "[seed] ERROR: invalid Module 3 destination" >&2
+                    exit 1
+                    ;;
+                esac
+                case "/$relative/" in
+                  */../*|*/./*|*//*)
+                    echo "[seed] ERROR: unsafe Module 3 destination: $relative" >&2
+                    exit 1
+                    ;;
+                esac
+
+                destination="$destination_root/$relative"
+                directory="$(dirname "$destination")"
+
+                # Reject symlinked directories; never follow them when seeding.
+                probe="$directory"
+                while [ "$probe" != "/home/jovyan" ]; do
+                  if [ -L "$probe" ]; then
+                    echo "[seed] ERROR: symlinked workspace directory: $probe" >&2
+                    exit 1
+                  fi
+                  probe="$(dirname "$probe")"
+                done
+
+                mkdir -p "$directory"
+                probe="$directory"
+                while [ "$probe" != "$cloud_module3_parent" ]; do
+                  chown 1000:100 "$probe"
+                  chmod 0755 "$probe"
+                  probe="$(dirname "$probe")"
+                done
+
+                # Preserve participant files, including their existing permissions.
+                if [ -e "$destination" ] || [ -L "$destination" ]; then
+                  echo "[seed] preserving existing file: $destination"
+                else
+                  copy_seed_file "$source_root/$key" "$destination" false
+                  case "$relative" in
+                    *.sh) chmod 0755 "$destination" ;;
+                  esac
+                fi
+                asset_count=$((asset_count + 1))
+              done < "$map_file"
+
+              if [ "$asset_count" -eq 0 ]; then
+                echo "[seed] ERROR: no mapped Module 3 assets for $track" >&2
+                exit 1
+              fi
+
+              write_receipt_if_absent                 "$destination_root/MODULE3_SEED_RECEIPT.txt"                 "Module 3 $track mapped assets"
+            done
+          fi
+
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] workshop module: $workshop_module"
           echo "[seed] workshop mode: $mode"
@@ -1081,6 +1206,18 @@ singleuser:
           readOnly: true
         - name: digitafrica-seed-cloud-computing-soa-module2-tests
           mountPath: /seed/cloud-computing-soa/module2/tests
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module3-beginner
+          mountPath: /seed/cloud-computing-soa/module3/beginner
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module3-advanced
+          mountPath: /seed/cloud-computing-soa/module3/advanced
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module3-solutions
+          mountPath: /seed/cloud-computing-soa/module3/solutions
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module3-tests
+          mountPath: /seed/cloud-computing-soa/module3/tests
           readOnly: true
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
