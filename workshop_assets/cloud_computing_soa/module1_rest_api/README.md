@@ -17,6 +17,7 @@ server on `127.0.0.1:5000`. It is tested locally and is not exposed through a
 shared ingress or public service.
 
 See `SOURCE.md` for provenance and licence information.
+
 ## Beginner implementation provenance
 
-`beginner/app.py` is extracted verbatim from the documented `Complete Final Code (example)` section in `beginner/upstream-participants-guide.md`. The guide remains the pedagogical explanation for that complete, runnable starting point.
+`beginner/app.py` is adapted from the documented `Complete Final Code (example)` section in `beginner/upstream-participants-guide.md`, with explanatory comments and minor code-structure differences. The supplied file is the runnable beginner implementation; the guide explains its design and behaviour.
