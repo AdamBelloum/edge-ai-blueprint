@@ -250,6 +250,8 @@ CLOUD_COMPUTING_SOA_COHORT_WORKFLOW="${CLOUD_COMPUTING_SOA_COHORT_WORKFLOW:-$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd
 )/identity/cohort-workshop.sh}"
 
+# Delegate cohort validation to the shared identity workflow.
+# This check does not create participant accounts.
 cloud_module2_require_complete_participant_cohort() {
   if [[ ! -x "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" ]]; then
     printf 'Missing executable participant cohort workflow: %s\n' \
@@ -260,6 +262,8 @@ cloud_module2_require_complete_participant_cohort() {
   "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" require-complete
 }
 
+# Return beginner or advanced on stdout; prompts and errors use stderr.
+# CLOUD_COMPUTING_SOA_MODE supports non-interactive mode selection.
 cloud_module2_select_mode() {
   local choice
 
@@ -299,6 +303,10 @@ cloud_module2_select_mode() {
   done
 }
 
+# Generate a remote inspection script; execution is handled by the caller.
+# Check listed ConfigMap assets for non-empty content and report checksums.
+# These checks do not test service behaviour or compare against local source.
+# SOURCE.md is not currently included in the Module 2 asset mappings.
 cloud_module2_remote_status_script() {
   printf 'namespace=%q\n' "$DIGITAFRICA_NAMESPACE"
   cat <<'REMOTE_STATUS'
@@ -384,6 +392,8 @@ printf 'solutions_released=%s\n' "$(state_value solutions_released)"
 REMOTE_STATUS
 }
 
+# Inspect deployed assets and shared workshop state without changing them.
+# The status text below still names app.py; Module 2 uses two service files.
 cloud_module2_show_status() {
   print_heading "$CLOUD_COMPUTING_SOA_MODULE2_NAME deployment status"
   run_deployment_remote "$(cloud_module2_remote_status_script)"
@@ -398,6 +408,8 @@ and only for the active advanced track.
 STATUS_MESSAGE
 }
 
+# Require the selected teaching ConfigMap and shared tests to be populated.
+# This is asset readiness, not a running-service or participant-access test.
 cloud_module2_check_activation_readiness() {
   local track="$1"
   local status_output
@@ -418,6 +430,9 @@ cloud_module2_check_activation_readiness() {
     'Shared tests are available; solutions remain protected until explicit release.'
 }
 
+# Select Module 2 and its teaching mode, clearing the solution-release flag.
+# The spawn-time seeder consumes this state; this function copies no files
+# and does not restart existing participant servers.
 cloud_module2_set_workshop_state() {
   local mode="$1"
 
@@ -433,6 +448,8 @@ REMOTE
     "Cloud Module 2 (${mode}) is now active for subsequently spawned participant servers."
 }
 
+# Validate the cohort, shared activation safeguards, and asset readiness
+# before changing workshop state. Return immediately on a failed check.
 cloud_module2_activate_selected_mode() {
   local mode="$1"
 
@@ -442,6 +459,7 @@ cloud_module2_activate_selected_mode() {
   cloud_module2_set_workshop_state "$mode"
 }
 
+# Select a teaching mode, then delegate to the guarded activation sequence.
 cloud_module2_activate() {
   local mode
 
@@ -449,6 +467,11 @@ cloud_module2_activate() {
   cloud_module2_activate_selected_mode "$mode"
 }
 
+# After confirmation, set the shared release flag for subsequent spawns.
+# The seeder copies reference services into a separate solutions directory.
+# Known guard gap: this action checks workshop type and advanced mode,
+# but not workshop_module. Verify Module 2 is active before invoking it.
+# The asset check below verifies only the reference authentication file.
 cloud_module2_release_solutions() {
   print_heading "Release $CLOUD_COMPUTING_SOA_MODULE2_NAME solutions"
   printf '%s\n' \

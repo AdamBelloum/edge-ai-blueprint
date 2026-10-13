@@ -1,3 +1,12 @@
+# Module 2 live HTTP integration tests; these do not start the services.
+# Start authentication on localhost:5001 and the shortener on localhost:5000.
+# Run from this tests directory so read_from.csv resolves correctly.
+# Requires requests and completed services with matching RSA key material.
+# Tests create an account and mappings; use a disposable workshop instance.
+# CSV rows are chosen randomly, so test inputs can vary between runs.
+# HTTP calls have no explicit timeout and may wait on an unresponsive service.
+# Passing this suite is not a comprehensive authentication or security audit.
+
 import unittest
 import requests
 import csv
@@ -11,6 +20,8 @@ class TestApi(unittest.TestCase):
     base_url = "http://127.0.0.1:5000"
     auth_url = "http://127.0.0.1:5001"
 
+    # Skip the CSV header and choose a row with at least five columns.
+    # The unpacking in setUp requires exactly five values.
     @classmethod
     def populate_variables_from_csv_static(cls):
         with open("read_from.csv", "r") as f:
@@ -23,6 +34,8 @@ class TestApi(unittest.TestCase):
     def populate_variables_from_csv(self):
         return self.populate_variables_from_csv_static()
 
+    # Register a unique test user, log in, and retain its bearer token.
+    # Accept several token response field names for assignment compatibility.
     @classmethod
     def setUpClass(cls):
         # use a unique username each run so re-running tests does not fail on duplicate registration
@@ -81,6 +94,7 @@ class TestApi(unittest.TestCase):
         cls.headers = {"Authorization": f"Bearer {cls.token}"}
         cls.headers_wrong = {"Authorization": "Bearer wrong"}
 
+    # Accept common identifier field names or a single string response value.
     def extract_id_from_response(self, response):
         try:
             body = response.json()
@@ -107,6 +121,8 @@ class TestApi(unittest.TestCase):
 
         return returned_id
 
+    # Check the target without following the redirect to an external website.
+    # Accept a Location header or the assignment's JSON target alternative.
     def assert_redirect_points_to(self, response, expected_value, fail_prefix):
         location = response.headers.get("Location")
         if location is not None:
@@ -140,6 +156,7 @@ class TestApi(unittest.TestCase):
                 f"{fail_prefix}: expected redirected URL {expected_value} to be present in response body."
             )
 
+    # Create two mappings before each test using the selected CSV inputs.
     def setUp(self):
         self.id_shortened_url_1 = ""
         self.id_shortened_url_2 = ""
@@ -167,6 +184,8 @@ class TestApi(unittest.TestCase):
         self.id_shortened_url_1 = do_post(self.url_to_shorten_1)
         self.id_shortened_url_2 = do_post(self.url_to_shorten_2)
 
+    # Attempt to delete this user's mappings; cleanup failures are suppressed.
+    # The authentication account is not removed.
     def tearDown(self):
         url = f"{self.base_url}/"
         try:
@@ -283,6 +302,7 @@ class TestApi(unittest.TestCase):
             f"Expected status code 404, but got {response.status_code}"
         )
 
+    # Check authentication and a list-shaped response, not exact ownership contents.
     def test_get_all(self):
         url = f"{self.base_url}/"
 
@@ -354,6 +374,8 @@ class TestApi(unittest.TestCase):
             f"Expected status code 400, but got {response.status_code}"
         )
 
+    # Expect the exercise-specific 404 after bulk deletion.
+    # The final assertion checks for an empty list, not every possible collection.
     def test_deletion_all(self):
         url = f"{self.base_url}/"
 
