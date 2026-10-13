@@ -7,7 +7,7 @@
 # 1) build each service from its own context directory
 # 2) map ports 5001:5001 and 5000:5000
 # 3) mount persistent data volumes to /app/data
-# 4) mount keys folders to /app/keys
+# 4) mount keys folders read-only to /app/keys (hint: :ro)
 # 5) shortener depends_on auth
 # 6) restart policy: unless-stopped
 # 7) define named volumes auth_data and shortener_data
@@ -23,7 +23,7 @@
 #       - "5001:5001"
 #     volumes:
 #       - auth_data:/app/data
-#       - ./auth_service/keys:/app/keys
+#       - ./auth_service/keys:/app/keys:ro
 #     restart: unless-stopped
 #
 #   shortener:
@@ -34,7 +34,7 @@
 #       - "5000:5000"
 #     volumes:
 #       - shortener_data:/app/data
-#       - ./shortener_service/keys:/app/keys
+#       - ./shortener_service/keys:/app/keys:ro
 #     depends_on:
 #       - auth
 #     restart: unless-stopped
