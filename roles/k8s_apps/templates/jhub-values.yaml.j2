@@ -917,6 +917,9 @@ singleuser:
               "$selected_workspace/auth_service" \
               "$selected_workspace/shortener_service"
 
+            # Module-wide instructions, dependencies, and Git exclusions
+            # live at Module-2 root; service code lives in the selected track.
+            # SOURCE.md is not mapped or copied by this block.
             copy_seed_file \
               "$selected_source/module2_readme_md" \
               "$cloud_module2_workspace/README.md" \
@@ -946,10 +949,14 @@ singleuser:
               "$selected_workspace/upstream-participants-guide.md" \
               false
 
+            # Record initial delivery; a receipt is not a service test
+            # or proof that current workspace files match deployed assets.
             write_receipt_if_absent \
               "$selected_workspace/$receipt_name" \
               "$receipt_description"
 
+            # Both teaching modes share the same HTTP tests and CSV inputs.
+            # Copying tests does not start either participant-local service.
             mkdir -p "$cloud_module2_tests_workspace"
             chown 1000:100 "$cloud_module2_tests_workspace"
             chmod 0755 "$cloud_module2_tests_workspace"
@@ -971,6 +978,10 @@ singleuser:
               "$cloud_module2_tests_workspace/MODULE2_TESTS_SEED_RECEIPT.txt" \
               "Module 2 microservices test suite"
 
+            # The enclosing condition selects Cloud SOA Module 2.
+            # Release additionally requires advanced mode; reference code
+            # goes into solutions/ without replacing the advanced exercise.
+            # These copy conditions do not revoke previously delivered files.
             if [ "$solutions_released" = "true" ]; then
               if [ "$mode" != "advanced" ]; then
                 echo "[seed] ERROR: Cloud Module 2 solutions require mode=advanced" >&2

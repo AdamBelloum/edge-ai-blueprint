@@ -68,3 +68,62 @@ appropriate for production.
 In the source repository, see `SOURCE.md` alongside this README for
 provenance and licence information. It is not currently copied into the
 JupyterHub participant workspace.
+
+## Teaching and organiser guidelines
+
+### Learning progression
+
+1. Identify the responsibilities of the authentication and shortener services.
+2. Follow registration and login through to issuance of an RS256 JWT.
+3. Distinguish token signature verification from encryption and user lookup.
+4. Exercise protected management routes and public redirects.
+5. Compare authentication failures with ownership-based authorization failures.
+6. Explain what the supplied tests cover and which security properties remain
+   untested.
+
+Beginner participants use the completed code and its explanatory comments.
+Advanced participants implement the existing TODOs before testing.
+Use the selected track's `upstream-participants-guide.md` alongside this README.
+Reference solutions support comparison after explicit organiser release; they
+are not a production-security baseline.
+
+### Environment preparation
+
+Use a Python environment with the dependencies in the module's
+`requirements.lock` installed. In the participant workspace, that file is at
+the Module-2 root, alongside this README, rather than inside a teaching track.
+Run the services and tests inside the same participant server: a browser or
+terminal on another machine has a different localhost.
+
+### Activation and workspace delivery
+
+Infrastructure deployment publishes the assets; organiser activation selects
+the workshop module and teaching mode. Activation does not start Flask or
+restart existing participant servers. The spawn-time seeder delivers assets
+under `/home/jovyan/Cloud-Computing-SOA/Module-2`.
+
+The seeder copies the selected teaching track and shared tests while preserving
+existing participant files. A later asset update is therefore not a guarantee
+that an existing workspace will receive revised files. Verify delivery using
+the repository's deployment and workspace checks; do not delete participant
+work merely to refresh documentation.
+
+Reference code is copied into a separate `solutions/` directory only when
+Module 2 is selected, mode is advanced, and the release flag is true. This
+copying rule is not an authentication boundary or a revocation mechanism for
+files already delivered.
+
+Before using the Module 2 release action, verify that Module 2 is active.
+The current organiser action checks workshop type and advanced mode, but does
+not check `workshop_module`; its solution asset check covers only the reference
+authentication file. These are known follow-up defects, not fixed by this
+documentation update. Status text also still mentions `app.py`, although this
+module uses `auth_service/auth.py` and `shortener_service/shortener.py`.
+
+### Documentation maintenance
+
+Keep participant instructions in this README, provenance in `SOURCE.md`,
+implementation explanations beside the relevant code, and delivery comments
+beside the template logic. Changes to teaching behaviour, asset mappings,
+release guards, or tests require a separate functional change and validation.
+Do not include generated keys, passwords, or tokens in documentation or Git.
