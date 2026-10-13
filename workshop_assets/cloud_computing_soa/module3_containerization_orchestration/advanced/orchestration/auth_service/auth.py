@@ -54,25 +54,18 @@ def load_users():
     - Ensure the parent directory exists
     - If file is missing, create it with {}
     - Load JSON into users_dict
-    - If loaded content is not a dict, reset to {}
-    - On parse/read errors, reset to {}
+    - If existing JSON is not an object, raise a clear RuntimeError.
+    - On read or JSON parsing errors, raise a clear RuntimeError.
+    - Preserve the existing file for inspection and repair.
+    - Initialise {} only when the storage file does not exist.
     """
     global users_dict
 
-    # TODO:
-    # ensure_parent_dir(DATA_FILE)
-    #
-    # if ...:
-    #     with open(DATA_FILE, "w", encoding="utf-8") as f:
-    #         json.dump({}, f)
-    #
-    # try:
-    #     with open(DATA_FILE, "r", encoding="utf-8") as f:
-    #         users_dict = json.load(f)
-    #     if ...:
-    #         users_dict = {}
-    # except Exception:
-    #     users_dict = {}
+    # TODO: implement the expected behaviour above.
+    # Hint: distinguish missing storage from invalid existing storage.
+    # Hint: catch OSError and ValueError for read/JSON failures.
+    # Hint: reject non-object JSON with a clear RuntimeError.
+    # Never overwrite existing storage as an error-recovery shortcut.
     pass
 
 
