@@ -1,3 +1,12 @@
+# Module 2 live HTTP ownership checks; these do not start the services.
+# Start authentication on localhost:5001 and the shortener on localhost:5000.
+# Requires requests and completed services with matching RSA key material.
+# Creates two accounts; use a disposable workshop instance.
+# Requests use a five-second timeout; cleanup does not remove accounts.
+# Covers listing and direct update/delete attempts by a second valid user.
+# Does not test same-URL submission, collision handling, or ownership reassignment.
+# Passing this test is not proof of complete multi-user security.
+
 import time
 import unittest
 import uuid
@@ -11,6 +20,7 @@ class TestOwnershipIsolation(unittest.TestCase):
     base_url = "http://127.0.0.1:5000"
     auth_url = "http://127.0.0.1:5001"
 
+    # Create a unique account and require the reference token response field.
     @classmethod
     def create_and_login(cls, label):
         username = f"{label}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
@@ -42,11 +52,14 @@ class TestOwnershipIsolation(unittest.TestCase):
 
         return {"Authorization": f"Bearer {token}"}
 
+    # Authenticate Alice and Bob independently to distinguish authorization
+    # failures from invalid-token authentication failures.
     @classmethod
     def setUpClass(cls):
         cls.alice_headers = cls.create_and_login("alice")
         cls.bob_headers = cls.create_and_login("bob")
 
+    # Attempt mapping cleanup for both users; ignore request failures.
     @classmethod
     def tearDownClass(cls):
         for headers in (cls.alice_headers, cls.bob_headers):
@@ -55,6 +68,8 @@ class TestOwnershipIsolation(unittest.TestCase):
             except requests.RequestException:
                 pass
 
+    # Create Alice's mapping and check that Bob cannot list, update, or delete it.
+    # Finally verify that Alice can delete her own mapping.
     def test_valid_second_user_cannot_manage_first_users_mapping(self):
         created = requests.post(
             f"{self.base_url}/",

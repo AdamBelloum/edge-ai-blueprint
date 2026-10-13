@@ -5,7 +5,7 @@ Welcome! In this workshop, you will evolve your **URL Shortener** into a **micro
 By the end, you will have:
 - An **Authentication Service** that manages users and issues **JSON Web Tokens (JWTs)** after successful login.
 - A **URL Shortener Service** that requires authentication, associates mappings with specific users, and ensures **only the owner can manage their mappings**.
-- A workflow where the shortener service can use the **authentication service itself** to validate tokens and confirm whether a user is logged in.
+- A workflow where the shortener service verifies RS256 JWTs **locally using the authentication service's public key**, without contacting the authentication service for each request.
 
 ---
 
@@ -15,10 +15,14 @@ By the end, you will have:
 A microservice architecture splits backend functionality into **multiple simple services**, each with a defined role, instead of one monolithic service containing everything.
 
 ### What a JWT Is
-A JWT is **information + a signature**:
-- The signature is created using a **private/secret key** known only to a particular entity (here: the authentication service).
-- When the token is presented later, that same entity can verify the signature and confirm it has approved the information before.
-- This supports authentication where the “logged-in” state is effectively carried client-side via the token, matching RESTful principles.
+In this workshop, a JWT contains a **header, payload, and signature**:
+- The authentication service signs with an RSA **private key**.
+- The shortener verifies the signature using the corresponding **public key**.
+- The payload identifies the user through `sub` and includes issuance and
+  expiration timestamps (`iat` and `exp`).
+- Base64url encoding is not encryption: token contents remain readable.
+- A valid token is not a live session check; ownership must still be enforced
+  separately for each protected operation.
 
 ---
 
@@ -27,14 +31,14 @@ A JWT is **information + a signature**:
 ### 1.1 Service Map
 | Service | Core Responsibility | Minimal State (In-Memory Allowed) | Key Constraint |
 | --- | --- | --- | --- |
-| Authentication Service | User database + login + JWT issuance | User table (username, password) | Keep the secret key **only** here |
-| URL Shortener Service | CRUD URL mappings with multi-user ownership | Mapping table (id → value + owner) | Must not possess the auth secret; validate tokens by using the auth service |
+| Authentication Service | User database + login + JWT issuance | User table (username, password hash) | Keep the private signing key **only** here |
+| URL Shortener Service | CRUD URL mappings with multi-user ownership | Mapping table (id → value + owner) | Must not possess the private signing key; verify tokens locally using the public key |
 
 ### 1.2 Data Ownership (Design Reminder)
 | Data | Owned By | Used By | Notes |
 | --- | --- | --- | --- |
 | Users (credentials) | Authentication Service | Authentication Service | Store and update here |
-| JWT secret/private key | Authentication Service | Authentication Service | **Never share** with URL Shortener |
+| JWT private signing key | Authentication Service | Authentication Service | **Never share** with URL Shortener |
 | URL mappings | URL Shortener Service | URL Shortener Service | Must be bound to a user (owner) |
 
 ---
@@ -50,7 +54,7 @@ You must implement the following endpoints and return codes.
 | Path & Method | Parameters | Description | Return Value (HTTP code, Value) |
 | :--- | :--- | :--- | :--- |
 | `/users` `POST` | `username` (unique), `password` | Create a new user and store it in a table | `201` OR `409, "duplicate"` |
-| `/users` `PUT` | `username` (unique), `old-password`, `new-password` | Update password if the old password is correct | `200` OR `403, "forbidden"` |
+| `/users` `PUT` | `username` (unique), `old_password`, `new_password` | Update password if the old password is correct | `200` OR `403, "forbidden"` |
 | `/users/login` `POST` | `username` (unique), `password` | If credentials exist, generate and return a JWT | `200, JWT` OR `403, "forbidden"` |
 
 ---
@@ -70,7 +74,7 @@ You must implement the following endpoints and return codes.
 | Change | Meaning |
 | --- | --- |
 | Inclusion of `403, "forbidden"` return codes | You must incorporate authentication/authorization failure paths |
-| “When to request the JWT” is up to you | Decide at which endpoints/conditions JWT is required |
+| JWT protection in this track | Require a valid token for management routes; keep `GET /<id>` public |
 | Adding extra return codes is allowed | As long as the API stays CRUD-style and still supports at least the listed spec |
 
 ---
@@ -81,12 +85,12 @@ You must implement the following endpoints and return codes.
 | Constraint | Why It Matters |
 | --- | --- |
 | Do not put unnecessary information in JWTs | More information costs more to hash/sign and more to transmit |
-| Keep the secret key secret in the authentication service | Do **not** share it with the URL shortener service |
+| Keep the private signing key only in the authentication service | Do **not** share it with the URL shortener service |
 
 ### 3.2 Implementation Rule: Build the Token Yourself
 You are expected to construct the final JWT yourself by:
 1. Generating the required JSON
-2. Encoding it in Base64
+2. Encoding it in Base64url
 3. Signing it
 
 | Allowed | Not Allowed |
@@ -97,13 +101,25 @@ You are expected to construct the final JWT yourself by:
 
 ## 4. Hands-on Build Plan
 
-This workshop assumes you already have a URL shortener from the earlier session and will extend it.
+This workshop builds on Module 1, but supplies both service skeletons in
+`advanced/auth_service/auth.py` and `advanced/shortener_service/shortener.py`.
+Complete their TODOs without replacing the exercise with the reference solution.
 
-### Step 1: Split Into Two Services
+### Before Running the Services
+1. Implement `ensure_keys_exist()` in `auth_service/auth.py`.
+2. From the `advanced/` directory, run `bash setup_local_keys.sh`.
+   The helper calls your function, protects the private key, and copies only
+   the public key to the shortener. In a fresh workspace, it fails if the
+   key-generation TODO is still unfinished.
+3. Complete the remaining service TODOs before expecting API tests to pass.
+4. Follow the module README for separate service terminals and test execution.
+   Run these commands inside your own JupyterHub participant server.
+
+### Step 1: Inspect the Two Supplied Service Skeletons
 | Task | Deliverable |
 | --- | --- |
-| Create an authentication service | A separate service process with user storage and endpoints |
-| Keep the URL shortener service separate | A separate service process with mapping storage and endpoints |
+| Inspect the authentication skeleton | Identify the user storage, JWT helpers, and endpoint TODOs |
+| Inspect the shortener skeleton | Identify the token-verification, mapping-storage, and ownership TODOs |
 
 **Goal:** Two independently runnable services with clear responsibility boundaries.
 
@@ -130,7 +146,7 @@ You must define what information you include (keeping it minimal), then construc
 | What identity info is included | Keep it minimal; include only what’s needed to identify/authenticate the user |
 | What the shortener needs to know | Enough to associate requests with a specific user after validation |
 
-> Reminder: The signature must be verifiable by the authentication service using its secret key.
+> Reminder: The authentication service signs with its private key; the shortener verifies with the corresponding public key.
 
 ---
 
@@ -148,21 +164,25 @@ Modify the URL shortener so that:
 | Update mapping (`PUT /:id`) | Only the owner can update; else `403, "forbidden"` |
 | Delete mapping (`DELETE /:id`) | Only the owner can delete; else `403, "forbidden"` |
 
-> The spec requires the existence of `403` cases; the exact enforcement points and JWT request pattern are part of your design.
+> Require a valid JWT for listing, creating, updating, and deleting mappings. Public `GET /<id>` resolution does not require a token. Accept `Authorization: Bearer <token>` or `x-access-token: <token>`, as described in the starter code.
 
 ---
 
-### Step 5: Token Validation Flow (Service-to-Service)
-Users present the JWT to the URL shortener service. The shortener service then uses the **authentication service** to:
-- Validate the token
-- Determine whether the user is logged in (and which user they are)
+### Step 5: Local Token Validation
+Users present the JWT to the URL shortener service. The shortener service:
+- Verifies the RS256 signature locally using its copy of the public key.
+- Checks expiration and the subject (`sub`) claim.
+- Uses the verified subject as the identity for ownership checks.
+
+This does not query live login state or the authentication service's user
+dictionary. Changing a password does not by itself revoke an existing token.
 
 #### Flow Summary
 | Step | Actor | Action |
 | --- | --- | --- |
 | 1 | Client | Logs in to authentication service and receives JWT |
 | 2 | Client | Presents JWT to URL shortener service |
-| 3 | URL Shortener Service | Uses authentication service to validate token and retrieve user identity/session validity |
+| 3 | URL Shortener Service | Verifies the signature, expiration, and subject locally using the public key |
 | 4 | URL Shortener Service | Applies authorization rules (ownership) before CRUD operations |
 
 ---
@@ -230,7 +250,7 @@ These are design questions aligned with the workshop goals around organizing and
 | --- | --- |
 | Using external code is allowed with attribution | Provide a source in README/comments and explain how it works |
 | Unattributed copying is not acceptable | Must show understanding; otherwise considered plagiarism |
-| Avoid “JWT done-for-you” libraries | You must construct the token yourself via JSON → Base64 → signing |
+| Avoid “JWT done-for-you” libraries | You must construct the token yourself via JSON → Base64url → signing |
 
 ---
 ### 9. References

@@ -1,7 +1,11 @@
 # Workshop: RESTful Microservices Architecture with JWT (Multi-User URL Shortener)
 
 
-Compared with restful api, the system is now split into two services:
+This beginner track supplies complete implementations in
+`auth_service/auth.py` and `shortener_service/shortener.py`. The code snippets
+below explain those files; you do not need to reconstruct them manually.
+
+Compared with Module 1's REST API, the system is now split into two services:
 
 1. an **authentication service**
 2. a **URL shortener service**
@@ -49,7 +53,7 @@ For this tutorial, both services may still keep their state in memory.
 Install the required libraries with:
 
 ~~~bash
-pip install flask cryptography
+python -m pip install flask cryptography requests
 ~~~
 
 ---
@@ -170,7 +174,9 @@ we store:
 users_dict["alice"] = "<sha256 hash>"
 ~~~
 
-This is a basic but much safer approach for the assignment.
+This avoids storing plaintext, but unsalted SHA-256 is not suitable for
+production password storage. Production systems should use a dedicated password
+hashing scheme such as Argon2id, with unique salts.
 
 ---
 
@@ -1159,25 +1165,59 @@ keys/public_key.pem
 
 # 6. Running the system
 
-## Step 1: start the authentication service
+Run all commands inside your own JupyterHub participant server.
+Use separate terminals for authentication, the shortener, and requests/tests.
+In each terminal, start from the selected `beginner/` directory.
+
+## Step 1: prepare local keys
 
 ~~~bash
+bash setup_local_keys.sh
+~~~
+
+The helper creates the key directories, generates a key pair if either key is
+missing, restricts private-key permissions, and copies only the public key to
+the shortener. When both authentication key files exist, they are reused.
+Never share or commit the private key.
+
+## Step 2: start the authentication service
+
+In the first terminal:
+
+~~~bash
+cd auth_service
 python auth.py
 ~~~
 
-This will also generate the key pair if the files do not exist yet.
+## Step 3: start the shortener service
 
-## Step 2: start the shortener service
+In the second terminal:
 
 ~~~bash
+cd shortener_service
 python shortener.py
 ~~~
 
-The shortener expects the public key at:
+Both development servers bind to participant-local `127.0.0.1`.
+Leave them running while using the third terminal for requests or tests.
 
-~~~text
-keys/public_key.pem
+## Step 4: run the supplied tests
+
+In the third terminal, from the selected `beginner/` directory:
+
+~~~bash
+cd ../tests
+python -m unittest -v
 ~~~
+
+Run from `tests/` because the main suite reads `read_from.csv` relative to
+the current directory. The tests require `requests` and create accounts and
+mappings against the running services. They attempt mapping cleanup, but test
+accounts remain until the authentication service restarts.
+
+Passing tests demonstrates the covered scenarios, not comprehensive security.
+In particular, the ownership test does not check whether a second user can
+take ownership by submitting the same URL. Use a disposable workshop session.
 
 ---
 
@@ -1206,6 +1246,10 @@ Example response:
   "token": "YOUR_JWT_TOKEN"
 }
 ~~~
+
+Replace `YOUR_JWT_TOKEN` in the following commands with the token returned
+by login. Replace `abc123` with the actual ID returned when you create a mapping.
+Tokens expire; log in again if a previously working token is rejected.
 
 ## 7.3 Create a shortened URL
 
@@ -1245,7 +1289,9 @@ curl -X DELETE http://127.0.0.1:5000/abc123 \
 curl -i http://127.0.0.1:5000/abc123
 ~~~
 
-If the ID exists, the service returns `301`.
+If the ID exists, the service returns `301` with a `Location` header.
+Run this resolution check before deleting the mapping, or create another mapping
+first. If you already completed section 7.6 for this ID, expect `404`.
 
 ---
 
@@ -1278,7 +1324,22 @@ This implementation stays close to the tutorial 1 style while introducing the co
 - public key verification
 - multi-user URL management
 
-Because the code is still kept in memory and uses simple Flask routes, it is also a good base for the next assignment, where persistence and containerization will be added.
+Application data is stored in memory: restarting authentication clears users,
+and restarting the shortener clears mappings. Local JWT verification does not
+query current user records, so a password change or authentication restart does
+not by itself revoke an issued token.
+
+Successful `DELETE /` deliberately returns `404` under this assignment's
+contract; this is not conventional REST success semantics.
+
+The supplied implementation has a known ownership limitation: submitting the
+same URL as another user can reassign the existing mapping's owner. Its
+list/update/delete checks do not prevent that creation-path issue.
+
+This is an educational implementation, not a production authentication system.
+Unsalted SHA-256 password hashing and Flask's debug development servers require
+replacement before production use. Persistence and containerization are topics
+for the following module.
 
 ---
 ### 10. References

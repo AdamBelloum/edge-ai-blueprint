@@ -1,3 +1,10 @@
+# Module 2 advanced shortener exercise: complete the existing placeholders.
+# This skeleton is not yet a working URL-shortener service.
+# Prepare keys with ../setup_local_keys.sh; run from shortener_service/.
+# Direct execution uses localhost:5000 with workshop-only Flask debug mode.
+# Mappings are in memory and disappear on restart.
+# Management routes require authentication; GET /<id> resolves publicly.
+
 from flask import Flask, jsonify, request, redirect
 import hashlib
 import json
@@ -18,6 +25,7 @@ shared_dict = {}
 PUBLIC_KEY_FILE = "keys/public_key.pem"
 
 
+# The requested prefix check is not comprehensive URL validation.
 def is_it_an_url(string):
     """
     TODO:
@@ -31,6 +39,7 @@ def is_it_an_url(string):
     pass
 
 
+# MD5 provides a compact identifier here, not a security guarantee.
 def generate_short_id(url):
     """
     TODO:
@@ -60,6 +69,8 @@ def base64url_decode(data):
     pass
 
 
+# Load only the copied public key, never the authentication private key.
+# The key path is relative to the working directory.
 def load_public_key():
     """
     TODO:
@@ -99,6 +110,10 @@ def get_token_from_request():
     pass
 
 
+# Verify locally rather than calling the authentication service per request.
+# The reference fixes verification to RSA PKCS#1 v1.5 with SHA-256.
+# It does not explicitly validate header, issuer, audience, or subject type.
+# This educational verifier has no live user lookup or revocation check.
 def verify_jwt(token):
     """
     TODO:
@@ -208,6 +223,7 @@ def read_item(id):
     pass
 
 
+# Returning 404 after deletion follows the exercise contract, not normal REST semantics.
 @app.route("/", methods=["DELETE"])
 def delete_root():
     """
@@ -262,6 +278,9 @@ def delete_item(id):
     pass
 
 
+# Different-URL collision handling does not guarantee ownership isolation.
+# The reference can reassign ownership when another user submits the same URL.
+# This is a known limitation, not a secure multi-user design.
 @app.route("/", methods=["POST"])
 def create_root():
     """
@@ -312,6 +331,7 @@ def create_root():
     pass
 
 
+# Updating the target URL retains the existing short ID.
 @app.route("/<id>", methods=["PUT"])
 def update_item(id):
     """
