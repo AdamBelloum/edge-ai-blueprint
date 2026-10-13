@@ -4,7 +4,7 @@ This guide provides a complete walkthrough for building a simple RESTful URL sho
 
 ---
 
-## 1. Understanding thea Problem & Architecture
+## 1. Understanding the Problem & Architecture
 
 ### The Problem
 
@@ -27,10 +27,10 @@ We use different HTTP methods to perform different actions:
 | HTTP method | Endpoint | Description                               |
 | ------------- | ---------- | ------------------------------------------- |
 | GET         | /        | Return all stored short IDs               |
-| GET         | /        | Return the URL stored for a specific ID   |
+| GET         | /<id>        | Return the URL stored for a specific ID   |
 | POST        | /        | Create a new short ID for a submitted URL |
-| PUT         | /        | Update the URL behind an existing ID      |
-| DELETE      | /        | Delete one specific ID/URL mapping        |
+| PUT         | /<id>        | Update the URL behind an existing ID      |
+| DELETE      | /<id>        | Delete one specific ID/URL mapping        |
 | DELETE      | /        | Delete all stored mappings                |
 
 ---
@@ -168,7 +168,7 @@ Example response:
 }
 ```
 
-### Step 4: GET / — Return the Stored URL
+### Step 4: GET /<id> — Return the Stored URL
 
 Return the URL for a given short ID.
 
@@ -211,7 +211,7 @@ def delete_root():
 
 Note: Returning `404` here matches the assignment/test expectations, even though it's unusual for real APIs.
 
-### Step 6: DELETE / — Delete One Entry
+### Step 6: DELETE /<id> — Delete One Entry
 
 Delete a specific mapping.
 
@@ -257,7 +257,7 @@ curl -X POST http://127.0.0.1:5000/ \
   -d '{"value":"https://google.com"}'
 ```
 
-### Step 8: PUT / — Update an Existing URL
+### Step 8: PUT /<id> — Update an Existing URL
 
 Update the stored URL behind an existing ID. Expected input:
 
@@ -381,13 +381,36 @@ if __name__ == "__main__":
 
 ## 5. How to Run
 
-Save the code as `app.py`, then start the server:
+The beginner track supplies a complete `app.py`; you do not need to reconstruct
+it from the examples above. Run these commands inside your own JupyterHub
+participant server.
+
+In the first JupyterHub terminal, start the supplied application:
 
 ```bash
-python3 app.py
+cd /home/jovyan/Cloud-Computing-SOA/Module-1/beginner
+python app.py
 ```
 
-The server will run at: `http://127.0.0.1:5000`
+Leave the server running on participant-local `127.0.0.1:5000`.
+Your laptop's localhost is different: use a second JupyterHub terminal for
+the curl examples and tests.
+
+In the second terminal, run the supplied API integration tests:
+
+```bash
+cd /home/jovyan/Cloud-Computing-SOA/Module-1/tests
+python -m unittest -v test_api
+```
+
+Run from `tests/` because the suite opens `read_from.csv` relative to the
+current directory. Flask is required by the application and `requests` by
+the test client.
+
+**Warning:** The tests create mappings and clear all mappings during cleanup.
+Use disposable data. Restarting the application also clears its in-memory
+store. Passing tests demonstrates the covered scenarios, not comprehensive
+input validation or production readiness.
 
 ---
 
@@ -409,14 +432,26 @@ curl http://127.0.0.1:5000/
 
 Get one URL by ID
 
+The POST response contains an `id`. Copy its value into the variable below,
+replacing `PASTE_RETURNED_ID_HERE`. Run this in the same second JupyterHub
+terminal used for the requests:
+
 ```bash
-curl http://127.0.0.1:5000/1a
+id='PASTE_RETURNED_ID_HERE'
+```
+
+Use that variable for GET, PUT, and DELETE. Do not assume the ID is `1a`.
+If you ran the automated tests, create a new mapping first because the tests
+clear the store.
+
+```bash
+curl "http://127.0.0.1:5000/$id"
 ```
 
 Update one URL
 
 ```bash
-curl -X PUT http://127.0.0.1:5000/1a \
+curl -X PUT "http://127.0.0.1:5000/$id" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://openai.com"}'
 ```
@@ -424,7 +459,7 @@ curl -X PUT http://127.0.0.1:5000/1a \
 Delete one URL
 
 ```bash
-curl -X DELETE http://127.0.0.1:5000/1a
+curl -X DELETE "http://127.0.0.1:5000/$id"
 ```
 
 Delete all mappings
@@ -447,7 +482,7 @@ curl -X DELETE http://127.0.0.1:5000/
 
 ---
 
-## 6. References
+## 8. References
 
 1. [Flask quickstart](https://flask.palletsprojects.com/en/stable/quickstart/)
 2. [Flask Cheat Sheet](https://realpython.com/flask-blueprint/)

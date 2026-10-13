@@ -1,3 +1,13 @@
+"""Beginner authentication service for Module 2.
+
+Run from auth_service/ after running ../setup_local_keys.sh.
+Listens on participant-local 127.0.0.1:5001 when executed directly.
+Users are process-local and disappear on restart; RSA keys persist on disk.
+
+This educational implementation manually constructs RS256 JWTs. Unsalted
+SHA-256 password hashing and Flask debug mode are not production-safe.
+Only the public key should be copied to the shortener service."""
+
 from flask import Flask, jsonify, request
 import os
 import json
@@ -19,14 +29,24 @@ PUBLIC_KEY_FILE = "keys/public_key.pem"
 
 
 def base64url_encode(data):
+    """Encode JWT bytes with the URL-safe alphabet and no trailing padding."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
 
 
 def hash_password(password):
+    """Return an unsalted SHA-256 password hash for this exercise.
+
+    Production authentication requires a dedicated password hashing scheme,
+    such as Argon2id, rather than this fast, unsalted hash."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 
 def ensure_keys_exist():
+    """Reuse both key files, or generate and write a new RSA key pair.
+
+    Paths are relative to the current working directory. The keys directory
+    must already exist; setup_local_keys.sh prepares it and protects the
+    private-key file. If either key is missing, both files are replaced."""
     if os.path.exists(PRIVATE_KEY_FILE) and os.path.exists(PUBLIC_KEY_FILE):
         return
 
@@ -55,11 +75,17 @@ def ensure_keys_exist():
 
 
 def load_private_key():
+    """Load the unencrypted signing key from the service-local keys directory."""
     with open(PRIVATE_KEY_FILE, "rb") as f:
         return serialization.load_pem_private_key(f.read(), password=None)
 
 
 def generate_jwt(username):
+    """Sign a manually assembled JWT identifying username for one hour.
+
+    Base64url encoding does not encrypt the header or payload. RS256 signs
+    their encoded bytes using RSA PKCS#1 v1.5 and SHA-256. No server-side
+    session or token-revocation record is created."""
     header = {
         "alg": "RS256",
         "typ": "JWT"
@@ -89,6 +115,10 @@ def generate_jwt(username):
 
 @app.route("/users", methods=["POST"])
 def create_user():
+    """Register a username and password supplied in a JSON body.
+
+    Return 400 for missing input, 409 for an existing username, or 201
+    after storing the password hash in the in-memory dictionary."""
     data = request.get_json(silent=True)
 
     if not data:
@@ -109,6 +139,11 @@ def create_user():
 
 @app.route("/users", methods=["PUT"])
 def update_user_password():
+    """Replace a password after checking old_password against its stored hash.
+
+    The JSON fields are username, old_password, and new_password.
+    Return 400 for missing input, 403 for failed credential checks, or 200
+    on success. Previously issued JWTs are not revoked by this operation."""
     data = request.get_json(silent=True)
 
     if not data:
@@ -133,6 +168,10 @@ def update_user_password():
 
 @app.route("/users/login", methods=["POST"])
 def login_user():
+    """Check JSON credentials and return a signed JWT on success.
+
+    Return 400 for missing input, 403 for failed credentials, or 200 with
+    a token. Login issues a token rather than creating a live session."""
     data = request.get_json(silent=True)
 
     if not data:

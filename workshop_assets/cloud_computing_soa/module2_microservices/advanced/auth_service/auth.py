@@ -1,3 +1,10 @@
+# Module 2 advanced authentication exercise: complete the existing placeholders.
+# This skeleton is not yet a working authentication service.
+# Prepare keys with ../setup_local_keys.sh; run from auth_service/.
+# Direct execution uses localhost:5001 with workshop-only Flask debug mode.
+# User records are in memory and disappear on restart.
+# Keep the private signing key here; share only the public key.
+
 from flask import Flask, jsonify, request
 import os
 import json
@@ -18,6 +25,7 @@ PRIVATE_KEY_FILE = "keys/private_key.pem"
 PUBLIC_KEY_FILE = "keys/public_key.pem"
 
 
+# Base64url encoding is not encryption; JWT claims remain readable.
 def base64url_encode(data):
     """
     TODO:
@@ -32,6 +40,8 @@ def base64url_encode(data):
     pass
 
 
+# SHA-256 is an exercise simplification, not safe production password storage.
+# Production systems require a dedicated password hash such as Argon2id.
 def hash_password(password):
     """
     TODO:
@@ -45,6 +55,8 @@ def hash_password(password):
     pass
 
 
+# Key paths are relative to the working directory; prepare directories first.
+# Replacing the key pair requires refreshing the shortener's public key.
 def ensure_keys_exist():
     """
     TODO:
@@ -91,6 +103,8 @@ def load_private_key():
     pass
 
 
+# RS256 uses RSA PKCS#1 v1.5 with SHA-256.
+# The signature authenticates the encoded header and payload, not their secrecy.
 def generate_jwt(username):
     """
     TODO:
@@ -166,6 +180,7 @@ def create_user():
     pass
 
 
+# A password change alone does not revoke previously issued JWTs.
 @app.route("/users", methods=["PUT"])
 def update_user_password():
     """

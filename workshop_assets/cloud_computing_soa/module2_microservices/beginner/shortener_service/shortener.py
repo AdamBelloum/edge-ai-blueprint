@@ -1,3 +1,13 @@
+"""Beginner multi-user URL shortener for Module 2.
+
+Run from shortener_service/ after running ../setup_local_keys.sh.
+Listens on participant-local 127.0.0.1:5000 when executed directly.
+Mappings are process-local and disappear on restart.
+
+Management routes verify tokens locally using the copied public key;
+GET /<id> redirects publicly. No live authentication-service lookup occurs.
+This is teaching code, not a production-ready JWT verifier or web server."""
+
 from flask import Flask, jsonify, request, redirect
 import hashlib
 import json
@@ -19,16 +29,24 @@ PUBLIC_KEY_FILE = "keys/public_key.pem"
 
 
 def is_it_an_url(string):
+    """Check only that a string starts with http:// or https://.
+
+    This is a lightweight exercise check, not comprehensive URL validation."""
     return isinstance(string, str) and (
         string.startswith("http://") or string.startswith("https://")
     )
 
 
 def generate_short_id(url):
+    """Derive a deterministic six-character ID from the URL.
+
+    MD5 is used for a compact identifier, not as a security mechanism.
+    Different URLs can collide; create_root handles that case separately."""
     return hashlib.md5(url.encode()).hexdigest()[:6]
 
 
 def base64url_decode(data):
+    """Restore missing JWT padding and decode a Base64url component to bytes."""
     padding_needed = 4 - (len(data) % 4)
     if padding_needed != 4:
         data += "=" * padding_needed
@@ -36,11 +54,18 @@ def base64url_decode(data):
 
 
 def load_public_key():
+    """Load the authentication service's copied public key.
+
+    The relative path requires running from shortener_service/.
+    The private signing key must never be copied here."""
     with open(PUBLIC_KEY_FILE, "rb") as f:
         return serialization.load_pem_public_key(f.read())
 
 
 def get_token_from_request():
+    """Read a Bearer token, falling back to the x-access-token header.
+
+    Return None when neither supported header supplies a token."""
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header.split(" ", 1)[1].strip()
@@ -53,6 +78,15 @@ def get_token_from_request():
 
 
 def verify_jwt(token):
+    """Verify the signature and return the payload subject, or None on failure.
+
+    Verification always uses RSA PKCS#1 v1.5 with SHA-256. This example does
+    not parse or validate the JWT header, issuer, audience, or subject type.
+    It requires exp and sub, and rejects exp only when current time exceeds it.
+    Any verification or key-loading exception becomes an authentication failure.
+
+    There is no live user lookup or revocation check: changing a password
+    does not invalidate a token while its signature and expiry remain accepted."""
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -87,6 +121,7 @@ def verify_jwt(token):
 
 
 def get_current_user():
+    """Extract and verify the request token; return its subject or None."""
     token = get_token_from_request()
     if not token:
         return None
@@ -95,6 +130,7 @@ def get_current_user():
 
 @app.route("/", methods=["GET"])
 def read_root():
+    """List only the authenticated user's mapping IDs; reject missing/invalid tokens."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403
@@ -106,6 +142,9 @@ def read_root():
 
 @app.route("/<id>", methods=["GET"])
 def read_item(id):
+    """Publicly redirect an existing ID with HTTP 301, or return 404.
+
+    Resolution does not require a JWT or an ownership check."""
     value = shared_dict.get(id)
 
     if value is not None:
@@ -117,6 +156,10 @@ def read_item(id):
 
 @app.route("/", methods=["DELETE"])
 def delete_root():
+    """Delete only mappings owned by the authenticated user.
+
+    Successful bulk deletion returns 404 under the existing assignment
+    contract; this is not conventional REST success semantics."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403
@@ -131,6 +174,9 @@ def delete_root():
 
 @app.route("/<id>", methods=["DELETE"])
 def delete_item(id):
+    """Delete an owned mapping with 204.
+
+    Return 403 for authentication/ownership failure or 404 for an unknown ID."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403
@@ -147,6 +193,12 @@ def delete_item(id):
 
 @app.route("/", methods=["POST"])
 def create_root():
+    """Create a mapping from JSON value, falling back to url.
+
+    Require authentication and return the generated ID with 201.
+    Collision handling distinguishes different URLs, not different owners:
+    submitting an existing URL can overwrite its owner. This known teaching
+    implementation limitation is documented here, not corrected."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403
@@ -182,6 +234,11 @@ def create_root():
 
 @app.route("/<id>", methods=["PUT"])
 def update_item(id):
+    """Update an owned mapping's URL while retaining its existing ID.
+
+    Return 403 for authentication/ownership failure, 404 for an unknown ID,
+    400 for invalid input, or 200 on success. JSON parsing is forced even
+    without the usual content-type header."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403

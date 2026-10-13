@@ -1,3 +1,11 @@
+# Module 2 reference URL shortener; educational, not production-ready.
+# Run ../setup_local_keys.sh first, then start Python from shortener_service/.
+# Direct execution uses localhost:5000 with workshop-only Flask debug mode.
+# Mappings are process-local and disappear on restart.
+# Management routes use locally verified JWTs; redirects are public.
+# Only the authentication public key belongs in this service.
+# Known limitation: submitting another user's identical URL can take ownership.
+
 from flask import Flask, jsonify, request, redirect
 import hashlib
 import json
@@ -18,16 +26,19 @@ shared_dict = {}
 PUBLIC_KEY_FILE = "keys/public_key.pem"
 
 
+# Check only type and HTTP(S) prefix, not full URL syntax or safety.
 def is_it_an_url(string):
     return isinstance(string, str) and (
         string.startswith("http://") or string.startswith("https://")
     )
 
 
+# Use six MD5 hexadecimal characters as a compact, non-security identifier.
 def generate_short_id(url):
     return hashlib.md5(url.encode()).hexdigest()[:6]
 
 
+# Restore omitted padding before decoding a JWT segment.
 def base64url_decode(data):
     padding_needed = 4 - (len(data) % 4)
     if padding_needed != 4:
@@ -35,11 +46,13 @@ def base64url_decode(data):
     return base64.urlsafe_b64decode(data.encode("utf-8"))
 
 
+# Read the copied PEM verification key relative to the working directory.
 def load_public_key():
     with open(PUBLIC_KEY_FILE, "rb") as f:
         return serialization.load_pem_public_key(f.read())
 
 
+# Prefer Authorization: Bearer; otherwise accept x-access-token.
 def get_token_from_request():
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -52,6 +65,11 @@ def get_token_from_request():
     return None
 
 
+# Verify the signature locally with fixed RSA PKCS#1 v1.5/SHA-256.
+# Require exp and sub, but do not validate header, issuer, audience,
+# issued-at time, or subject type. No account lookup or revocation occurs.
+# The expiration comparison accepts the exact expiration second.
+# Failures, including key-loading errors, are returned as no valid user.
 def verify_jwt(token):
     try:
         parts = token.split(".")
@@ -86,6 +104,7 @@ def verify_jwt(token):
         return None
 
 
+# Extract and verify a token; return its subject or None on failure.
 def get_current_user():
     token = get_token_from_request()
     if not token:
@@ -93,6 +112,7 @@ def get_current_user():
     return verify_jwt(token)
 
 
+# List only mapping IDs whose recorded owner matches the token subject.
 @app.route("/", methods=["GET"])
 def read_root():
     username = get_current_user()
@@ -104,6 +124,7 @@ def read_root():
     return jsonify({"keys": user_keys}), 200
 
 
+# Redirect publicly with HTTP 301; ownership is not checked here.
 @app.route("/<id>", methods=["GET"])
 def read_item(id):
     value = shared_dict.get(id)
@@ -115,6 +136,8 @@ def read_item(id):
         return jsonify({"detail": "Key not found in shared dictionary"}), 404
 
 
+# Delete only the current user's mappings.
+# HTTP 404 after deletion is the exercise contract, not normal REST success.
 @app.route("/", methods=["DELETE"])
 def delete_root():
     username = get_current_user()
@@ -129,6 +152,7 @@ def delete_root():
     return jsonify({"detail": "All your shortened URLs have been deleted"}), 404
 
 
+# Require ownership before deletion; return an empty HTTP 204 on success.
 @app.route("/<id>", methods=["DELETE"])
 def delete_item(id):
     username = get_current_user()
@@ -145,6 +169,10 @@ def delete_item(id):
     return "", 204
 
 
+# Accept value or, as a fallback, url in the request body.
+# Rehash when an occupied ID points to a different URL.
+# An identical URL bypasses that loop and overwrites the recorded owner.
+# This collision strategy therefore does not ensure ownership isolation.
 @app.route("/", methods=["POST"])
 def create_root():
     username = get_current_user()
@@ -180,6 +208,7 @@ def create_root():
     return jsonify({"id": short_id}), 201
 
 
+# Require ownership and a url field; retain the existing ID after updating.
 @app.route("/<id>", methods=["PUT"])
 def update_item(id):
     username = get_current_user()
