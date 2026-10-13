@@ -4,6 +4,9 @@ metadata:
   name: shortener
   namespace: websvc
 spec:
+  # Teaching limitation: shared JSON storage has no concurrent-write protection.
+  # One replica is the baseline; multiple replicas demonstrate scheduling,
+  # not safe concurrent persistence or production readiness.
   replicas: 1
   selector:
     matchLabels:
