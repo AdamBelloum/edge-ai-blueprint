@@ -1,367 +1,278 @@
-# Infrastructure deployment
+# Federated-learning application
 
-This guide is for platform administrators who deploy and maintain the DIGITAfrica Edge-AI infrastructure. It covers Ansible, Tier-0, Tier-1, k3s, JupyterHub, networking, storage, TLS, and authentication.
+## Current workshop workflow versus legacy experiment examples
 
-For running a Flower-based experiment after the platform is available, see [Federated-learning application](federated-learning-application.md). For acceptance checks and troubleshooting, see [Operations and validation](operations-and-validation.md).
+For organiser-controlled FL workshops, use `scripts/workshop/organizer-main.sh`: provision participant identities/groups, select **Workshops → Federated Learning**, prepare the intended track, then issue and distribute credentials. Preparation requires a complete cohort and includes Flower server startup. Participants start their clients using the selected tutorial; completed training rounds require separate execution evidence.
 
-## Scope
+The organiser also provides Flower server management and separate advanced reference-solution release. See the [workshop organiser guide](workshop-organiser.md) for the supported actions and reset scopes.
 
-The infrastructure layer provides:
+**Legacy reference scope:** the direct server commands, `inventories/prod/hosts.ini`, and fixed `fl-client-silo-a` / `fl-client-silo-b` workspaces below describe an older two-Silo experiment arrangement. They have not been revalidated in this documentation sprint and must not be assumed to describe the current inventory-derived participant/JupyterHub workflow or Tier-2 placement. Inspect the selected deployment and application before using them. The experiment-contract, data-governance, and reproducibility guidance remains relevant independently of topology.
 
-- Ansible-managed deployment to Tier-0 and/or Tier-1 nodes;
-- k3s server and agent lifecycle for Tier-1;
-- JupyterHub deployment through Helm;
-- Traefik ingress or NodePort service exposure;
-- JupyterHub user storage and example-notebook seeding;
-- TLS configuration; and
-- optional Keycloak/OIDC authentication.
+This guide is for researchers and application developers using the DIGITAfrica Edge-AI Blueprint to prepare and run federated-learning experiments.
 
-The Tier-1 playbook also prepares the federated-learning application environment, but infrastructure deployment does not automatically execute an experiment.
+It describes the application boundary: a Flower server, independently operated Silo workspaces, experiment inputs, execution evidence, and reproducibility. It does not describe how to install k3s, JupyterHub, TLS, or OIDC; see [Infrastructure deployment](infrastructure-deployment.md) for platform administration.
 
----
+## Legacy experiment scope and automation boundary
 
-## Prerequisites
+The Tier-1 Ansible playbook prepares an execution environment for a federated-learning application:
 
-### Control machine
+- it prepares the server-side application source on the Tier-1 control-plane node;
+- it deploys independent Silo A and Silo B Kubernetes workspaces on worker nodes; and
+- each Silo bootstrap installs the required Python packages, installs Git, and checks out the configured tutorial/application source into `/home/jovyan/digitafrica`.
 
-Install Ansible and the required collections:
+The deployment does **not** automatically:
 
-```bash
-pip install ansible
-ansible-galaxy collection install -r requirements.yml
-```
+- launch a Flower server;
+- launch Flower clients;
+- distribute private datasets;
+- execute aggregation rounds;
+- store experiment results in an experiment registry; or
+- stop workloads after an experiment completes.
 
-The control machine must be able to connect by SSH to all target nodes. Use SSH keys where possible. If passwords or sensitive connection values are unavoidable, place them in Ansible Vault or an untracked secret variables file rather than a committed inventory.
-
-### Target nodes
-
-The roles install their own required operating-system and Kubernetes components. Before deployment, ensure that:
-
-- each node has a supported Linux installation and network access suitable for package and image downloads;
-- the control machine can reach every target through SSH;
-- Tier-1 server and agent nodes can communicate on the network required by k3s;
-- the public IP address or DNS name is known if ingress will be exposed externally; and
-- persistent-storage requirements are understood before deploying user workloads.
+These are intentional application-level responsibilities. They must be performed under an experiment-specific workflow and recorded with the resulting evidence.
 
 ---
 
-## Inventory
+## Conceptual model
 
-Configure `inventories/prod/hosts.ini` for the topology being deployed.
+Federated learning trains a shared model without centrally pooling the underlying Silo datasets.
 
-```ini
-### TIER 0 NODES ###
-; [tier0]
-; digitafrica-edge-node0 ansible_host=10.64.45.176
+1. The Flower server defines the experiment and aggregation strategy.
+2. Each Silo trains locally against data that remains under its own control.
+3. Each Silo sends model updates and permitted metrics to the server.
+4. The server aggregates the updates and coordinates subsequent rounds.
+5. The experiment produces an agreed set of model artefacts, metrics, logs, and provenance records.
 
-### TIER 1 NODES ###
-[tier1_server]
-digitafrica-edge-node1 ansible_host=10.64.45.176
-
-[tier1_agents]
-digitafrica-edge-node2 ansible_host=10.64.45.179
-
-[all:vars]
-ansible_user=ubuntu
-ansible_become=true
-# ansible_ssh_common_args='-o ProxyJump=proxy@bastion.example.org'
-```
-
-Only populate the groups relevant to the deployment:
-
-- for Tier-0 only, leave `tier1_server` and `tier1_agents` empty or commented out;
-- for Tier-1 only, no Tier-0 hosts are required;
-- Tier-1 requires exactly one server host and may have one or more agents.
-
-The inventory aliases, node hostnames, and Tier-1 configuration must be consistent. A k3s node may display its operating-system hostname rather than its Ansible inventory alias.
+The technical deployment does not by itself establish legal, ethical, privacy, or governance permission to use any dataset. Those requirements remain the responsibility of the experiment owner and participating organisations.
 
 ---
 
-## Deployment modes
+## Application components
 
-### Tier-0
+| Component | Current role | Managed by |
+|---|---|---|
+| Flower server source | Server-side application source prepared on the Tier-1 control-plane node | Tier-1 playbook prepares source; researcher starts the process |
+| Silo A workspace | Kubernetes workspace for one independent client-side execution context | Tier-1 playbook deploys it; researcher runs the client workflow |
+| Silo B workspace | Kubernetes workspace for a second independent client-side execution context | Tier-1 playbook deploys it; researcher runs the client workflow |
+| Tutorial/application repository | Source material checked out in each Silo workspace | Silo bootstrap obtains it at container startup |
+| JupyterHub | User-facing notebook environment on the same platform | Infrastructure administrator |
 
-`tier0.k3s_mode` determines how a Tier-0 node is used.
-
-| `tier0.k3s_mode` | Result |
-|---|---|
-| `none` | Docker-based Jupyter notebook, cAdvisor, and Node Exporter |
-| `single` | Single-node k3s cluster, JupyterHub through Helm, and optional model cache |
-| `agent` | k3s agent joining the Tier-1 cluster |
-
-### Tier-1
-
-Tier-1 is a multi-node k3s deployment:
-
-- one node in `[tier1_server]` provides the k3s server/control plane;
-- nodes in `[tier1_agents]` join as k3s agents;
-- application resources are deployed into `tier1.digitafrica_namespace`, normally `digitafrica`.
-
-The principal Tier-1 infrastructure components are:
-
-- k3s;
-- Traefik, when ingress mode is selected;
-- JupyterHub through Helm;
-- Kubernetes storage for JupyterHub user homes;
-- the JupyterHub TLS secret and ingress; and
-- optional OIDC integration.
+The Silo Deployments are separate Kubernetes workloads. They are not automatically the same thing as a user’s JupyterHub notebook server, and the current deployment does not automatically expose an interactive terminal for them through JupyterHub.
 
 ---
 
-## Configure variables
+## Before running an experiment
 
-The main configuration is in:
+### 1. Confirm platform readiness
+
+Use [Operations and validation](operations-and-validation.md) to confirm:
+
+- the k3s cluster is healthy;
+- Silo A and Silo B Deployments are rolled out;
+- each Silo completed its startup bootstrap; and
+- the expected source revision is present in each Silo.
+
+A pod being `Running` is not, on its own, sufficient evidence: a container can be Kubernetes-ready while its startup script is still installing dependencies. The workspace bootstrap check verifies the source directory and Git revision explicitly.
+
+### 2. Identify the application source revision
+
+Record the exact source revision used by every role before starting an experiment.
+
+For the Silo workspaces, the application source is located at:
 
 ```text
-inventories/prod/group_vars/all.yml
+/home/jovyan/digitafrica
 ```
 
-Set environment-specific values before deployment, in particular:
-
-- public JupyterHub URL;
-- Tier-0 and Tier-1 exposure modes;
-- Tier-1 server hostname and cluster network ranges;
-- storage class;
-- TLS mode and associated certificate or ACME settings; and
-- OIDC settings when external authentication is enabled.
-
-### Tier-0 reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `tier0.k3s_mode` | `none` | `none` = Docker only; `single` = standalone k3s; `agent` = join Tier-1 |
-| `tier0.expose_mode` | `ingress` | `ingress` = Traefik; `nodeport` = raw ports |
-| `tier0.notebook_port` | `8888` | Jupyter container port |
-| `tier0.jupyter_nodeport` | `30888` | Jupyter NodePort when using `nodeport` |
-| `tier0.modelcache_nodeport` | `30080` | Model-cache NodePort when using `nodeport` |
-| `tier0.enable_modelcache` | `false` | Deploy the static model-cache service |
-| `tier0.notebook_user` | `digitafrica` | Local Linux user owning notebook files |
-| `tier0.notebook_dir` | `/opt/digitafrica/notebooks` | Directory mounted into the notebook container |
-| `tier0.notebook_password` | `digitafrica` | Plain-text password; configure an appropriate hash as well |
-| `tier0.k3s_version` | `v1.30.4+k3s1` | k3s version for `k3s_mode=single` |
-| `tier0.k3s_agent_server_host` | — | Tier-1 server hostname for `k3s_mode=agent` |
-| `tier0.monitoring.node_exporter_port` | `9100` | Node Exporter port |
-| `tier0.monitoring.cadvisor_port` | `8080` | cAdvisor port |
-
-### Tier-1 reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `tier1.expose_mode` | `ingress` | `ingress` = Traefik on ports 80/443; `nodeport` = direct service ports |
-| `tier1.tls_mode` | `selfsigned` | `selfsigned`, `letsencrypt`, `provided`, or `none` |
-| `tier1.tls_cert_dir` | — | Control-machine path containing `tls.crt` and `tls.key`, used with `provided` |
-| `tier1.tls_acme_email` | — | Email address for Let’s Encrypt registration |
-| `tier1.k3s_version` | `v1.30.4+k3s1` | k3s version |
-| `tier1.k3s_server_host` | — | k3s server hostname |
-| `tier1.k3s_cluster_cidr` | `10.42.0.0/16` | Pod CIDR |
-| `tier1.k3s_service_cidr` | `10.43.0.0/16` | Service CIDR |
-| `tier1.digitafrica_namespace` | `digitafrica` | Namespace for application resources |
-| `tier1.jupyterhub.jupyterhub_public_url` | `https://<host>/jupyter` | Public JupyterHub URL; must match the public IP address or DNS name |
-| `tier1.jupyterhub.jupyter_nodeport` | `30888` | JupyterHub NodePort in NodePort mode |
-| `tier1.jupyterhub.storage_class` | `local-path` | StorageClass for JupyterHub user PVCs |
-| `tier1.jupyterhub.jupyterhub_admin_users` | `["admin"]` | JupyterHub administrator usernames |
-| `tier1.mlflow.enabled` | `false` | Enable MLflow deployment |
-| `tier1.mlflow.mlflow_port` | `5000` | MLflow listening port |
-| `tier1.grafana_enabled` | `false` | Enable Grafana deployment |
-
-MLflow and Grafana flags are reserved for future service implementation where applicable; do not treat an enabled flag alone as evidence that a production service is operational.
-
-### OIDC / Keycloak reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `oidc.oidc_enabled` | `false` | `true` = Keycloak/OIDC login; `false` = dummy authenticator |
-| `oidc.oidc_issuer_url` | — | Keycloak realm URL |
-| `oidc.oidc_client_id` | — | Keycloak client ID |
-| `oidc.oidc_client_secret` | — | Keycloak client secret |
-| `oidc.oidc_scope` | `[openid, profile, email]` | OAuth scopes to request |
-| `oidc.oidc_username_claim` | `preferred_username` | JWT claim used as the JupyterHub username |
-| `oidc.oidc_tls_verify` | `true` | Keep certificate verification enabled; set to `false` only for a controlled self-signed test deployment |
-
----
-
-## Deploy
-
-Deploy all configured tiers:
+The following command reports the checked-out revision for both deployed Silos:
 
 ```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/site.yml
-```
-
-Deploy Tier-0 only:
-
-```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/tier0.yml
-```
-
-Deploy Tier-1 only:
-
-```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/tier1.yml
-```
-
-To reconcile the Tier-1 server-side resources after changing Tier-1 application or Helm values, without running the agent plays:
-
-```bash
-ansible-playbook \
+ANSIBLE_STDOUT_CALLBACK=default ansible \
   -i inventories/prod/hosts.ini \
-  playbooks/tier1.yml \
-  --limit tier1_server \
-  -e digitafrica_uninstall=false
+  tier1_server \
+  -b \
+  -m ansible.builtin.shell \
+  -a '
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+    for deployment in fl-client-silo-a fl-client-silo-b; do
+      pod=$(k3s kubectl -n digitafrica get pods \
+        -l "app=${deployment}" \
+        -o jsonpath="{.items[0].metadata.name}")
+
+      printf "%s: " "${deployment}"
+      k3s kubectl -n digitafrica exec "${pod}" -- \
+        git -C /home/jovyan/digitafrica rev-parse HEAD
+    done
+  '
 ```
 
-Using `--limit tier1_server` is appropriate only when the agent topology itself does not need installation, reconciliation, or repair.
+The bootstrap currently follows the configured repository branch. Therefore, record the commit SHA for every experiment. For stronger reproducibility, change the bootstrap to check out a pinned release tag or commit SHA before using the environment for comparative or published results.
+
+### 3. Establish the experiment contract
+
+Before execution, make the following decisions explicit in an experiment configuration or record:
+
+- server address and transport/security settings;
+- Flower and Python dependency versions;
+- client identifiers and participating Silos;
+- dataset identity, version, provenance, and permitted use;
+- local preprocessing and train/validation/test splits;
+- model architecture and initial parameters;
+- aggregation strategy and its parameters;
+- number of rounds, local epochs, batch size, and optimizer settings;
+- metrics to report and how they are interpreted;
+- output locations for checkpoints, metrics, and logs; and
+- failure, retry, and participant-dropout behaviour.
+
+Do not assume that two Silo workspaces contain equivalent data or use the same preprocessing unless the experiment configuration explicitly establishes this.
 
 ---
 
-## Networking
+## Running the application
 
-### Ingress mode
+### Server lifecycle
 
-With `expose_mode: ingress`, Traefik routes externally reachable traffic through ports 80 and 443.
+The Tier-1 deployment prepares the server-side source, including a convenient `server.py` link in the control-plane user’s home directory. The exact command-line arguments, address, port, strategy, and round count are properties of the application source and experiment configuration, not infrastructure defaults.
 
-| Service | Address |
+Before running an experiment, inspect the currently deployed server entry point and its supported arguments on the control-plane node:
+
+```bash
+ANSIBLE_STDOUT_CALLBACK=default ansible \
+  -i inventories/prod/hosts.ini \
+  tier1_server \
+  -b \
+  -m ansible.builtin.shell \
+  -a '
+    set -e
+    echo "===== Server entry point ====="
+    ls -l ~/server.py
+    python3 ~/server.py --help
+  '
+```
+
+If the server entry point does not provide `--help`, inspect the source and document the exact invocation in the experiment record. Do not publish generic server commands in this guide until they are verified against the application implementation.
+
+### Silo client lifecycle
+
+A Silo client must be started inside its own workspace using the client entry point and experiment configuration provided by the application source.
+
+To open a non-interactive inspection shell command in Silo A or Silo B, use the corresponding Deployment name:
+
+```bash
+ANSIBLE_STDOUT_CALLBACK=default ansible \
+  -i inventories/prod/hosts.ini \
+  tier1_server \
+  -b \
+  -m ansible.builtin.shell \
+  -a '
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+    deployment=fl-client-silo-a
+    pod=$(k3s kubectl -n digitafrica get pods \
+      -l "app=${deployment}" \
+      -o jsonpath="{.items[0].metadata.name}")
+
+    k3s kubectl -n digitafrica exec -it "${pod}" -- \
+      sh -lc "cd /home/jovyan/digitafrica && pwd && find . -maxdepth 2 -type f | sort | head -n 80"
+  '
+```
+
+Replace `fl-client-silo-a` with `fl-client-silo-b` for Silo B. The command is for source inspection; start client processes only with an experiment-specific invocation that has been reviewed against the current code.
+
+### Recommended execution sequence
+
+1. Record platform state and source revisions.
+2. Prepare or mount each Silo’s approved local dataset according to its data-governance requirements.
+3. Start the Flower server with the documented experiment configuration.
+4. Start one client process in each participating Silo workspace.
+5. Confirm that each intended client registers with the server.
+6. Run the planned number of rounds.
+7. Capture server logs, client logs, final metrics, and model/checkpoint artefacts.
+8. Stop application processes deliberately and retain the experiment record.
+
+If a client fails, do not silently substitute another Silo or dataset. Record the participant change and assess whether the experiment remains comparable to the original plan.
+
+---
+
+## Data handling and privacy
+
+Federated learning reduces the need to centralise raw training data, but it does not remove all privacy or security risks.
+
+At minimum:
+
+- keep each Silo dataset in its approved local storage location;
+- do not place raw Silo data in the shared application repository;
+- do not include credentials, access tokens, private keys, or personal data in notebooks, logs, or Git commits;
+- assess whether model updates or reported metrics could reveal sensitive information;
+- use authenticated and protected network communication for non-demonstration deployments; and
+- apply the data-management, ethical-review, and institutional requirements applicable to the participating organisations.
+
+For sensitive or regulated data, involve the relevant data steward, security contact, and ethics or legal process before running an experiment.
+
+---
+
+## Reproducibility record
+
+For every experiment, retain a compact but complete record containing:
+
+| Item | Evidence to retain |
 |---|---|
-| JupyterHub | `https://<host>/jupyter/` |
-| Tier-0 model cache | `http://<host>/models/` |
+| Experiment identifier | Unique name or identifier |
+| Date and operators | Start/end timestamps and responsible persons or roles |
+| Platform version | Blueprint revision and deployment configuration used |
+| Server source | Repository URL, branch/tag, and commit SHA |
+| Silo source | Repository URL, branch/tag, and commit SHA for each Silo |
+| Runtime dependencies | Python, Flower, and relevant package versions |
+| Data provenance | Dataset identifier, version, ownership, approvals, and local split description |
+| Experiment configuration | Model, strategy, hyperparameters, number of rounds, and client set |
+| Execution evidence | Server and client logs, registration evidence, and failure/retry events |
+| Outputs | Metrics, model/checkpoint locations, and integrity information |
+| Interpretation | Main result, limitations, and comparability with other runs |
 
-A Traefik redirect middleware redirects `/jupyter` to `/jupyter/`.
-
-### NodePort mode
-
-With `expose_mode: nodeport`, services are exposed through configured Kubernetes NodePorts rather than Traefik paths.
-
-| Service | Port variable | Default |
-|---|---|---|
-| JupyterHub, Tier-0 or Tier-1 | `jupyter_nodeport` | `30888` |
-| Tier-0 model cache | `modelcache_nodeport` | `30080` |
-
-Ensure the relevant ports are allowed by host and network firewalls before relying on NodePort access.
+The previously validated Silo deployment showed both Silo workspaces at commit `8879982`. Treat that only as an observed deployment result, not as a permanent application version. Re-check and record the actual revision before every new experiment.
 
 ---
 
-## TLS
+## Definition of success
 
-TLS configuration is selected using `tier1.tls_mode` and is relevant in ingress mode.
+### Platform and workspace deployment success
 
-### Self-signed certificate
+The infrastructure deployment is successful when:
 
-```yaml
-tier1:
-  tls_mode: "selfsigned"
-```
+- the Tier-1 cluster is healthy;
+- JupyterHub is reachable according to the configured exposure mode;
+- Silo A and Silo B Deployments roll out successfully;
+- each Silo has the required runtime dependencies; and
+- the expected source is present and identifiable by Git revision.
 
-A certificate is generated on the Tier-1 server and stored in the Kubernetes secret `jhub-tls`. Browser warnings are expected because the certificate is not publicly trusted.
+### Federated-learning experiment success
 
-### Provided certificate
+A federated-learning experiment is successful only when:
 
-```yaml
-tier1:
-  tls_mode: "provided"
-  tls_cert_dir: "/path/to/your/certs"
-```
+- the intended Flower server is running with the recorded configuration;
+- the intended Silo clients connect successfully;
+- the planned training rounds complete or deviations are documented;
+- expected metrics and artefacts are captured; and
+- the result can be associated with a complete reproducibility record.
 
-The specified directory on the control machine must contain `tls.crt` and `tls.key`. Ansible copies them to the Tier-1 server and updates the Kubernetes TLS secret.
-
-### Let’s Encrypt
-
-```yaml
-tier1:
-  tls_mode: "letsencrypt"
-  tls_acme_email: "admin@example.org"
-  jupyterhub:
-    jupyterhub_public_url: "https://yourdomain.example/jupyter"
-```
-
-Let’s Encrypt requires:
-
-- a real DNS name rather than a raw IP address;
-- public reachability on ports 80 and 443; and
-- an email address for ACME registration.
-
-### No TLS
-
-```yaml
-tier1:
-  tls_mode: "none"
-  jupyterhub:
-    jupyterhub_public_url: "http://10.64.45.176/jupyter"
-```
-
-Use this only in controlled non-production environments. It is unsuitable for credentials, research data, or any sensitive traffic.
+Do not conflate a successful Kubernetes rollout with a successful federated-learning experiment.
 
 ---
 
-## JupyterHub authentication
+## Current limitations and recommended improvements
 
-When OIDC is enabled, JupyterHub delegates authentication to Keycloak or another compatible OpenID Connect provider:
-
-1. the user visits JupyterHub;
-2. JupyterHub redirects the user to the identity provider;
-3. the user authenticates;
-4. the identity provider returns an OIDC token; and
-5. JupyterHub validates the token and establishes the user session.
-
-Register the callback URL with the identity provider:
-
-```text
-https://<your-host>/jupyter/hub/oauth_callback
-```
-
-When `oidc.oidc_enabled: false`, JupyterHub uses a dummy authenticator. This is appropriate only for controlled demonstrations and development because it accepts arbitrary username/password combinations.
-
----
-
-## Storage and notebook seeding
-
-JupyterHub user homes are backed by persistent volume claims using:
-
-```yaml
-tier1:
-  jupyterhub:
-    storage_class: "local-path"
-```
-
-Select a storage class appropriate to the availability and persistence requirements of the deployment. `local-path` is convenient for a basic k3s installation but has node-local behaviour. For multi-node persistence requirements, use a properly configured shared storage solution such as a tested NFS-backed provisioner.
-
-Example notebooks are supplied to JupyterHub user servers through a Kubernetes ConfigMap rather than a node-specific host-path volume. This removes the previous node pinning constraint. Validate notebook seeding by logging in and spawning a real user server after relevant configuration changes.
-
----
-
-## Uninstall
-
-To run the configured uninstall lifecycle:
-
-```bash
-ansible-playbook \
-  -i inventories/prod/hosts.ini \
-  playbooks/site.yml \
-  -e digitafrica_uninstall=true
-```
-
-Before using this command, review the uninstall tasks and determine the fate of:
-
-- JupyterHub user PVCs and research notebooks;
-- application data and experiment outputs;
-- cluster certificates and secrets; and
-- shared resources not owned exclusively by this deployment.
-
----
-
-## Post-deployment checks
-
-After deployment, use [Operations and validation](operations-and-validation.md) to check:
-
-- k3s nodes and system workloads;
-- Helm release state;
-- JupyterHub ingress reachability;
-- JupyterHub user-server spawning and seeded notebooks;
-- Silo workspace rollout and bootstrap; and
-- the distinction between platform readiness and a completed federated-learning experiment.
+- **Source pinning:** bootstrap follows a repository branch. Pin an immutable tag or commit for reproducible experiments.
+- **Runtime image:** dependencies are installed when a Silo starts. Use a versioned custom image containing Git and pinned Python dependencies to reduce startup time and package drift.
+- **Readiness:** Kubernetes readiness does not yet prove that source checkout and dependency installation are complete. Use an init container or a readiness probe based on a bootstrap-complete marker.
+- **Experiment automation:** introduce a reviewed launcher or workflow that starts the server and clients, captures evidence, and stops cleanly after a run.
+- **Results management:** define an approved persistent location and retention policy for models, metrics, and logs.
 
 ## Related documentation
 
 - [Project overview](../README.md)
-- [Federated-learning application](federated-learning-application.md)
+- [Infrastructure deployment](infrastructure-deployment.md)
 - [Operations and validation](operations-and-validation.md)
 - [Architecture](architecture.md)

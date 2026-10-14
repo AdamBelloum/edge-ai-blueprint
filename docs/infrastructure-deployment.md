@@ -1,5 +1,21 @@
 # Infrastructure deployment
 
+## Current workshop deployment entry point
+
+For guided Tier-1 or Tier-2 workshop deployment, run from the repository root:
+
+```bash
+bash scripts/admin/admin-main.sh
+```
+
+Choose **Configure and deploy infrastructure** and select the intended tier in the setup wizard. The wizard creates or replaces local ignored inventory/configuration under `inventories/workshop/tier1/` or `inventories/workshop/tier2/`. Review the selected VMs and settings before confirming deployment.
+
+For managed OIDC, infrastructure deployment owns TLS, Keycloak provisioning, and JupyterHub identity integration. If deployment pauses awaiting trusted TLS, use **Resume paused Managed-Keycloak OIDC deployment** with the saved tier after trusted TLS is available. Run the administrator health check for that tier before handing over to the organiser.
+
+Participant provisioning, credential issuance, and workshop activation are subsequent organiser actions; see the [workshop organiser guide](workshop-organiser.md).
+
+**Legacy reference scope:** the production-inventory examples and Tier-0/Tier-1 variable tables below describe the older direct-playbook workflow. They have not been revalidated in this documentation sprint and are not a complete configuration reference for the managed Tier-1/Tier-2 wizard. `playbooks/site.yml` runs Tier-0 and Tier-1 only, not Tier-2. Do not copy inline secret examples into tracked configuration.
+
 This guide is for platform administrators who deploy and maintain the DIGITAfrica Edge-AI infrastructure. It covers Ansible, Tier-0, Tier-1, k3s, JupyterHub, networking, storage, TLS, and authentication.
 
 For running a Flower-based experiment after the platform is available, see [Federated-learning application](federated-learning-application.md). For acceptance checks and troubleshooting, see [Operations and validation](operations-and-validation.md).

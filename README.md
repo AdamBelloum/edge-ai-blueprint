@@ -1,118 +1,104 @@
 # DIGITAfrica Edge-AI Blueprint
 
-Ansible-based blueprint for deploying an Edge-AI platform and preparing a federated-learning application environment.
+An Ansible-based blueprint for deploying an Edge-AI teaching and research platform and organising practical workshops through JupyterHub.
 
-The repository deliberately separates two concerns:
+The repository separates three responsibilities:
 
-1. **Platform infrastructure** — Tier-0 and Tier-1 deployment, k3s, JupyterHub, networking, storage, TLS, and authentication.
-2. **Federated-learning application** — Flower server and client workflows, Silo workspaces, datasets, experiment execution, and results.
+1. **Platform administration** — infrastructure deployment, k3s, JupyterHub, networking, storage, TLS, authentication, and infrastructure health checks.
+2. **Workshop organisation** — participant cohorts, protected credential exports, workshop preparation and activation, solution release, and participant-state resets.
+3. **Participant activities** — guided beginner practicals or advanced TODO-based exercises, including participant-controlled application execution.
 
-The Ansible playbooks deploy and configure the platform. They prepare the federated-learning execution environment, but they do **not** automatically start a Flower server, start Flower clients, or run a federated-training round.
+Available workshop families are **Introduction to AI**, **Federated Learning**, and **Cloud Computing SOA**. Infrastructure deployment and workshop preparation are separate lifecycle steps: deploying the platform does not itself provision a fresh participant cohort or complete a practical.
 
 ## Who should use which guide?
 
 | Reader | Start here | Primary goal |
 |---|---|---|
-| Platform administrator | [Infrastructure deployment](docs/infrastructure-deployment.md) | Deploy and maintain Tier-0 or Tier-1 safely |
+| Platform administrator | [Infrastructure deployment](docs/infrastructure-deployment.md) | Configure, deploy, and maintain infrastructure |
+| Workshop organiser | [Workshop organiser guide](docs/workshop-organiser.md) | Manage cohorts, prepare teaching content, and release solutions safely |
 | Researcher or application developer | [Federated-learning application](docs/federated-learning-application.md) | Configure and run a reproducible federated-learning experiment |
-| Operator or tester | [Operations and validation](docs/operations-and-validation.md) | Validate deployment status, diagnose failures, and record acceptance evidence |
-| Workshop organiser | [Workshop organiser guide](docs/workshop-organiser.md) | Prepare, reset, and repeat participant workshop cohorts safely |
-| Architect or new project contributor | [Architecture](docs/architecture.md) | Understand component boundaries, responsibilities, and system interactions |
+| Operator or tester | [Operations and validation](docs/operations-and-validation.md) | Inspect deployment health, diagnose failures, and record acceptance evidence |
+| Architect or contributor | [Architecture](docs/architecture.md) | Understand component boundaries and system interactions |
 
-## What the blueprint provides
+## Deployment profiles
 
-### Tier-0: single-node Edge-AI environment
+### Tier-1 and Tier-2 workshop deployments
 
-Depending on configuration, Tier-0 can provide:
+The administrator workflow supports explicit **Tier-1** and **Tier-2** selection. Tier-2 uses its own `tier2_server` and `tier2_agents` inventory groups and deployment configuration; it is not included in the legacy site playbook.
 
-- a Docker-based Jupyter notebook environment;
-- monitoring components such as cAdvisor and Node Exporter;
-- a standalone k3s installation with JupyterHub; or
-- a k3s agent joining a Tier-1 cluster.
+The configured platform provides k3s, JupyterHub, workshop assets, and the selected networking, storage, TLS, and authentication settings. Managed-Keycloak OIDC setup belongs to infrastructure deployment, not participant cohort preparation.
 
-### Tier-1: multi-node Edge-AI platform
+The setup wizard creates or replaces local ignored inventory and configuration for the selected tier. The administrator workflow uses:
 
-Tier-1 provides:
+- `inventories/workshop/tier1/hosts.ini`; or
+- `inventories/workshop/tier2/hosts.ini`.
 
-- a k3s server and one or more k3s agents;
-- JupyterHub with persistent user storage;
-- Traefik ingress or NodePort exposure;
-- configurable TLS and OIDC authentication;
-- seeded example notebooks; and
-- prepared Silo A and Silo B federated-learning workspaces.
+Configure SSH access to the intended VMs and review the selected inventory and settings before deployment. Keep generated secrets and credential exports outside Git.
 
-## Federated-learning deployment scope
+### Legacy Tier-0 and site playbooks
 
-A successful Tier-1 deployment confirms that the platform and application workspaces are available. In the currently validated configuration, Silo A and Silo B:
+Tier-0 retains single-node options, including Docker notebook/monitoring and k3s installation or joining a Tier-1 cluster, depending on configuration.
 
-- run as independent Kubernetes Deployments on worker nodes;
-- contain Git and the required Python dependencies;
-- obtain the configured tutorial/application repository during bootstrap; and
-- remain available as prepared execution workspaces.
+`playbooks/site.yml` imports **Tier-0 followed by Tier-1 only**. The legacy production-inventory commands remain separate from the guided Tier-1/Tier-2 workshop workflow; do not assume `site.yml` deploys Tier-2.
 
-The following are separate application-level actions:
+## Quick start: administrator
 
-- starting the Flower server;
-- starting each Silo client;
-- registering clients with the server;
-- executing training rounds; and
-- recording models, metrics, logs, and experiment metadata.
-
-See the [federated-learning application guide](docs/federated-learning-application.md) for those responsibilities.
-
-## Quick start
-
-### Prerequisites
-
-On the Ansible control machine:
+Prepare the Ansible control environment and install the required collections:
 
 ```bash
 pip install ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
-Configure SSH access to the target nodes and review the environment-specific inventory and variables before deployment.
-
-### Configure inventory and variables
-
-- Inventory: `inventories/prod/hosts.ini`
-- Configuration: `inventories/prod/group_vars/all.yml`
-
-For Tier-1, define a `tier1_server` and one or more `tier1_agents`. Set the public JupyterHub URL, exposure mode, TLS mode, storage class, and authentication options for the target environment.
-
-Do not commit passwords, private keys, or client secrets in inventory or variable files. Use Ansible Vault or an approved secret-management method.
-
-### Deploy
-
-Deploy both configured tiers:
+From the repository root, open the administrator menu:
 
 ```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/site.yml
+bash scripts/admin/admin-main.sh
 ```
 
-Deploy Tier-0 only:
+The menu provides:
+
+- **1 — Run infrastructure health check**: select Tier-1 or Tier-2.
+- **2 — Configure and deploy infrastructure**: delegates to the setup wizard.
+- **3 — Clean VMs for a fresh deployment**: destructive; intended for dedicated disposable VMs, with a mandatory dry run and explicit confirmation.
+- **4 — Resume paused Managed-Keycloak OIDC deployment**: select the saved tier configuration and resume after trusted TLS is available, without rerunning the platform and identity phases.
+- **0 — Exit**.
+
+Do not use VM cleanup as a participant-cohort reset. See [Infrastructure deployment](docs/infrastructure-deployment.md) for deployment details and [Operations and validation](docs/operations-and-validation.md) for health-check guidance.
+
+## Quick start: workshop organiser
+
+After the administrator has deployed and validated the platform:
 
 ```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/tier0.yml
+bash scripts/workshop/organizer-main.sh
 ```
 
-Deploy Tier-1 only:
+The organiser menu provides participant cohort management, active-workshop resets, application reconciliation, and workshop selection.
 
-```bash
-ansible-playbook -i inventories/prod/hosts.ini playbooks/tier1.yml
-```
+The normal teaching workflow is:
 
-For full configuration, deployment modes, and lifecycle guidance, see [Infrastructure deployment](docs/infrastructure-deployment.md).
+1. Reconcile workshop applications after adding or updating a workshop/module, before publishing it.
+2. Provision participant identities and groups.
+3. Select the workshop/module and prepare or activate the intended track.
+4. Issue and securely distribute participant credentials.
+5. Run the practical; release reference solutions separately when appropriate.
 
-## Validate after deployment
+Reconciliation changes deployed applications and JupyterHub; it is not a read-only documentation check. Provisioning identities does not issue passwords. Credential issuance is a separate action that resets cohort passwords and writes a protected export under `secrets/workshops/`.
 
-Use the [operations and validation guide](docs/operations-and-validation.md) to verify:
+See the [Workshop organiser guide](docs/workshop-organiser.md) for exact menu paths, supported actions, reset scopes, and local Module 3 exports.
 
-- k3s node and workload health;
-- JupyterHub ingress reachability;
-- JupyterHub user-server spawning and notebook seeding;
-- Silo A and Silo B rollout and bootstrap completion; and
-- federated-learning experiment execution, when applicable.
+## Teaching content and execution boundaries
+
+- **Introduction to AI:** Modules 1–3, with module-specific publication/activation and solution-release actions where available.
+- **Federated Learning:** beginner and advanced preparation, advanced reference-solution release, and Flower server lifecycle management.
+- **Cloud Computing SOA:** Module 1 REST API, Module 2 Microservices and JWT Authentication, and Module 3 Containerization and Orchestration.
+
+Beginner tracks provide guided exercises; advanced tracks use TODO-based instructions. Reference solutions are released separately by the organiser. Participants should follow the entry guide for their selected workshop, module, and track.
+
+Infrastructure deployment does not automatically run a federated-training experiment. The FL organiser preparation workflow includes Flower server startup; participants follow their tutorial to start their clients and observe rounds. Participant groups and worker placement are inventory-derived; do not assume every workshop is limited to two fixed Silos.
+
+Cloud SOA Module 3 also supports local asset checks and track-specific bundle exports without platform access through direct local actions. These checks are structural/syntax checks, not evidence that containers, services, or participant exercises work at runtime. Local export is separate from JupyterHub activation and participant solution release.
 
 ## Repository documentation map
 
@@ -124,6 +110,10 @@ README.md
 │   ├── operations-and-validation.md
 │   ├── workshop-organiser.md
 │   └── architecture.md
+├── scripts/
+│   ├── admin/
+│   └── workshop/
+├── workshop_assets/
 ├── inventories/
 ├── playbooks/
 └── roles/
@@ -137,4 +127,3 @@ README.md
 | [nfs-server](https://gitlab.inria.fr/digitafrica/blueprints/services/nfs-server.git) | NFS server and provisioner for multi-node persistent storage |
 | [jupyterhub-on-k3s](https://gitlab.inria.fr/digitafrica/blueprints/services/jupyterhub-on-k3s.git) | JupyterHub-only deployment on an existing cluster |
 | [user-portal](https://gitlab.inria.fr/digitafrica/blueprints/services/user-portal.git) | Keycloak-based user portal for OIDC identity management |
-
