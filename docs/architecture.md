@@ -42,7 +42,7 @@ VM cleanup is an infrastructure operation, not a workshop-cohort reset. The admi
 
 ## Organiser control flow
 
-`scripts/workshop/organizer-main.sh` owns top-level argument handling, shared menus, participant-account access, and routing to workshop controllers. Shared context/runtime libraries provide reusable configuration and safeguards; workshop helpers implement domain-specific preparation.
+`scripts/workshops/organizer-main.sh` owns top-level argument handling, shared menus, participant-account access, and routing to workshop controllers. Shared context/runtime libraries provide reusable configuration and safeguards; workshop helpers implement domain-specific preparation.
 
 The organiser separates:
 

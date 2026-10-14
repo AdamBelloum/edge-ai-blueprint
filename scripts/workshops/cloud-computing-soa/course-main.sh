@@ -623,8 +623,8 @@ cloud_module3_local_information() {
     'Beginner and advanced entry guides are included; detailed practical guidance and runtime validation remain pending.' \
     'These menu actions do not change workshop state or participant servers.' \
     'The organiser menu still loads platform context; direct local actions bypass it:' \
-    '  bash scripts/workshop/organizer-main.sh cloud-module3-local-check beginner' \
-    '  bash scripts/workshop/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz'
+    '  bash scripts/workshops/organizer-main.sh cloud-module3-local-check beginner' \
+    '  bash scripts/workshops/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz'
 }
 
 # Platform delivery checks; standalone local helpers remain available.

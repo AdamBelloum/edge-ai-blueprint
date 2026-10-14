@@ -1,6 +1,6 @@
 # DIGITAfrica Edge-AI Blueprint
 
-An Ansible-based blueprint for deploying an Edge-AI teaching and research platform and organising practical workshops through JupyterHub.
+An Ansible-based blueprint for deploying shared teaching and research infrastructure and delivering **Introduction to AI**, **Federated Learning**, and **Cloud Computing SOA** workshops through JupyterHub.
 
 The repository separates three responsibilities:
 
@@ -8,7 +8,17 @@ The repository separates three responsibilities:
 2. **Workshop organisation** — participant cohorts, protected credential exports, workshop preparation and activation, solution release, and participant-state resets.
 3. **Participant activities** — guided beginner practicals or advanced TODO-based exercises, including participant-controlled application execution.
 
-Available workshop families are **Introduction to AI**, **Federated Learning**, and **Cloud Computing SOA**. Infrastructure deployment and workshop preparation are separate lifecycle steps: deploying the platform does not itself provision a fresh participant cohort or complete a practical.
+Infrastructure deployment and workshop preparation are separate lifecycle steps: deploying the platform does not itself provision a fresh participant cohort or complete a practical.
+
+## Supported workshops
+
+| Workshop family | Available content | Delivery |
+|---|---|---|
+| **Introduction to AI** | Modules 1–3 | Guided beginner practicals and advanced TODO-based exercises |
+| **Federated Learning** | Flower-based practicals exploring local datasets and federated training | Beginner and advanced tracks, with organiser-controlled server management |
+| **Cloud Computing SOA** | Module 1: REST API; Module 2: Microservices and JWT Authentication; Module 3: Containerization and Orchestration | Guided beginner practicals and advanced TODO-based exercises; Module 3 also provides local bundle exports |
+
+Use the [workshop organiser guide](docs/workshop-organiser.md) to select and prepare a workshop. Module activation and reference-solution release are separate actions where supported. This catalogue describes available offerings, not a guarantee of concurrent operation for separate cohorts.
 
 ## Who should use which guide?
 
@@ -16,7 +26,6 @@ Available workshop families are **Introduction to AI**, **Federated Learning**, 
 |---|---|---|
 | Platform administrator | [Infrastructure deployment](docs/infrastructure-deployment.md) | Configure, deploy, and maintain infrastructure |
 | Workshop organiser | [Workshop organiser guide](docs/workshop-organiser.md) | Manage cohorts, prepare teaching content, and release solutions safely |
-| Researcher or application developer | [Federated-learning application](docs/federated-learning-application.md) | Configure and run a reproducible federated-learning experiment |
 | Operator or tester | [Operations and validation](docs/operations-and-validation.md) | Inspect deployment health, diagnose failures, and record acceptance evidence |
 | Architect or contributor | [Architecture](docs/architecture.md) | Understand component boundaries and system interactions |
 
@@ -71,7 +80,7 @@ Do not use VM cleanup as a participant-cohort reset. See [Infrastructure deploym
 After the administrator has deployed and validated the platform:
 
 ```bash
-bash scripts/workshop/organizer-main.sh
+bash scripts/workshops/organizer-main.sh
 ```
 
 The organiser menu provides participant cohort management, active-workshop resets, application reconciliation, and workshop selection.
@@ -88,17 +97,15 @@ Reconciliation changes deployed applications and JupyterHub; it is not a read-on
 
 See the [Workshop organiser guide](docs/workshop-organiser.md) for exact menu paths, supported actions, reset scopes, and local Module 3 exports.
 
-## Teaching content and execution boundaries
+## Teaching delivery and validation
 
-- **Introduction to AI:** Modules 1–3, with module-specific publication/activation and solution-release actions where available.
-- **Federated Learning:** beginner and advanced preparation, advanced reference-solution release, and Flower server lifecycle management.
-- **Cloud Computing SOA:** Module 1 REST API, Module 2 Microservices and JWT Authentication, and Module 3 Containerization and Orchestration.
+Beginner tracks provide guided exercises; advanced tracks use TODO-based instructions. Participants follow the entry guide for their selected workshop, module, and track. Reference solutions are released separately by the organiser where supported. Newly selected content must not be assumed to appear immediately in already-running JupyterHub servers.
 
-Beginner tracks provide guided exercises; advanced tracks use TODO-based instructions. Reference solutions are released separately by the organiser. Participants should follow the entry guide for their selected workshop, module, and track.
+Keep three levels of evidence separate: **infrastructure health**, **workshop readiness**, and **participant execution success**. Deployment and preparation do not prove that a practical has completed successfully.
 
-Infrastructure deployment does not automatically run a federated-training experiment. The FL organiser preparation workflow includes Flower server startup; participants follow their tutorial to start their clients and observe rounds. Participant groups and worker placement are inventory-derived; do not assume every workshop is limited to two fixed Silos.
+For FL experiments, preparation includes Flower server startup; participants start their clients and observe training rounds through the tutorial. See the [federated-learning application guide](docs/federated-learning-application.md) for experiment, data-governance, and reproducibility guidance.
 
-Cloud SOA Module 3 also supports local asset checks and track-specific bundle exports without platform access through direct local actions. These checks are structural/syntax checks, not evidence that containers, services, or participant exercises work at runtime. Local export is separate from JupyterHub activation and participant solution release.
+Cloud SOA Module 3 supports local asset checks and track-specific bundle exports through direct actions without platform access. Structural/syntax checks do not establish container or service runtime success. Local export neither activates JupyterHub content nor releases participant solutions.
 
 ## Repository documentation map
 
@@ -112,7 +119,7 @@ README.md
 │   └── architecture.md
 ├── scripts/
 │   ├── admin/
-│   └── workshop/
+│   └── workshops/
 ├── workshop_assets/
 ├── inventories/
 ├── playbooks/

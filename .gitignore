@@ -15,7 +15,7 @@ __pycache__/
 /roles/k8s_apps/files/20-jupyterhub.yaml
 
 # Local workshop runtime configuration
-scripts/workshop/workshop-release.env
+scripts/workshops/workshop-release.env
 
 # Federated-learning workshop runtime artefacts.
 # Source CSVs and generated partitions are prepared locally for the active
@@ -27,7 +27,7 @@ data/partitions/
 /inventories/workshop/
 
 # Local workshop-script recovery copies; never commit.
-scripts/workshop/*.bak
+scripts/workshops/*.bak
 
 # Local credentials and generated secrets; never commit.
 /secrets/

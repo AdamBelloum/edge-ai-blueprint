@@ -2,7 +2,7 @@
 
 ## Current workshop workflow versus legacy experiment examples
 
-For organiser-controlled FL workshops, use `scripts/workshop/organizer-main.sh`: provision participant identities/groups, select **Workshops → Federated Learning**, prepare the intended track, then issue and distribute credentials. Preparation requires a complete cohort and includes Flower server startup. Participants start their clients using the selected tutorial; completed training rounds require separate execution evidence.
+For organiser-controlled FL workshops, use `scripts/workshops/organizer-main.sh`: provision participant identities/groups, select **Workshops → Federated Learning**, prepare the intended track, then issue and distribute credentials. Preparation requires a complete cohort and includes Flower server startup. Participants start their clients using the selected tutorial; completed training rounds require separate execution evidence.
 
 The organiser also provides Flower server management and separate advanced reference-solution release. See the [workshop organiser guide](workshop-organiser.md) for the supported actions and reset scopes.
 

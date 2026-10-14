@@ -2,7 +2,7 @@
 #
 # Compatibility façade for the Introduction to AI organiser workflow.
 #
-# Sourced by scripts/workshop/organizer-main.sh. The course implementation is
+# Sourced by scripts/workshops/organizer-main.sh. The course implementation is
 # intentionally kept under introduction-to-ai/, while this stable controller
 # path preserves the existing organiser workflow and CLI dispatch contract.
 

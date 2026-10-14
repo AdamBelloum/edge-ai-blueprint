@@ -13,7 +13,7 @@ Workshop application reconciliation is available to the organiser after workshop
 Run from the repository root:
 
 ```bash
-bash scripts/workshop/organizer-main.sh
+bash scripts/workshops/organizer-main.sh
 ```
 
 The top-level menu provides:
@@ -27,7 +27,7 @@ The top-level menu provides:
 Use the script's help for the supported command-line actions:
 
 ```bash
-bash scripts/workshop/organizer-main.sh --help
+bash scripts/workshops/organizer-main.sh --help
 ```
 
 ## Recommended workshop sequence
@@ -57,7 +57,7 @@ Preparation requires a complete participant cohort and delegates to the Federate
 For non-interactive FL preparation, use the explicit mode and destructive-operation acknowledgement:
 
 ```bash
-bash scripts/workshop/organizer-main.sh \
+bash scripts/workshops/organizer-main.sh \
   --non-interactive \
   --mode beginner \
   --confirm-cohort-reset \
@@ -83,14 +83,14 @@ Each module offers readiness checking, beginner activation, advanced TODO activa
 Module 3 additionally offers local asset validation, beginner/advanced bundle exports, reference-solution export with confirmation, and local workflow information. Direct local actions bypass platform context:
 
 ```bash
-bash scripts/workshop/organizer-main.sh cloud-module3-local-check beginner
-bash scripts/workshop/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz
+bash scripts/workshops/organizer-main.sh cloud-module3-local-check beginner
+bash scripts/workshops/organizer-main.sh cloud-module3-local-export beginner /tmp/module3-beginner.tar.gz
 ```
 
 For a reference-solution bundle, explicit confirmation is required:
 
 ```bash
-bash scripts/workshop/organizer-main.sh cloud-module3-local-export solutions /tmp/module3-solutions.tar.gz --confirm-solutions
+bash scripts/workshops/organizer-main.sh cloud-module3-local-export solutions /tmp/module3-solutions.tar.gz --confirm-solutions
 ```
 
 Local checks validate mapped assets and Python/Bash syntax only; they do not test containers or services. Exports contain the selected track plus shared tests, not generated keys. Local exports do not activate a workshop or release solutions to participant servers. The interactive organiser menu still loads platform context.
@@ -104,7 +104,7 @@ Under **Reset active workshop cycle**, choose the reset scope deliberately.
 Choose submenu option **1**, or run:
 
 ```bash
-bash scripts/workshop/organizer-main.sh reset
+bash scripts/workshops/organizer-main.sh reset
 ```
 
 Although implemented in the Federated Learning reset helper, this action uses the active deployment inventory to select the participant cohort. After confirmation, it performs these steps in order:
@@ -124,7 +124,7 @@ The helper stops on failure; cleanup is sequential, not atomic, and earlier comp
 Choose submenu option **2**, or run:
 
 ```bash
-bash scripts/workshop/organizer-main.sh reset-participants
+bash scripts/workshops/organizer-main.sh reset-participants
 ```
 
 This removes inventory-derived participant identities/groups and matching protected credential exports. It does not stop or start Flower, remove JupyterHub servers/workspaces, or prepare a new workshop. Retained workspaces are not a newly prepared cohort.

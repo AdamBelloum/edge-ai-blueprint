@@ -22,7 +22,7 @@
       ansible.builtin.command:
         argv:
           - bash
-          - "{{ playbook_dir }}/../scripts/workshop/cloud-computing-soa/module3-local.sh"
+          - "{{ playbook_dir }}/../scripts/workshops/cloud-computing-soa/module3-local.sh"
           - check
           - "{{ item }}"
       loop:

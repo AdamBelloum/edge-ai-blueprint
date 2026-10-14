@@ -650,7 +650,7 @@ fi
 printf '\nVERDICT: PLATFORM GO — selected worker topology, staged partitions,\nJupyterHub group mapping, and Flower server readiness checks passed.\n\nRemaining operational gate: each participant group must complete the\nJupyterHub notebook/client smoke test before federated training begins.\n'
 
 printf '\nReadiness checks do not start Flower. After the cohort is prepared, use\n'
-printf '  scripts/workshop/organizer-main.sh\n'
+printf '  scripts/workshops/organizer-main.sh\n'
 printf 'and select "Manage the Flower server" to inspect, start, stop, or configure it.\n'
 
 exit 0
