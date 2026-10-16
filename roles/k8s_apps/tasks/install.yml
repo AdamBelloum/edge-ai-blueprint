@@ -552,6 +552,30 @@
   tags:
     - workshop_application_reconciliation
 
+- name: Read active workshop before rendering JupyterHub
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - get
+      - configmap
+      - digitafrica-workshop-state
+      - --ignore-not-found
+      - -o
+      - "jsonpath={.data.workshop_type}"
+  register: big_data_active_workshop_type
+  changed_when: false
+  tags:
+    - workshop_application_reconciliation
+
+- name: Select Big Data workspace delivery for the active workshop
+  ansible.builtin.set_fact:
+    big_data_workspace_enabled: "{{ (big_data_active_workshop_type.stdout | trim) == 'big-data' }}"
+  tags:
+    - workshop_application_reconciliation
+
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2
@@ -697,7 +721,7 @@
           -p '{"data":{"workshop_type":"none"}}'
         echo "initialised"
         ;;
-      none|introduction-to-ai|federated-learning|cloud-computing-soa)
+      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data)
         echo "preserved"
         ;;
       *)
@@ -735,7 +759,7 @@
     )"
 
     case "$workshop_module" in
-      none|module1|module2|module3)
+      none|module1|module2|module3|spark)
         echo "preserved"
         exit 0
         ;;
@@ -766,6 +790,9 @@
         ;;
       cloud-computing-soa)
         workshop_module=module1
+        ;;
+      big-data)
+        workshop_module=spark
         ;;
       none|federated-learning)
         workshop_module=none

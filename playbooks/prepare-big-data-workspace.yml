@@ -1,0 +1,7 @@
+---
+- name: Prepare Big Data participant assets on the selected worker VMs
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: false
+  roles:
+    - role: big_data_workspace

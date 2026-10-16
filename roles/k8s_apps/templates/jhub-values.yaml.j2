@@ -113,6 +113,12 @@ hub:
       WORKSHOP_GROUP_NODES = {{ workshop_group_nodes | to_json }}
       WORKSHOP_ADMIN_USERS = {{ jupyterhub_admin_users | to_json }}
       OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
+      from copy import deepcopy
+
+      BIG_DATA_WORKSPACE_ENABLED = {{ 'True' if (big_data_workspace_enabled | default(false) | bool) else 'False' }}
+      SPARK_SOURCE_VOLUME = "digitafrica-spark-source"
+      SPARK_SOURCE_HOST_PATH = "/opt/digitafrica/big-data/spark"
+      SPARK_SOURCE_SEED_PATH = "/seed/big-data/spark"
       WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
       WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
 
@@ -121,7 +127,85 @@ hub:
       c.KubeSpawner.remember_pvc_name = False
       c.KubeSpawner.storage_pvc_ensure = True
 
+      def configure_digitafrica_spark_source(spawner, workspace_role):
+          if workspace_role == "disabled":
+              # Preserve non-Spark spawns without imposing a seeder count.
+              # Remove any source configuration left by an earlier Spark spawn.
+              containers = deepcopy(list(spawner.init_containers or []))
+              for container in containers:
+                  for entry in container.get("env", []):
+                      if entry.get("name") == "DIGITAFRICA_SPARK_WORKSPACE_ROLE":
+                          entry.pop("valueFrom", None)
+                          entry["value"] = "disabled"
+                  if "volumeMounts" in container:
+                      container["volumeMounts"] = [
+                          mount for mount in container["volumeMounts"]
+                          if mount.get("name") != SPARK_SOURCE_VOLUME
+                      ]
+              spawner.init_containers = containers
+              spawner.volumes = {
+                  key: volume
+                  for key, volume in dict(spawner.volumes or {}).items()
+                  if volume.get("name") != SPARK_SOURCE_VOLUME
+              }
+              return
+
+          # Work on copies: never mutate the shared init-container configuration.
+          containers = deepcopy(list(spawner.init_containers or []))
+          seeders = [
+              container for container in containers
+              if any(
+                  mount.get("mountPath") == "/seed/beginner"
+                  for mount in container.get("volumeMounts", [])
+              )
+          ]
+          if len(seeders) != 1:
+              raise RuntimeError("Expected exactly one DIGITAfrica tutorial seed container.")
+
+          seeder = seeders[0]
+          environment = [
+              entry for entry in seeder.get("env", [])
+              if entry.get("name") != "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
+          ]
+          environment.append({
+              "name": "DIGITAFRICA_SPARK_WORKSPACE_ROLE",
+              "value": workspace_role,
+          })
+          seeder["env"] = environment
+
+          mounts = [
+              mount for mount in seeder.get("volumeMounts", [])
+              if mount.get("name") != SPARK_SOURCE_VOLUME
+          ]
+          volumes = {
+              key: volume
+              for key, volume in dict(spawner.volumes or {}).items()
+              if volume.get("name") != SPARK_SOURCE_VOLUME
+          }
+
+          if workspace_role == "participant":
+              volumes[SPARK_SOURCE_VOLUME] = {
+                  "name": SPARK_SOURCE_VOLUME,
+                  "hostPath": {
+                      "path": SPARK_SOURCE_HOST_PATH,
+                      "type": "Directory",
+                  },
+              }
+              mounts.append({
+                  "name": SPARK_SOURCE_VOLUME,
+                  "mountPath": SPARK_SOURCE_SEED_PATH,
+                  "readOnly": True,
+              })
+
+          seeder["volumeMounts"] = mounts
+          spawner.init_containers = containers
+          spawner.volumes = volumes
+
       async def configure_digitafrica_group_workspace(spawner):
+          configure_digitafrica_spark_source(
+              spawner,
+              "administrator" if BIG_DATA_WORKSPACE_ENABLED else "disabled",
+          )
           username = spawner.user.name.lower()
           if OIDC_ENABLED:
               user_group_names = {
@@ -191,6 +275,9 @@ hub:
           environment = dict(spawner.environment or {})
           environment["GROUP_ID"] = group_id
           spawner.environment = environment
+
+          if BIG_DATA_WORKSPACE_ENABLED:
+              configure_digitafrica_spark_source(spawner, "participant")
 
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
@@ -461,6 +548,9 @@ singleuser:
               cloud-computing-soa)
                 workshop_module=module1
                 ;;
+              big-data)
+                workshop_module=spark
+                ;;
               none|federated-learning)
                 workshop_module=none
                 ;;
@@ -472,7 +562,7 @@ singleuser:
           fi
 
           case "$workshop_type" in
-            none|introduction-to-ai|federated-learning|cloud-computing-soa) ;;
+            none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data) ;;
             *)
               echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
               exit 1
@@ -480,7 +570,7 @@ singleuser:
           esac
 
           case "$workshop_module" in
-            none|module1|module2|module3) ;;
+            none|module1|module2|module3|spark) ;;
             *)
               echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
               exit 1
@@ -488,7 +578,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|big-data:spark)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -590,6 +680,44 @@ singleuser:
           }}
 
           mkdir -p "$workspace"
+
+          # Spark: preserve participant edits on subsequent spawns.
+          if [ "$workshop_type" = "big-data" ] && [ "$workshop_module" = "spark" ]; then
+            case "${DIGITAFRICA_SPARK_WORKSPACE_ROLE:-disabled}" in
+              administrator)
+                echo "[seed] Administrator: participant Spark workspace skipped."
+                ;;
+              participant)
+                if [ "$mode" != "beginner" ]; then
+                  echo "[seed] ERROR: Spark currently supports beginner mode only." >&2
+                  exit 1
+                fi
+                big_data_source=/seed/big-data/spark
+                big_data_parent=/home/jovyan/Big-Data
+                big_data_workspace="$big_data_parent/Spark"
+
+                mkdir -p "$big_data_workspace"
+                chown 1000:100 "$big_data_parent" "$big_data_workspace"
+                chmod 0755 "$big_data_parent" "$big_data_workspace"
+
+                for directory in data docs outputs; do
+                  mkdir -p "$big_data_workspace/$directory"
+                  chown 1000:100 "$big_data_workspace/$directory"
+                  chmod 0755 "$big_data_workspace/$directory"
+                done
+
+                for filename in README.md 01-spark-beginner.ipynb data-analytics.py participants-instructions.md data/Bank_Personal_Loan_Modelling.csv docs/spark-DA.pdf; do
+                  copy_seed_file "$big_data_source/$filename" "$big_data_workspace/$filename" false
+                done
+
+                write_receipt_if_absent "$big_data_workspace/SPARK_SEED_RECEIPT.txt" "Spark README, notebook, code, dataset and PDF"
+                ;;
+              *)
+                echo "[seed] ERROR: Spark source delivery is not enabled; reconcile workshop applications before participant startup." >&2
+                exit 1
+                ;;
+            esac
+          fi
 
           if [ "$workshop_type" = "federated-learning" ]; then
           if [ "$mode" = "beginner" ]; then

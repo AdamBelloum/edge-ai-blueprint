@@ -1,0 +1,36 @@
+---
+- name: Stage the Big Data Spark participant workspace
+  become: true
+  tags:
+    - big_data_workspace
+    - workshop_assets
+  block:
+    - name: Ensure Spark participant asset directories exist
+      ansible.builtin.file:
+        path: "{{ big_data_workspace_host_path }}{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - ""
+        - /data
+        - /docs
+
+    - name: Copy the Spark participant asset bundle
+      ansible.builtin.copy:
+        src: "{{ big_data_workspace_source }}/{{ item }}"
+        dest: "{{ big_data_workspace_host_path }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - README.md
+        - 01-spark-beginner.ipynb
+        - data-analytics.py
+        - participants-instructions.md
+        - data/Bank_Personal_Loan_Modelling.csv
+        - docs/spark-DA.pdf
+
+# docker-compose.yml is deliberately excluded from the participant bundle.
+# JupyterHub delivery and Spark provisioning are integrated separately.

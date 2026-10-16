@@ -1,0 +1,22 @@
+---
+# Verified on linux/amd64: Spark 3.5.3, Scala 2.12.18,
+# Java 11.0.24 and bundled Python 3.8.10.
+# Preparation does not change Docker service enablement or start containers.
+big_data_spark_image: "apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576"
+
+# Organiser-controlled runtime files must remain outside the participant seed
+# directory /opt/digitafrica/big-data/spark.
+big_data_spark_runtime_host_path: /opt/digitafrica/big-data/runtime/spark
+
+# BEGIN managed Spark Compose staging
+# Private pilot cluster. Notebook access and submission are not enabled here.
+big_data_spark_project_name: digitafrica-spark
+big_data_spark_worker_count: 2
+big_data_spark_master_ui_loopback_port: 18080
+# Hard container limits, not memory reservations. Two workers plus the master
+# have a combined 4.5 GiB limit; driver/JupyterHub resources are separate.
+big_data_spark_master_container_memory: 512m
+big_data_spark_worker_container_memory: 2048m
+# Each worker advertises one core and 1 GiB for Spark executors; its container
+# limit also leaves room for the worker daemon and executor overhead.
+# END managed Spark Compose staging
