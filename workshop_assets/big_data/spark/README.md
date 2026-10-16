@@ -1,10 +1,15 @@
 # Big Data — Spark participant workspace
 
+> **Pilot status — not yet ready for participant execution.** The organiser must validate the Python runtime, Spark connection, dataset access and worker-to-driver networking before either interface is used. Neither interface is a workaround for incomplete preparation.
+
 ## Start here
 
-1. Open `01-spark-beginner.ipynb` in JupyterLab.
-2. Select the prepared Python kernel and run the cells in order.
-3. Find your exported preview under `outputs/`.
+Choose your preferred interface:
+
+- **Notebook:** open `01-spark-beginner.ipynb` in JupyterLab, select the prepared Python kernel, and run the cells in order.
+- **Python script:** run `python data-analytics.py` in a terminal using the organiser-prepared Python interpreter. The terminal's default Python may differ from the notebook kernel.
+
+Both routes perform the same analysis activities and export `outputs/filtered_preview.csv`. Re-running either replaces that file.
 
 Do not install Spark, Java or Python packages, or manage Docker containers.
 The organiser prepares the runtime and your group's Spark cluster.
@@ -12,14 +17,13 @@ The organiser prepares the runtime and your group's Spark cluster.
 ## Included files
 
 - `01-spark-beginner.ipynb`: guided bank-loan analysis.
-- `data-analytics.py`: the original container-based analysis, with corrected data and output paths.
+- `data-analytics.py`: documented terminal-based alternative to the notebook, using the same prepared Spark connection and analysis steps.
 - `data/Bank_Personal_Loan_Modelling.csv`: the included input dataset.
 - `docs/spark-DA.pdf`: teaching material.
 - `participants-instructions.md`: the original standalone Docker tutorial, retained for reference.
-- `outputs/`: created by the notebook for your own results.
+- `outputs/`: created by either interface for your own exported results.
 
-The source bundle also retains `docker-compose.yml` for organiser provisioning.
-It is not a participant setup requirement.
+The organiser provisions Spark separately using the managed runtime configuration. The legacy `docker-compose.yml` is not delivered to participant workspaces and is not used for managed provisioning.
 
 ## Prepared connection
 
