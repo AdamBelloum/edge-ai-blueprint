@@ -1,0 +1,83 @@
+---
+# Explicit pilot startup only: no pulls, image builds, asset preparation or deletion.
+- name: Start the fixed one-worker Spark and Livy educational pilot
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars_files:
+    - ../roles/big_data_spark_runtime/defaults/main.yml
+  tasks:
+    - name: Validate already staged runtime inputs without building
+      ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+
+    - name: Validate the already built Livy image
+      ansible.builtin.import_tasks: tasks/big-data-livy-image-validation.yml
+
+    - name: Require the fixed one-worker pilot and explicit server heap settings
+      ansible.builtin.assert:
+        that:
+          - big_data_spark_project_name == 'digitafrica-spark'
+          - (livy_build_worker_count | int) == 1
+          - "'spark-worker-1' in livy_build_compose.services"
+          - livy_build_compose.services['spark-master'].image == big_data_spark_image
+          - livy_build_compose.services['spark-livy'].environment.LIVY_SERVER_JAVA_OPTS == '-Xms128m -Xmx512m'
+        fail_msg: Startup is restricted to the explicitly staged one-worker educational pilot with the reviewed heap settings.
+
+    - name: Read a minimal inventory of existing project containers
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json, subprocess
+            ids = subprocess.check_output([
+                'docker', 'ps', '--all', '--quiet', '--filter',
+                'label=com.docker.compose.project=digitafrica-spark'
+            ], text=True).split()
+            records = json.loads(subprocess.check_output(
+                ['docker', 'inspect'] + ids, text=True
+            )) if ids else []
+            summary = []
+            for container in records:
+                labels = container['Config'].get('Labels') or {}
+                summary.append({
+                    'name': container['Name'].lstrip('/'),
+                    'state': container['State']['Status'],
+                    'service': labels.get('com.docker.compose.service', ''),
+                    'managed_by': labels.get('org.digitafrica.managed-by', '')
+                })
+            print(json.dumps(summary))
+      register: livy_existing_containers
+      changed_when: false
+
+    - name: Refuse orphaned, unmanaged or already active project containers
+      ansible.builtin.assert:
+        that:
+          - item.managed_by == 'organiser'
+          - item.service in livy_build_compose.services
+          - item.state in ['exited', 'created']
+        fail_msg: >-
+          Startup refused for {{ item.name }} (service={{ item.service }}, state={{ item.state }}).
+          Handle orphaned or active containers explicitly first. This action never removes containers.
+      loop: "{{ livy_existing_containers.stdout | from_json }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Assemble the explicit Compose command prefix
+      ansible.builtin.set_fact:
+        livy_start_compose_argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ big_data_spark_project_name }}"
+          - --file
+          - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+
+    - name: Start only the three staged pilot services using existing images
+      ansible.builtin.command:
+        argv: "{{ livy_start_compose_argv + ['up', '--detach', '--no-build', '--pull', 'never', 'spark-master', 'spark-worker-1', 'spark-livy'] }}"
+      changed_when: true
+
+    - name: Check the limited pilot readiness evidence
+      ansible.builtin.import_tasks: tasks/big-data-spark-livy-readiness.yml

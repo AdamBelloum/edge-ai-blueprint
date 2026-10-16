@@ -20,3 +20,14 @@ big_data_spark_worker_container_memory: 2048m
 # Each worker advertises one core and 1 GiB for Spark executors; its container
 # limit also leaves room for the worker daemon and executor overhead.
 # END managed Spark Compose staging
+
+# BEGIN managed Livy release lock
+# Opt-in: preparation must continue to stage only, never start services.
+big_data_livy_enabled: false
+big_data_livy_version: "0.9.0-incubating"
+big_data_livy_archive_url: "https://archive.apache.org/dist/incubator/livy/0.9.0-incubating/apache-livy-0.9.0-incubating_2.12-bin.zip"
+big_data_livy_archive_sha512: "50151be834bba3011fccbb564c3c9d6bf7a08af468c2082604f3c5b40ba95705a4c2e925e835bd58a58abcbeb18f3ab7bf588e01fa4f778ff9e82a4b91b9d2de"
+# Locally built from the locked Spark base and verified Livy archive.
+big_data_livy_image: "digitafrica/livy:0.9.0-incubating-spark3.5.3"
+big_data_livy_container_memory: "2048m"
+# END managed Livy release lock

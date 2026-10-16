@@ -18,16 +18,16 @@ No live deployment has been tested during this phase.
 - Existing local release records, backups, and caches were preserved.
 - A local Git exclude protects scripts/workshops/workshop-release.env;
   neither that record nor the exclude rule is part of this documentation.
-- Tracked workshop orchestration uses scripts/workshop/ (singular).
+- Tracked workshop orchestration uses scripts/workshops/ (singular).
 
 ## Verified integration points
 
 | Area | Implementation | Finding |
 | --- | --- | --- |
-| Entry point | scripts/workshop/organizer-main.sh | Owns CLI validation, shared menus, helper setup, and dispatch. |
+| Entry point | scripts/workshops/organizer-main.sh | Owns CLI validation, shared menus, helper setup, and dispatch. |
 | Workshop registration | organizer-main.sh | Requires menu routing and controller loading; any new explicit CLI actions also require help, parser registration, option validation, and dispatch. |
-| Controller pattern | scripts/workshop/controllers/cloud_computing_soa.sh | Sourced facade delegates to a course implementation under its own workshop directory. |
-| Activation safeguards | scripts/workshop/cloud-computing-soa/course-main.sh | Cloud handlers validate cohort completeness, shared activation permission, and asset readiness before patching state. These are patterns to reuse, not Spark runtime tests. |
+| Controller pattern | scripts/workshops/controllers/cloud_computing_soa.sh | Sourced facade delegates to a course implementation under its own workshop directory. |
+| Activation safeguards | scripts/workshops/cloud-computing-soa/course-main.sh | Cloud handlers validate cohort completeness, shared activation permission, and asset readiness before patching state. These are patterns to reuse, not Spark runtime tests. |
 | Asset staging | roles/k8s_apps/tasks/install.yml | Module 2 copies canonical workshop_assets sources to central staging and creates ConfigMaps with explicit flat keys. |
 | Workshop state | install.yml and roles/k8s_apps/templates/jhub-values.yaml.j2 | Shared state includes workshop_type, workshop_module, mode, and solutions_released. State migration and seeder validation must accommodate the chosen Spark identity. |
 | Asset delivery | jhub-values.yaml.j2 | Spawn-time seeder selects assets and reconstructs participant directories. ConfigMap source mounts and seed destinations must both be configured. |

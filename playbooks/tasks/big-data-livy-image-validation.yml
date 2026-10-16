@@ -1,0 +1,23 @@
+---
+- name: Inspect the built Livy image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ big_data_livy_image }}"
+  register: livy_built_image
+  changed_when: false
+
+- name: Verify the built image metadata
+  ansible.builtin.assert:
+    that:
+      - (livy_built_image.stdout | from_json)[0].Os == 'linux'
+      - (livy_built_image.stdout | from_json)[0].Architecture == 'amd64'
+      - (livy_built_image.stdout | from_json)[0].Config.User == '185:0'
+      - (livy_built_image.stdout | from_json)[0].Config.Cmd == ['/opt/livy/bin/livy-server']
+      - "'LIVY_SERVER_START_MODE=foreground' in (livy_built_image.stdout | from_json)[0].Config.Env"
+      - (livy_built_image.stdout | from_json)[0].Config.Labels['org.digitafrica.livy.archive-sha512'] == big_data_livy_archive_sha512
+      - (livy_built_image.stdout | from_json)[0].Config.Labels['org.digitafrica.livy.dockerfile-sha512'] == livy_build_files.results[0].stat.checksum
+      - (livy_built_image.stdout | from_json)[0].Config.Labels['org.digitafrica.livy.spark-base'] == big_data_spark_image
+    fail_msg: Built image metadata failed verification; do not start it.

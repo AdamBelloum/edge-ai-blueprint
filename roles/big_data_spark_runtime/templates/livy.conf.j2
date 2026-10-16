@@ -1,0 +1,9 @@
+# Organiser-managed Livy configuration.
+# Bind inside the container; this does not publish a host port.
+# Participant access must be configured separately and restricted.
+livy.server.host = 0.0.0.0
+livy.server.port = 8998
+
+# Reuse the managed Spark standalone cluster.
+livy.spark.master = spark://spark-master:7077
+livy.spark.deploy-mode = client

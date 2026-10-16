@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Big Data organiser course workflow, sourced through controllers/big_data.sh.
-# Publication delivers participant assets; it does not start or validate Spark.
+# Spark module workflow, sourced by the Big Data course dispatcher.
+# Asset publication remains separate from runtime preparation and startup.
 
-BIG_DATA_COURSE_DIR="$(
+BIG_DATA_SPARK_MODULE_DIR="$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
 )"
-BIG_DATA_SPARK_WORKSPACE_HELPER="$BIG_DATA_COURSE_DIR/prepare-spark-workspace.sh"
-BIG_DATA_COHORT_WORKFLOW="$BIG_DATA_COURSE_DIR/../identity/cohort-workshop.sh"
+BIG_DATA_SPARK_WORKSPACE_HELPER="$BIG_DATA_SPARK_MODULE_DIR/../prepare-spark-workspace.sh"
+BIG_DATA_COHORT_WORKFLOW="$BIG_DATA_SPARK_MODULE_DIR/../../identity/cohort-workshop.sh"
 
 big_data_spark_future_unavailable() {
   printf 'Spark %s is unavailable: implementation is reserved for a future sprint. No changes performed.\n' \
@@ -148,19 +148,6 @@ run_big_data_spark_menu() {
            printf 'Workshop selection status could not be retrieved.\n' >&2 ;;
       0) return 0 ;;
       *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
-    esac
-  done
-}
-
-run_big_data_menu() {
-  local choice
-  while true; do
-    printf '\nBig Data workshops\n\n  1) Spark\n  0) Back to workshops\n\nSelection: '
-    read -r choice || return 0
-    case "$choice" in
-      1) run_big_data_spark_menu ;;
-      0) return 0 ;;
-      *) printf 'Choose 0 or 1.\n' >&2 ;;
     esac
   done
 }

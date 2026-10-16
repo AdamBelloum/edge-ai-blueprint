@@ -1,0 +1,30 @@
+FROM {{ big_data_spark_image }}
+
+USER root
+
+# Ansible will download and checksum-verify this archive into the build context.
+# Verify it again during the image build.
+COPY livy.zip /tmp/livy.zip
+RUN printf '%s  %s\n' "{{ big_data_livy_archive_sha512 }}" "/tmp/livy.zip" \
+      | sha512sum --check --strict - \
+    && python3 -c 'import zipfile; zipfile.ZipFile("/tmp/livy.zip").extractall("/opt")' \
+    && mv "/opt/apache-livy-{{ big_data_livy_version }}_2.12-bin" /opt/livy \
+    && rm /tmp/livy.zip \
+    && chmod 0755 /opt/livy/bin/* \
+    && mkdir -p /opt/livy/logs \
+    && chown 185:0 /opt/livy/logs
+
+ENV LIVY_HOME=/opt/livy \
+    LIVY_CONF_DIR=/opt/livy/conf \
+    LIVY_LOG_DIR=/opt/livy/logs \
+    LIVY_SERVER_START_MODE=foreground \
+    SPARK_HOME=/opt/spark \
+    PYSPARK_PYTHON=python3
+
+WORKDIR /opt/livy
+USER 185:0
+
+# The runtime will mount organiser-managed configuration.
+# No host port is published by this Dockerfile.
+EXPOSE 8998
+CMD ["/opt/livy/bin/livy-server"]

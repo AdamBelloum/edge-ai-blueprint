@@ -85,6 +85,46 @@ services:
       - spark://spark-master:7077
 {% endfor %}
 
+{% if big_data_livy_enabled | bool %}
+  # Optional runtime: preparation stages assets only.
+  # Image building and container startup remain separate organiser actions.
+  # No Livy port is published to the host; notebook access is not enabled here.
+  spark-livy:
+    <<: *spark-common
+    image: "{{ big_data_livy_image }}"
+    build:
+      context: "{{ big_data_spark_runtime_host_path }}/livy-build"
+      dockerfile: Dockerfile
+    hostname: spark-livy
+    cpus: 1.0
+    mem_limit: "{{ big_data_livy_container_memory }}"
+    environment:
+      LIVY_SERVER_JAVA_OPTS: "-Xms128m -Xmx512m"
+    depends_on:
+      - spark-master
+    volumes:
+      # A service-level volumes list replaces the inherited list.
+      # Keep the same read-only dataset mount as the Spark workers.
+      - type: bind
+        source: /opt/digitafrica/big-data/spark/data
+        target: /opt/spark-data/data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/livy.conf"
+        target: /opt/livy/conf/livy.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/livy-spark-defaults.conf"
+        target: /opt/spark/conf/spark-defaults.conf
+        read_only: true
+        bind:
+          create_host_path: false
+{% endif %}
+
 networks:
   spark-private:
     driver: bridge

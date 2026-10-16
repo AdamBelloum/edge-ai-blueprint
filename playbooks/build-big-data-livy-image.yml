@@ -1,0 +1,41 @@
+---
+# Explicit image build only. Never prepare assets, start services, or change accounts.
+- name: Build the staged Livy image on selected group VMs
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars_files:
+    - ../roles/big_data_spark_runtime/defaults/main.yml
+  tasks:
+    - name: Validate the staged Livy build inputs
+      ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+
+    - name: Build the explicit local Livy image without starting containers
+      ansible.builtin.command:
+        argv:
+          - docker
+          - build
+          - --pull=false
+          - --network=none
+          - --file
+          - "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+          - --tag
+          - "{{ big_data_livy_image }}"
+          - --label
+          - "org.digitafrica.livy.archive-sha512={{ big_data_livy_archive_sha512 }}"
+          - --label
+          - "org.digitafrica.livy.dockerfile-sha512={{ livy_build_files.results[0].stat.checksum }}"
+          - --label
+          - "org.digitafrica.livy.spark-base={{ big_data_spark_image }}"
+          - "{{ big_data_spark_runtime_host_path }}/livy-build"
+      changed_when: true
+
+    - name: Validate the resulting Livy image
+      ansible.builtin.import_tasks: tasks/big-data-livy-image-validation.yml
+
+    - name: Report the verified local image identity
+      ansible.builtin.debug:
+        msg: >-
+          Built {{ big_data_livy_image }} as {{ (livy_built_image.stdout | from_json)[0].Id }}.
+          No services were started. Livy startup and execution readiness remain unverified.

@@ -2,7 +2,7 @@
 #
 # Compatibility façade for the Big Data organiser workflow.
 #
-# Sourced by scripts/workshop/organizer-main.sh. Course implementation
+# Sourced by scripts/workshops/organizer-main.sh. Course implementation
 # remains under big-data/, following the existing workshop architecture.
 
 BIG_DATA_CONTROLLER_DIR="$(

@@ -1,0 +1,93 @@
+---
+# Explicit computation test: creates one session and deletes only its own session.
+- name: Test one bounded organiser-controlled Livy computation
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars_files:
+    - ../roles/big_data_spark_runtime/defaults/main.yml
+  tasks:
+    - name: Validate already staged runtime inputs without building
+      ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+
+    - name: Validate the already built Livy image
+      ansible.builtin.import_tasks: tasks/big-data-livy-image-validation.yml
+
+    - name: Require the fixed one-worker pilot and explicit server heap settings
+      ansible.builtin.assert:
+        that:
+          - big_data_spark_project_name == 'digitafrica-spark'
+          - (livy_build_worker_count | int) == 1
+          - "'spark-worker-1' in livy_build_compose.services"
+          - livy_build_compose.services['spark-master'].image == big_data_spark_image
+          - livy_build_compose.services['spark-livy'].environment.LIVY_SERVER_JAVA_OPTS == '-Xms128m -Xmx512m'
+        fail_msg: Startup is restricted to the explicitly staged one-worker educational pilot with the reviewed heap settings.
+
+    - name: Assemble the explicit Compose command prefix
+      ansible.builtin.set_fact:
+        livy_start_compose_argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ big_data_spark_project_name }}"
+          - --file
+          - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+
+    - name: Check the limited pilot readiness evidence
+      ansible.builtin.import_tasks: tasks/big-data-spark-livy-readiness.yml
+
+    - name: Record actual VM resources before the computation
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json, os, pathlib, platform, shutil, subprocess
+            memory = {}
+            for line in pathlib.Path('/proc/meminfo').read_text().splitlines():
+                fields = line.split()
+                if fields[0] in ('MemTotal:', 'MemAvailable:'):
+                    memory[fields[0].rstrip(':')] = int(fields[1]) / 1024
+            docker = json.loads(subprocess.check_output([
+                'docker', 'info', '--format', chr(123) * 2 + 'json .' + chr(125) * 2
+            ], text=True))
+            paths = ['/opt/digitafrica/big-data/runtime/spark', docker['DockerRootDir']]
+            print(json.dumps({
+                'vm_hostname': platform.node(),
+                'architecture': platform.machine(),
+                'reported_vcpus': os.cpu_count(),
+                'ram_mib': memory,
+                'free_disk_gib_by_path': {p: round(shutil.disk_usage(p).free / (1024 ** 3), 2) for p in paths},
+                'measurement_scope': 'pre-test snapshot; not peak usage or a capacity benchmark',
+                'physical_host_placement': 'not established by these VM measurements'
+            }))
+      register: livy_smoke_hardware
+      changed_when: false
+
+    - name: Display actual hardware evidence
+      ansible.builtin.debug:
+        msg:
+          inventory_host: "{{ inventory_hostname }}"
+          hardware: "{{ livy_smoke_hardware.stdout | from_json }}"
+
+    - name: Execute the bounded session test inside the existing Livy container
+      ansible.builtin.command:
+        argv: "{{ livy_start_compose_argv + ['exec', '-T', 'spark-livy', 'python3', '-'] }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../scripts/workshops/big-data/spark/livy-smoke-test.py') }}"
+      register: livy_smoke_result
+      changed_when: (livy_smoke_result.stdout | default('{}', true) | from_json).get('session_request_sent', false)
+      failed_when: false
+
+    - name: Display computation and owned-session cleanup evidence
+      ansible.builtin.debug:
+        msg:
+          - "Return code: {{ livy_smoke_result.rc }}"
+          - "{{ livy_smoke_result.stdout_lines }}"
+          - "{{ livy_smoke_result.stderr_lines }}"
+
+    - name: Require a successful computation and confirmed cleanup
+      ansible.builtin.assert:
+        that:
+          - livy_smoke_result.rc == 0
+        fail_msg: Test failed or cleanup was not confirmed. Inspect the reported session ID before retrying; do not remove unrelated sessions.
