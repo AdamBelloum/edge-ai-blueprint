@@ -111,5 +111,8 @@ analysis, not predictive modelling, causal inference or automated data cleaning.
 The counts above were checked locally with Python's CSV reader. Confirmation of
 those results through the prepared Spark cluster remains pending. Successful
 session creation alone does not prove that every worker participated in execution.
-The accompanying `docs/spark-DA.pdf` still requires its separate full review and
-is not currently an authoritative dictionary for these fields.
+The accompanying `docs/spark-DA.pdf` has completed a **text-only review** and is
+conceptual/historical background, not executable managed-workshop instructions or
+an authoritative dataset dictionary. Visual checks, slide revisions and example
+execution remain pending. The source-repository review is recorded at
+`docs/spark-teaching-material-review.md`, outside the participant bundle.

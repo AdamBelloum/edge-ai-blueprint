@@ -102,8 +102,10 @@ or install software to work around it.
 ## References and historical material
 
 Use `README.md`, the guided notebook and the documented Python script for the
-managed workflow. `docs/spark-DA.pdf` is accompanying teaching material pending
-its separate review; consult the organiser if it conflicts with this workflow.
+managed workflow. `docs/spark-DA.pdf` is conceptual/historical background.
+Its text-only review identified legacy examples and apparent code problems; do
+not copy its local/streaming setup into the managed workshop. Visual checks and
+slide revisions remain pending. Use the prepared notebook or script instead.
 
 The original Docker tutorial is archived in the source repository at
 `docs/archive/spark-standalone-docker-tutorial.md`, outside the participant bundle.
