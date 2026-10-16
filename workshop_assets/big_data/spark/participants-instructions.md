@@ -1,169 +1,105 @@
-## Tutorial: Deploying a Spark Cluster with Docker
-> [!NOTE]
-> This tutorial is a foundational introduction to the `Apache Spark` Big Data platform and Virtualization. The goal is to deploy a functional Spark cluster using Docker containers for educational purposes.
+# Spark participant instructions — managed workshop
 
-### Overview
-We will build a `Spark cluster` composed of two main components:
+> **Pilot status:** do not run either interface until the organiser confirms that
+> the runtime, dataset access, cluster connection and driver networking are ready.
+> These instructions describe the intended workflow, not a validated deployment.
 
-`Spark Master`: The central coordinator.
+## Responsibilities and preparation
 
-`Spark Worker`: The node that executes the data processing tasks.
+The organiser provides the compatible Python/PySpark/Java environment, Spark
+cluster, dataset and connection settings. Do not install dependencies, manage
+Docker containers, change ports, guess settings or substitute local Spark.
+You may inspect the files, run prepared exercises and save your own results.
 
+Open the organiser-provided Spark workspace in JupyterLab. Confirm the CSV exists
+under `data/`. Use the organiser-designated notebook kernel or terminal interpreter.
+Selecting a notebook kernel does not select the terminal's Python. The administrator's
+Ansible environment is not automatically the participant runtime.
 
-## 1. Objectives & Prerequisites
-### Objectives
-- Part 1: Deploy a Docker container using the pre-installed Spark distribution.
-- Part 2: Perform data analytics using the spark-shell.
-- Part 3: Scale the cluster and submit jobs using the spark-submit script.
+Use one interface at a time. Stop its Spark session before switching, particularly
+when fixed callback ports are configured. Both routes replace the same preview.
 
-### Learning Outcomes
-- Container Orchestration: Manage container lifecycles (download, start, stop).
-- Cluster Management: Understand Spark Master/Worker architecture.
-- Application Deployment: Submit jobs to a remote cluster via CLI.
+## Option A: guided notebook
 
-### Software Requirements
-- Docker & Docker Compose [1]
-- Spark 3.5.0 (Local installation required for Part 3 only) [2]
-- Hardware Note: Tested on Apple Silicon (Mac M1, macOS Sonoma).
+1. Open `01-spark-beginner.ipynb` from the Spark workspace directory.
+2. Select the organiser-prepared Python kernel.
+3. Read the explanations and run cells in order using **Shift+Enter**.
+4. Wait for each cell to finish before running dependent cells.
+5. Find your preview under `outputs/` and run the final cleanup cell.
 
-## Part 1: Setting up the Spark Cluster
-### Step 1: Initialize the Environment
-We will use the official Spark image, which is optimized for easy deployment.
+After an error, do not continue dependent cells. If a usable `spark` session exists,
+run the final cleanup cell. After stopping Spark, restart the kernel and begin
+again from the first cell if you want to repeat the exercises.
 
-Task:
+## Option B: terminal Python script
 
-Download the official docker-compose.yml file:
-
-```Yaml
-services:
-  spark:
-     image: apache/spark:latest
-     container_name: spark-spark-1
-     environment:
-       - SPARK_MODE=master
-     ports:
-      - "8080:8080"
-      - "7077:7077"
- # Wap this in quotes to fix the "mapping" error
-command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
-
-   spark-worker:
-     image: apache/spark:latest
-     container_name: spark-spark-worker-1
-     depends_on:
-      - spark
-     environment:
-     - SPARK_MODE=worker
-     - SPARK_MASTER_URL=spark://spark:7077
-     - SPARK_WORKER_MEMORY=1G
-     - SPARK_WORKER_CORES=1
-     ports:
-     - "8081:8081"
-# Wrap this in quotes as well
-command: "/opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark:7077"
-```
-Alternative: Manually pull the image:
+Open a JupyterLab terminal in the Spark workspace. Run the following only if the
+organiser confirms that `python` selects the prepared interpreter; otherwise use
+the exact interpreter command supplied by the organiser:
 
 ```bash
-docker pull apache/spark:latest
-```
-> [!TIP]
-> Exercise: Open the docker-compose.yml file. Can you  identify the purpose of the services, image, environment, and ports keywords?
-
-### Step 2: Start the Cluster
-Run the following commands in your terminal:
-
-```bash
-# Start in the foreground to see logs
-docker compose up
-```
-OR: Start in background (detached mode)
-```bash
-docker compose up -d
-Validation:
-Visit the Spark Web UI at http://localhost:8080.
-```
-Check:
-
-- How many Spark Workers are listed in the UI?
-- Run docker ps. How many containers are currently active?
-
-## Part 2: Data Analysis with Spark-Shell
-### Step 1: Attach a Volume for Data
-To analyze your own data, you must map a local folder to the container.
-
-Open docker-compose.yml.
-
-Add a Volumes section to the Spark service:
-
-```YAML
-services:
-  spark:
-    volumes:
-      - type: bind
-        source: .
-        target: /opt/spark-data
-```
-Download the Bank Personal Loan dataset from Kaggle [3] into your current directory.
-
-### Step 2: Access the Spark Shell
-Get a bash shell inside the running Master container:
-
-```bash
-docker exec -it <container-id> bash
-```
-# Once inside the container, start the shell:
-spark-shell
-### Step 3: Manipulate Data
-Run these Scala commands inside the spark-shell to analyze the CSV:
-
-```scala
-// Read the CSV file
-val df = spark.read.format("csv").option("header","true").load("/opt/spark-data/Bank_Personal_Loan_Modelling.csv")
-
-// View Schema
-df.printSchema()
-
-// Filter Data: Users older than 30
-df.select("Age", "Income", "Family").filter("Age > 30").show()
+python data-analytics.py
 ```
 
-## Part 3: Scaling & Job Submission
-### Step 1: Scale the Cluster
-To simulate a larger environment, we will scale the number of workers.
+The script resolves local paths relative to its own location and performs the
+same analysis activities as the notebook. Once it obtains a Spark session, it
+attempts to stop it after success or an analysis/export failure.
 
-Stop existing containers: docker-compose down
+Successful completion prints the saved path and `Analysis completed successfully.`
+An error and nonzero exit status mean the run did not complete successfully.
 
-Restart with three workers:
+## Prepared connection
 
-```bash
-docker compose up --scale spark-worker=3
-```
-### Step 2: Submit a Job
-The spark-submit script is the standard way to deploy applications. Ensure your local Spark bin folder is in your PATH.
+The organiser supplies `SPARK_MASTER_URL`, `SPARK_DATA_PATH` and `SPARK_DRIVER_HOST`,
+plus optional `SPARK_DRIVER_PORT` and `SPARK_BLOCK_MANAGER_PORT` when required.
+Workers/executors need to connect back to the driver; reaching the master alone
+is insufficient. The local preview and distributed read must use the same supplied
+dataset, even when their paths differ. Do not guess replacement values.
 
-```bash
-spark-submit \
-  --class org.apache.spark.examples.SparkPi \
-  --master spark://<master-IP>:7077 \
-  --deploy-mode client \
-  /path/to/spark-examples_2.12-3.5.0.jar 10
-```
-## References
-[1] [Docker Documentation ualization ](https://docs.docker.com/)
+## Analysis and expected outcomes
 
-[2] [Spark Image]( https://hub.docker.com/r/spark/spark)
+Both routes preview up to five local records, connect to Spark, inspect the schema
+and count the complete input. The supplied local CSV contains **5,000 records**.
+They select `Age`, `Income` and `Family`, retain `Age > 30`, display up to ten matches
+and count all matches. `Age == 30` is excluded. They also count the observed
+`Personal Loan` categories. Matching/category counts are computed, not assumed.
 
-[3] [Kaggle Dataset: Personal Loan Modelling](https://www.kaggle.com/datasets/krantiswalke/bank-personal-loan-modelling)
+Check field meanings, units and category definitions against the dataset source
+and teaching material. This is descriptive analysis, not predictive modelling.
+Neither interface cleans or modifies the input. Session creation alone does not
+prove successful distributed processing or that every available worker ran tasks.
 
-[4] [Spark-Submit Guide](https://supergloo.com/spark/spark-submit/)
+## Export and cleanup
 
-[5] [Docker quick start](https://spark.apache.org/docs/latest/quick-start.html)
+`outputs/filtered_preview.csv` has the `Age`, `Income` and `Family` header and at
+most ten data rows. An empty filtered result produces a header-only CSV.
+Re-running either interface replaces it; rename or download earlier results first.
+Rows are not explicitly ordered, so previews can differ between runs.
 
-[7] [docker builder](https://docs.docker.com/engine/reference/builder/)
+This bounded local collection is not a full export or Spark's distributed CSV
+output directory. Do not remove the limit to collect an arbitrarily large dataset.
+Shared worker input is not modified. Stopping your session releases application
+resources; it does not stop the organiser's cluster containers.
 
-[8] [Docker compose](https://docs.docker.com/compose/gettingstarted/)
+## Troubleshooting
 
-[11] [pyspark](https://supergloo.com/pyspark/python-spark-cluster/#?utm_content=cmp-true)
+- **Missing local CSV:** check the workspace location; ask the organiser to verify delivery.
+- **Missing configuration:** report the named settings; do not invent values.
+- **Missing PySpark / Java startup error:** ask the organiser to check the kernel/interpreter.
+- **Timeout or refused connection:** interrupt a blocked notebook cell and report the error;
+  do not change ports or start containers.
+- **Spark input path unavailable:** ask the organiser to check driver/executor dataset access.
+- **Output permission error:** report the path and error; do not change shared permissions.
 
-[4] https://streaming.humix.com/contents/dnEmKDUvkLkZdeHP/1678083066/index.m3u8
+Report the interface, failing activity and error text. Do not continue after failure
+or install software to work around it.
+
+## References and historical material
+
+Use `README.md`, the guided notebook and the documented Python script for the
+managed workflow. `docs/spark-DA.pdf` is accompanying teaching material pending
+its separate review; consult the organiser if it conflicts with this workflow.
+
+The original Docker tutorial is archived in the source repository at
+`docs/archive/spark-standalone-docker-tutorial.md`, outside the participant bundle.
+Its commands are not current participant instructions or managed provisioning.

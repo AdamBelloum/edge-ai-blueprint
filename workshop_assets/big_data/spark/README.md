@@ -20,7 +20,7 @@ The organiser prepares the runtime and your group's Spark cluster.
 - `data-analytics.py`: documented terminal-based alternative to the notebook, using the same prepared Spark connection and analysis steps.
 - `data/Bank_Personal_Loan_Modelling.csv`: the included input dataset.
 - `docs/spark-DA.pdf`: teaching material.
-- `participants-instructions.md`: the original standalone Docker tutorial, retained for reference.
+- `participants-instructions.md`: managed-workshop guide for both participant interfaces.
 - `outputs/`: created by either interface for your own exported results.
 
 The organiser provisions Spark separately using the managed runtime configuration. The legacy `docker-compose.yml` is not delivered to participant workspaces and is not used for managed provisioning.
@@ -40,5 +40,5 @@ report the error to the organiser. Do not work around it by installing software 
 ## Integration status
 
 These are participant assets, not proof of a working deployment. Runtime preparation,
-file delivery, group connection settings and end-to-end notebook execution still need
+file delivery, group connection settings and end-to-end execution of both interfaces still need
 integration and validation before this workspace is ready for participants.
