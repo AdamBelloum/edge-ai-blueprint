@@ -61,12 +61,17 @@ dataset, even when their paths differ. Do not guess replacement values.
 Both routes preview up to five local records, connect to Spark, inspect the schema
 and count the complete input. The supplied local CSV contains **5,000 records**.
 They select `Age`, `Income` and `Family`, retain `Age > 30`, display up to ten matches
-and count all matches. `Age == 30` is excluded. They also count the observed
-`Personal Loan` categories. Matching/category counts are computed, not assumed.
+and count all matches. `Age == 30` is excluded. For the bundled snapshot, the
+expected matching count is **4,376**. The observed `Personal Loan` codes are `0`
+(**4,520 records**) and `1` (**480 records**); their meanings remain unverified.
+These counts were checked locally; live Spark confirmation remains pending.
 
 Check field meanings, units and category definitions against the dataset source
 and teaching material. This is descriptive analysis, not predictive modelling.
-Neither interface cleans or modifies the input. Session creation alone does not
+Neither interface cleans or modifies the input. There are **52 negative
+`Experience` values**; investigate them rather than silently changing the data.
+See the README's dataset section for the snapshot fingerprint, observations and
+unresolved provenance, units and licensing. Session creation alone does not
 prove successful distributed processing or that every available worker ran tasks.
 
 ## Export and cleanup
