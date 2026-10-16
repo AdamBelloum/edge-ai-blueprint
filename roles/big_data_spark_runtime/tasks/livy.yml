@@ -1,0 +1,69 @@
+---
+# Optional preparation only. Never start services or change Docker enablement.
+- name: Validate the locked Livy release inputs
+  ansible.builtin.assert:
+    that:
+      - big_data_livy_version == '0.9.0-incubating'
+      - big_data_livy_archive_url == 'https://archive.apache.org/dist/incubator/livy/0.9.0-incubating/apache-livy-0.9.0-incubating_2.12-bin.zip'
+      - big_data_livy_archive_sha512 is match('^[0-9a-f]{128}$')
+      - big_data_spark_image == 'apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576'
+      - big_data_livy_container_memory == '2048m'
+      - (ansible_memtotal_mb | int) >= (7168 + 2048 * ((big_data_spark_worker_count | int) - 1))
+    fail_msg: >-
+      Livy requires the locked release and reviewed Spark base, a 2 GiB Livy
+      container limit, and at least 7 GiB total RAM with one Spark worker or
+      9 GiB with two. These staging checks do not guarantee runtime headroom.
+
+- name: Create the protected Livy build context
+  ansible.builtin.file:
+    path: "{{ big_data_spark_runtime_host_path }}/livy-build"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Download and verify the locked Livy archive
+  ansible.builtin.get_url:
+    url: "{{ big_data_livy_archive_url }}"
+    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/livy.zip"
+    checksum: "sha512:{{ big_data_livy_archive_sha512 }}"
+    owner: root
+    group: root
+    mode: '0600'
+    timeout: 120
+    validate_certs: true
+
+- name: Stage the pinned Livy Dockerfile
+  ansible.builtin.template:
+    src: livy.Dockerfile.j2
+    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Restrict the Livy Docker build context
+  ansible.builtin.copy:
+    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/.dockerignore"
+    content: |
+      *
+      !Dockerfile
+      !livy.zip
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Stage the organiser-managed Livy configuration
+  ansible.builtin.template:
+    src: livy.conf.j2
+    dest: "{{ big_data_spark_runtime_host_path }}/livy.conf"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Stage Spark driver networking defaults for Livy
+  ansible.builtin.template:
+    src: livy-spark-defaults.conf.j2
+    dest: "{{ big_data_spark_runtime_host_path }}/livy-spark-defaults.conf"
+    owner: root
+    group: root
+    mode: '0644'

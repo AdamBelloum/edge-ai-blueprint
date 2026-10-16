@@ -1,0 +1,4 @@
+# Used only by the organiser-managed Livy container.
+# Executors resolve this hostname on the shared Spark Docker network.
+spark.driver.host spark-livy
+spark.driver.bindAddress 0.0.0.0

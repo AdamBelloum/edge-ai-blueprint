@@ -1,0 +1,37 @@
+services:
+  spark:
+    image: apache/spark:latest
+    container_name: spark-spark-1
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    # Wap this in quotes to fix the "mapping" error
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+    # Step 1 add volume
+    volumes:
+      - type: bind
+        source: .
+        target: /opt/spark-data
+
+  spark-worker:
+    image: apache/spark:latest
+      # Wie need to comment the name for scalling question container_name:spark-spark-worker-1
+    depends_on:
+      - spark
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=1
+    ports:
+      - "8081"  # "8081:8081"
+
+    # Step 1 add volume
+    volumes:
+      - type: bind
+        source: .
+        target: /opt/spark-data
+    # Wrap this in quotes as well
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark:7077"

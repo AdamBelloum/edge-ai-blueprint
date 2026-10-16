@@ -1,0 +1,4 @@
+---
+# Dedicated Big Data participant-asset staging; no authentication changes.
+big_data_workspace_source: "{{ playbook_dir }}/../workshop_assets/big_data/spark"
+big_data_workspace_host_path: /opt/digitafrica/big-data/spark

@@ -1,0 +1,122 @@
+---
+- name: Validate the reviewed build inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_system == 'Linux'
+      - ansible_architecture == 'x86_64'
+      - (ansible_processor_vcpus | int) >= 4
+      - big_data_spark_runtime_host_path == '/opt/digitafrica/big-data/runtime/spark'
+      - big_data_spark_image == 'apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576'
+      - big_data_livy_image == 'digitafrica/livy:0.9.0-incubating-spark3.5.3'
+      - big_data_livy_archive_sha512 is match('^[0-9a-f]{128}$')
+    fail_msg: Build requires the reviewed platform, runtime path and locked image inputs.
+
+- name: Inspect required staged build files without following symlinks
+  ansible.builtin.stat:
+    path: "{{ big_data_spark_runtime_host_path }}/livy-build/{{ item }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha512
+  loop:
+    - Dockerfile
+    - livy.zip
+  register: livy_build_files
+
+- name: Require root-owned regular build files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+      - (item.stat.uid | default(-1)) == 0
+      - (item.stat.gid | default(-1)) == 0
+      - (item.stat.mode | default('')) == '0600'
+    fail_msg: Run explicit Livy runtime preparation first; protected build files are missing or invalid.
+  loop: "{{ livy_build_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify the archive against the pinned checksum
+  ansible.builtin.assert:
+    that:
+      - livy_build_files.results[1].stat.checksum == big_data_livy_archive_sha512
+    fail_msg: Staged Livy archive checksum mismatch; no image build was attempted.
+
+- name: Read the staged Dockerfile
+  ansible.builtin.slurp:
+    src: "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+  register: livy_dockerfile
+
+- name: Require the pinned Spark base in the staged Dockerfile
+  ansible.builtin.assert:
+    that:
+      - (livy_dockerfile.content | b64decode).splitlines()[0] == ('FROM ' ~ big_data_spark_image)
+    fail_msg: Staged Dockerfile does not use the reviewed Spark base.
+
+- name: Inspect the already prepared Spark base image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ big_data_spark_image }}"
+  register: livy_base_image
+  changed_when: false
+
+- name: Verify the local base platform and digest
+  ansible.builtin.assert:
+    that:
+      - (livy_base_image.stdout | from_json)[0].Os == 'linux'
+      - (livy_base_image.stdout | from_json)[0].Architecture == 'amd64'
+      - big_data_spark_image in ((livy_base_image.stdout | from_json)[0].RepoDigests | default([]))
+    fail_msg: The pinned Spark base must already be present on this VM.
+
+- name: Validate and read the staged Compose configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ big_data_spark_project_name }}"
+      - --file
+      - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+      - config
+      - --format
+      - json
+  register: livy_staged_compose
+  changed_when: false
+
+- name: Decode the staged runtime configuration
+  ansible.builtin.set_fact:
+    livy_build_compose: "{{ livy_staged_compose.stdout | from_json }}"
+
+- name: Require explicitly staged Livy configuration
+  ansible.builtin.assert:
+    that:
+      - "'spark-livy' in livy_build_compose.services"
+    fail_msg: Stage the Livy-enabled runtime explicitly before building; Spark-only preparation is insufficient.
+
+- name: Read the staged worker count
+  ansible.builtin.set_fact:
+    livy_build_worker_count: "{{ livy_build_compose.services.keys() | select('match', '^spark-worker-[12]$') | list | length }}"
+
+- name: Check staged image, build context, privacy and memory limits
+  ansible.builtin.assert:
+    that:
+      - (livy_build_worker_count | int) in [1, 2]
+      - (livy_build_compose.services | length) == (2 + (livy_build_worker_count | int))
+      - livy_build_compose.services['spark-livy'].image == big_data_livy_image
+      - livy_build_compose.services['spark-livy'].build.context == (big_data_spark_runtime_host_path ~ '/livy-build')
+      - livy_build_compose.services['spark-livy'].build.dockerfile == 'Dockerfile'
+      - (livy_build_compose.services['spark-livy'].mem_limit | int) == 2147483648
+      - (livy_build_compose.services['spark-master'].mem_limit | int) == 536870912
+      - "'ports' not in livy_build_compose.services['spark-livy']"
+      - "'network_mode' not in livy_build_compose.services['spark-livy']"
+      - (ansible_memtotal_mb | int) >= (7168 + 2048 * ((livy_build_worker_count | int) - 1))
+    fail_msg: Staged Livy configuration or minimum memory budget differs from the reviewed pilot.
+
+- name: Verify each staged Spark worker uses the reviewed image and limit
+  ansible.builtin.assert:
+    that:
+      - livy_build_compose.services[item].image == big_data_spark_image
+      - (livy_build_compose.services[item].mem_limit | int) == 2147483648
+  loop: "{{ livy_build_compose.services.keys() | select('match', '^spark-worker-[12]$') | list }}"

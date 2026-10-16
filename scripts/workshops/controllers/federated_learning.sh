@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # federated_learning.sh
-# Sourced by scripts/workshop/organizer-main.sh.
+# Sourced by scripts/workshops/organizer-main.sh.
 # It expects the organiser's shared configuration and helper functions.
 
 select_fl_mode() {

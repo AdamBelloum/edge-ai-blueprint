@@ -14,7 +14,7 @@ The organiser does not create or reconfigure the JupyterHub OIDC client. The org
 Run the organiser menu from the repository root:
 
 ```bash
-scripts/workshop/organizer-main.sh
+scripts/workshops/organizer-main.sh
 ```
 
 The menu provides two workshop lifecycle actions:
@@ -33,7 +33,7 @@ Preparation first validates workshop readiness and then initialises the selected
 For automation, use an explicit mode and the required safety acknowledgement:
 
 ```bash
-scripts/workshop/organizer-main.sh \
+scripts/workshops/organizer-main.sh \
   --non-interactive \
   --mode beginner \
   --confirm-cohort-reset \

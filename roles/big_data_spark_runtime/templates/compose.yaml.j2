@@ -1,0 +1,131 @@
+# Organiser-managed private pilot cluster. Never seed into participant homes.
+# RPC is not published to the host.
+# Loopback UI publication is requested below, but host access failed in the pilot.
+# Notebook driver networking and participant UI routing need separate validation.
+name: {{ big_data_spark_project_name }}
+
+x-spark-common: &spark-common
+  image: "{{ big_data_spark_image }}"
+  pull_policy: never
+  init: true
+  restart: "no"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  labels:
+    org.digitafrica.workshop: big-data
+    org.digitafrica.module: spark
+    org.digitafrica.managed-by: organiser
+  networks:
+    - spark-private
+  volumes:
+    - type: bind
+      source: /opt/digitafrica/big-data/spark/data
+      target: /opt/spark-data/data
+      read_only: true
+      bind:
+        create_host_path: false
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  spark-master:
+    <<: *spark-common
+    hostname: spark-master
+    cpus: 0.5
+    mem_limit: "{{ big_data_spark_master_container_memory }}"
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+      SPARK_LOCAL_IP: spark-master
+      SPARK_LOCAL_HOSTNAME: spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    ports:
+      - "127.0.0.1:{{ big_data_spark_master_ui_loopback_port }}:8080"
+
+{% for worker in range(1, (big_data_spark_worker_count | int) + 1) %}
+  spark-worker-{{ worker }}:
+    <<: *spark-common
+    hostname: spark-worker-{{ worker }}
+    cpus: 1.0
+    mem_limit: "{{ big_data_spark_worker_container_memory }}"
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+      SPARK_LOCAL_IP: spark-worker-{{ worker }}
+      SPARK_LOCAL_HOSTNAME: spark-worker-{{ worker }}
+      PYSPARK_PYTHON: python3
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --host
+      - spark-worker-{{ worker }}
+      - --port
+      - "7078"
+      - --webui-port
+      - "8081"
+      - --cores
+      - "1"
+      - --memory
+      - "1g"
+      - --work-dir
+      - /tmp/spark-worker
+      - spark://spark-master:7077
+{% endfor %}
+
+{% if big_data_livy_enabled | bool %}
+  # Optional runtime: preparation stages assets only.
+  # Image building and container startup remain separate organiser actions.
+  # No Livy port is published to the host; notebook access is not enabled here.
+  spark-livy:
+    <<: *spark-common
+    image: "{{ big_data_livy_image }}"
+    build:
+      context: "{{ big_data_spark_runtime_host_path }}/livy-build"
+      dockerfile: Dockerfile
+    hostname: spark-livy
+    cpus: 1.0
+    mem_limit: "{{ big_data_livy_container_memory }}"
+    environment:
+      LIVY_SERVER_JAVA_OPTS: "-Xms128m -Xmx512m"
+    depends_on:
+      - spark-master
+    volumes:
+      # A service-level volumes list replaces the inherited list.
+      # Keep the same read-only dataset mount as the Spark workers.
+      - type: bind
+        source: /opt/digitafrica/big-data/spark/data
+        target: /opt/spark-data/data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/livy.conf"
+        target: /opt/livy/conf/livy.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/livy-spark-defaults.conf"
+        target: /opt/spark/conf/spark-defaults.conf
+        read_only: true
+        bind:
+          create_host_path: false
+{% endif %}
+
+networks:
+  spark-private:
+    driver: bridge
+    internal: true
