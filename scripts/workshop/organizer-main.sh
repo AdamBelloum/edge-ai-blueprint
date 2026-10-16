@@ -72,6 +72,11 @@ Actions:
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
                           Release Cloud Computing SOA Module 2 advanced reference solution.
+  spark-prepare           Stage Spark participant assets only; no runtime startup.
+  spark-publish           Publish Spark beginner workspace and reconcile JupyterHub.
+  spark-status            Show workshop selection; not Spark execution readiness.
+  spark-release-solutions
+                          Reserved for future advanced Spark solutions; currently unavailable.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -96,6 +101,10 @@ Workflow:
   2. Prepare the selected workshop after the participant cohort exists.
   3. Issue/export shared participant credentials when they are ready to distribute.
   4. Distribute credentials to participants.
+
+Spark mode selection: BIG_DATA_SPARK_MODE=beginner|advanced.
+Advanced Spark publication and solution release are currently unavailable.
+Spark publication does not start its runtime or prove participant execution readiness.
 
 Federated Learning preparation is independent from Introduction to AI.
 After pulling or adding a workshop or module, run reconcile-applications before publishing it.
@@ -332,7 +341,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|spark-prepare|spark-publish|spark-status|spark-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -484,6 +493,7 @@ run_workshops_menu() {
     printf '  1) Introduction to AI\n'
     printf '  2) Federated Learning\n'
     printf '  3) Cloud Computing SOA\n'
+    printf '  4) Big Data\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
@@ -492,8 +502,9 @@ run_workshops_menu() {
       1) run_introduction_to_ai_menu ;;
       2) run_federated_learning_menu ;;
       3) run_cloud_computing_soa_menu ;;
+      4) run_big_data_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, or 3.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
     esac
   done
 }
@@ -536,6 +547,8 @@ source "$SCRIPT_DIR/controllers/introduction_to_ai.sh"
 source "$SCRIPT_DIR/controllers/federated_learning.sh"
 # shellcheck source=controllers/cloud_computing_soa.sh
 source "$SCRIPT_DIR/controllers/cloud_computing_soa.sh"
+# shellcheck source=controllers/big_data.sh
+source "$SCRIPT_DIR/controllers/big_data.sh"
 
 # Dispatch only after all dependencies and controllers have been loaded.
 # Interactive menus require a terminal; explicit actions remain scriptable.
@@ -567,6 +580,10 @@ case "$ACTION" in
     cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)"
     ;;
   cloud-module2-release-solutions) cloud_module2_release_solutions ;;
+  spark-prepare) big_data_spark_prepare_workspace ;;
+  spark-publish) big_data_spark_activate ;;
+  spark-status) big_data_spark_show_status ;;
+  spark-release-solutions) big_data_spark_release_solutions ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
