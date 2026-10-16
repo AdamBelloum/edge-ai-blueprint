@@ -4,20 +4,31 @@
 
 ## Start here
 
-Choose your preferred interface:
+Complete the exercises in order. For each exercise, choose the notebook
+(recommended for beginners) or its equivalent Python script—not both.
+The scripts are alternatives, not extra exercises or advanced solutions.
 
-- **Notebook:** open `01-spark-beginner.ipynb` in JupyterLab, select the prepared Python kernel, and run the cells in order.
-- **Python script:** run `python data-analytics.py` in a terminal using the organiser-prepared Python interpreter. The terminal's default Python may differ from the notebook kernel.
+| Order | Goal | Notebook | Python alternative |
+|---|---|---|---|
+| 01 — Spark basics | Analyse the CSV with a workspace-side Spark driver. | `01_spark_basics.ipynb` | `01_spark_basics.py` |
+| 02 — Spark via Livy | Repeat the analysis through pre-deployed Livy. | `02_spark_via_livy.ipynb` | `02_spark_via_livy.py` |
 
-Both routes perform the same analysis activities and export `outputs/filtered_preview.csv`. Re-running either replaces that file.
+Use the organiser-prepared notebook kernel or terminal interpreter.
+Complete Exercise 1 and stop its Spark session before starting Exercise 2.
 
-Do not install Spark, Java or Python packages, or manage Docker containers.
-The organiser prepares the runtime and your group's Spark cluster.
+Exercise 1 exports `outputs/filtered_preview.csv`.
+Exercise 2 exports `outputs/02_filtered_preview.csv`.
+Re-running either alternative replaces that exercise's output.
+
+Do not install software or manage containers. The organiser confirms readiness
+separately for each exercise. Exercise 2 live Livy validation remains pending.
 
 ## Included files
 
-- `01-spark-beginner.ipynb`: guided bank-loan analysis.
-- `data-analytics.py`: documented terminal-based alternative to the notebook, using the same prepared Spark connection and analysis steps.
+- `01_spark_basics.ipynb`: guided bank-loan analysis.
+- `01_spark_basics.py`: documented terminal-based alternative to the notebook, using the same prepared Spark connection and analysis steps.
+- `02_spark_via_livy.ipynb`: guided Livy session and remote analysis.
+- `02_spark_via_livy.py`: terminal alternative and shared notebook helpers.
 - `data/Bank_Personal_Loan_Modelling.csv`: the included input dataset.
 - `docs/spark-DA.pdf`: teaching material.
 - `participants-instructions.md`: managed-workshop guide for both participant interfaces.
@@ -25,7 +36,7 @@ The organiser prepares the runtime and your group's Spark cluster.
 
 The organiser provisions Spark separately using the managed runtime configuration. The legacy `docker-compose.yml` is not delivered to participant workspaces and is not used for managed provisioning.
 
-## Prepared connection
+## Prepared connection — Exercise 1
 
 Workspace preparation must provide a compatible PySpark/Java runtime and these settings:
 
@@ -37,11 +48,27 @@ Workspace preparation must provide a compatible PySpark/Java runtime and these s
 If the notebook reports missing configuration, missing dependencies or connection errors,
 report the error to the organiser. Do not work around it by installing software yourself.
 
+## Prepared connection — Exercise 2
+
+The organiser supplies `LIVY_URL` and `LIVY_DATA_PATH`.
+The remote path identifies the same CSV accessible to the Livy-side driver
+and executors; it need not equal the local path or `SPARK_DATA_PATH`.
+
+Livy is pre-deployed and configured for Spark. Participants only connect.
+Exercise 2 does not use Exercise 1's participant-driver callback settings.
+Both Exercise 2 files must be delivered together: the notebook imports the
+Python companion's helpers without running its terminal workflow.
+
+This simple client assumes organiser-approved access without additional API
+authentication. JupyterHub login does not automatically protect Livy.
+Do not expose an unauthenticated Livy endpoint publicly.
+
 ## Integration status
 
-These are participant assets, not proof of a working deployment. Runtime preparation,
-file delivery, group connection settings and end-to-end execution of both interfaces still need
-integration and validation before this workspace is ready for participants.
+Asset publication does not prove execution readiness. The organiser must
+confirm runtime, settings and dataset access for each exercise. Exercise 2
+requires end-to-end Livy validation. Delivery preserves participant files:
+it does not update a running server or overwrite an existing README.
 
 ## Dataset snapshot and source status
 

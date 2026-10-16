@@ -4,6 +4,13 @@
 > the runtime, dataset access, cluster connection and driver networking are ready.
 > These instructions describe the intended workflow, not a validated deployment.
 
+## Learning path
+
+Read `README.md` first. Complete 01 — Spark basics and stop its Spark session.
+Then complete 02 — Spark via Livy. Choose the notebook or Python alternative
+for each exercise; the script is not an extra exercise or advanced solution.
+The organiser confirms readiness separately. Live Livy validation is pending.
+
 ## Responsibilities and preparation
 
 The organiser provides the compatible Python/PySpark/Java environment, Spark
@@ -16,12 +23,16 @@ under `data/`. Use the organiser-designated notebook kernel or terminal interpre
 Selecting a notebook kernel does not select the terminal's Python. The administrator's
 Ansible environment is not automatically the participant runtime.
 
-Use one interface at a time. Stop its Spark session before switching, particularly
-when fixed callback ports are configured. Both routes replace the same preview.
+Use one interface at a time. Stop Exercise 1's Spark session before switching,
+particularly with fixed callback ports. Delete Exercise 2's Livy session before
+switching. Alternatives share an output file within each exercise; the two
+exercises use separate preview filenames.
 
-## Option A: guided notebook
+## Exercise 1 — Spark basics
 
-1. Open `01-spark-beginner.ipynb` from the Spark workspace directory.
+### Option A: guided notebook
+
+1. Open `01_spark_basics.ipynb` from the Spark workspace directory.
 2. Select the organiser-prepared Python kernel.
 3. Read the explanations and run cells in order using **Shift+Enter**.
 4. Wait for each cell to finish before running dependent cells.
@@ -31,14 +42,14 @@ After an error, do not continue dependent cells. If a usable `spark` session exi
 run the final cleanup cell. After stopping Spark, restart the kernel and begin
 again from the first cell if you want to repeat the exercises.
 
-## Option B: terminal Python script
+### Option B: terminal Python script
 
 Open a JupyterLab terminal in the Spark workspace. Run the following only if the
 organiser confirms that `python` selects the prepared interpreter; otherwise use
 the exact interpreter command supplied by the organiser:
 
 ```bash
-python data-analytics.py
+python 01_spark_basics.py
 ```
 
 The script resolves local paths relative to its own location and performs the
@@ -48,7 +59,7 @@ attempts to stop it after success or an analysis/export failure.
 Successful completion prints the saved path and `Analysis completed successfully.`
 An error and nonzero exit status mean the run did not complete successfully.
 
-## Prepared connection
+### Prepared connection
 
 The organiser supplies `SPARK_MASTER_URL`, `SPARK_DATA_PATH` and `SPARK_DRIVER_HOST`,
 plus optional `SPARK_DRIVER_PORT` and `SPARK_BLOCK_MANAGER_PORT` when required.
@@ -56,7 +67,7 @@ Workers/executors need to connect back to the driver; reaching the master alone
 is insufficient. The local preview and distributed read must use the same supplied
 dataset, even when their paths differ. Do not guess replacement values.
 
-## Analysis and expected outcomes
+### Analysis and expected outcomes
 
 Both routes preview up to five local records, connect to Spark, inspect the schema
 and count the complete input. The supplied local CSV contains **5,000 records**.
@@ -74,7 +85,7 @@ See the README's dataset section for the snapshot fingerprint, observations and
 unresolved provenance, units and licensing. Session creation alone does not
 prove successful distributed processing or that every available worker ran tasks.
 
-## Export and cleanup
+### Export and cleanup
 
 `outputs/filtered_preview.csv` has the `Age`, `Income` and `Family` header and at
 most ten data rows. An empty filtered result produces a header-only CSV.
@@ -86,7 +97,7 @@ output directory. Do not remove the limit to collect an arbitrarily large datase
 Shared worker input is not modified. Stopping your session releases application
 resources; it does not stop the organiser's cluster containers.
 
-## Troubleshooting
+### Troubleshooting
 
 - **Missing local CSV:** check the workspace location; ask the organiser to verify delivery.
 - **Missing configuration:** report the named settings; do not invent values.
@@ -98,6 +109,50 @@ resources; it does not stop the organiser's cluster containers.
 
 Report the interface, failing activity and error text. Do not continue after failure
 or install software to work around it.
+
+## Exercise 2 — Spark via Livy
+
+Repeat Exercise 1's analysis through pre-deployed Livy. Your workspace runs
+the HTTP client; the driver runs on the Livy side.
+
+### Choose one interface
+
+- Notebook: open `02_spark_via_livy.ipynb` and run cells in order.
+  Keep `02_spark_via_livy.py` beside it for the shared helpers.
+- Python alternative: use the organiser-prepared terminal interpreter:
+
+    python 02_spark_via_livy.py
+
+### Connection and activities
+
+The organiser supplies `LIVY_URL` and `LIVY_DATA_PATH`. The remote path must
+identify the supplied CSV accessible to the Livy-side driver and executors.
+Do not guess addresses or substitute participant-driver callback settings.
+
+1. Preview the local CSV.
+2. Create a PySpark session and wait for readiness.
+3. Submit Exercise 1's read, filter and category-count analysis.
+4. Retrieve results using the session and statement IDs returned by Livy.
+5. Transfer at most ten rows to `outputs/02_filtered_preview.csv` locally.
+6. Request deletion of your own Livy session.
+
+Creation and execution are asynchronous. Helpers poll with bounded waits and
+report remote errors. Compare counts with Exercise 1 for the same dataset;
+preview ordering need not match.
+
+### Export, cleanup and errors
+
+Re-running either alternative replaces Exercise 2's preview, not Exercise 1's
+output. The input CSV remains unchanged.
+
+The script attempts deletion in a finally block. In the notebook, run Section 7
+after success or a failed cell if a session ID was obtained. Deletion affects
+your session, not shared containers. Acceptance does not verify finished teardown.
+
+If creation times out before returning an ID, ask the organiser to check for an
+orphan session before retrying. Restarting the kernel does not delete a remote
+session. Report HTTP, authentication, TLS, data-path or cleanup errors.
+Do not disable TLS verification, guess settings or manage containers.
 
 ## References and historical material
 

@@ -26,8 +26,10 @@
         mode: "0644"
       loop:
         - README.md
-        - 01-spark-beginner.ipynb
-        - data-analytics.py
+        - 01_spark_basics.ipynb
+        - 01_spark_basics.py
+        - 02_spark_via_livy.ipynb
+        - 02_spark_via_livy.py
         - participants-instructions.md
         - data/Bank_Personal_Loan_Modelling.csv
         - docs/spark-DA.pdf

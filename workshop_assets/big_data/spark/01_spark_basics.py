@@ -2,7 +2,7 @@
 
 Role
 ----
-This is the terminal-based alternative to ``01-spark-beginner.ipynb``.
+This is the terminal-based alternative to ``01_spark_basics.ipynb``.
 It follows the same activities: preview the local CSV, connect to the prepared
 Spark cluster, inspect the schema, filter records, count loan-outcome categories,
 and export a small preview. It is not a Docker deployment or installation tool.
@@ -13,7 +13,7 @@ The organiser must first validate the compatible Python/PySpark/Java environment
 cluster connection and worker-to-driver networking. In a participant terminal,
 run this script using that prepared Python interpreter::
 
-    python data-analytics.py
+    python 01_spark_basics.py
 
 Here, ``python`` must refer to the organiser-prepared interpreter, not an
 arbitrary system Python or the administrator's Ansible virtual environment.
