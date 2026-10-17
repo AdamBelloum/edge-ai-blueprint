@@ -77,6 +77,9 @@ Actions:
   spark-status            Show workshop selection; not Spark execution readiness.
   spark-release-solutions
                           Reserved for future advanced Spark solutions; currently unavailable.
+  hpc-prepare             Stage HPC teaching assets only; no activation or runtime installation.
+  hpc-openmp-publish      Publish HPC OpenMP basics beginner workspace and reconcile JupyterHub.
+  hpc-status             Show workshop selection; not HPC execution readiness.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -105,6 +108,10 @@ Workflow:
 Spark mode selection: BIG_DATA_SPARK_MODE=beginner|advanced.
 Advanced Spark publication and solution release are currently unavailable.
 Spark publication does not start its runtime or prove participant execution readiness.
+
+HPC currently supports OpenMP basics in beginner mode only; no solution release.
+HPC runtime preparation occurs during participant pod startup.
+HPC publication does not prove asset delivery, runtime installation or OpenMP execution.
 
 Federated Learning preparation is independent from Introduction to AI.
 After pulling or adding a workshop or module, run reconcile-applications before publishing it.
@@ -341,7 +348,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|spark-prepare|spark-publish|spark-status|spark-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -480,7 +487,7 @@ run_status() {
 }
 
 run_application_reconciliation() {
-  "$APPLICATION_RECONCILIATION_HELPER"
+  "$APPLICATION_RECONCILIATION_HELPER" "$@"
 }
 
 # The menu only routes to controllers; the controllers implement each
@@ -494,6 +501,7 @@ run_workshops_menu() {
     printf '  2) Federated Learning\n'
     printf '  3) Cloud Computing SOA\n'
     printf '  4) Big Data\n'
+    printf '  5) HPC\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
@@ -503,8 +511,9 @@ run_workshops_menu() {
       2) run_federated_learning_menu ;;
       3) run_cloud_computing_soa_menu ;;
       4) run_big_data_menu ;;
+      5) run_hpc_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, 4, or 5.\n' >&2 ;;
     esac
   done
 }
@@ -549,6 +558,8 @@ source "$SCRIPT_DIR/controllers/federated_learning.sh"
 source "$SCRIPT_DIR/controllers/cloud_computing_soa.sh"
 # shellcheck source=controllers/big_data.sh
 source "$SCRIPT_DIR/controllers/big_data.sh"
+# shellcheck source=controllers/hpc.sh
+source "$SCRIPT_DIR/controllers/hpc.sh"
 
 # Dispatch only after all dependencies and controllers have been loaded.
 # Interactive menus require a terminal; explicit actions remain scriptable.
@@ -584,6 +595,9 @@ case "$ACTION" in
   spark-publish) big_data_spark_activate ;;
   spark-status) big_data_spark_show_status ;;
   spark-release-solutions) big_data_spark_release_solutions ;;
+  hpc-prepare) hpc_openmp_prepare_workspace ;;
+  hpc-openmp-publish) hpc_openmp_publish ;;
+  hpc-status) hpc_openmp_show_status ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;
