@@ -19,3 +19,6 @@ workshop_notebook_runtime_profiles:
   cloud-computing-soa:
     configmap_name: digitafrica-runtime-cloud-computing-soa
     requirements_source: workshop_assets/cloud_computing_soa/module1_rest_api/requirements.lock
+
+# Opt-in HPC runtime staging and pod integration; preserves other workshops.
+hpc_runtime_enabled: false

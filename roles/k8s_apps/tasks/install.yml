@@ -838,6 +838,18 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+- name: Reconcile the opt-in HPC runtime ConfigMap
+  ansible.builtin.include_tasks:
+    file: hpc-runtime.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  when: hpc_runtime_enabled | default(false) | bool
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Create/update workshop runtime requirements ConfigMaps
   ansible.builtin.shell: |
     set -euo pipefail

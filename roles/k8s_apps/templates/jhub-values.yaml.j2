@@ -351,6 +351,11 @@ singleuser:
     # mounted in the regular notebook container for backwards compatibility.
     # Advanced assets, solutions, and organiser state are init-container-only.
     extraVolumes:
+{% if hpc_runtime_enabled | default(false) | bool %}
+      - name: digitafrica-runtime-hpc
+        configMap:
+          name: digitafrica-runtime-hpc
+{% endif %}
       - name: digitafrica-seed-beginner
         configMap:
           name: digitafrica-notebooks-beginner
@@ -423,6 +428,68 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% if hpc_runtime_enabled | default(false) | bool %}
+    # Prepare only the PVC root; never recursively change participant files.
+    - name: prepare-hpc-home
+      image: alpine:3.20
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -eu
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; home preparation skipped."
+            exit 0
+          fi
+          chown 1000:100 /home/jovyan
+          chmod u+rwx /home/jovyan
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+
+    # Install only into the shared home PVC, never the worker host.
+    - name: prepare-hpc-runtime
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+{% else %}
+      image: jupyter/minimal-notebook:python-3.11
+{% endif %}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      env:
+        - name: HOME
+          value: /home/jovyan
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; installation skipped."
+            exit 0
+          fi
+          bash /runtime/hpc/prepare-hpc-environment.sh /runtime/hpc/environment.yml
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: digitafrica-runtime-hpc
+          mountPath: /runtime/hpc
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
     # Select and cache the pinned runtime profile for the active workshop.
     # Workshops without a profile are dependency-free and require no install.

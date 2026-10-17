@@ -1,0 +1,20 @@
+---
+- name: Stage the independent HPC runtime definitions
+  ansible.builtin.include_role:
+    name: hpc_runtime
+    public: true
+
+- name: Publish the HPC runtime ConfigMap without installing packages
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace | quote }} \
+      create configmap digitafrica-runtime-hpc \
+      --from-file=environment.yml={{ (hpc_runtime_host_path ~ '/environment.yml') | quote }} \
+      --from-file=prepare-hpc-environment.sh={{ (hpc_runtime_host_path ~ '/prepare-hpc-environment.sh') | quote }} \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  register: hpc_runtime_configmap
+  changed_when: >-
+    'created' in hpc_runtime_configmap.stdout or
+    'configured' in hpc_runtime_configmap.stdout
