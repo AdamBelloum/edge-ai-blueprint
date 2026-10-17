@@ -119,6 +119,10 @@ hub:
       SPARK_SOURCE_VOLUME = "digitafrica-spark-source"
       SPARK_SOURCE_HOST_PATH = "/opt/digitafrica/big-data/spark"
       SPARK_SOURCE_SEED_PATH = "/seed/big-data/spark"
+      HPC_WORKSPACE_ENABLED = {{ 'True' if ((hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool)) else 'False' }}
+      HPC_SOURCE_VOLUME = "digitafrica-hpc-source"
+      HPC_SOURCE_HOST_PATH = "/opt/digitafrica/hpc"
+      HPC_SOURCE_SEED_PATH = "/seed/hpc"
       WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
       WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
 
@@ -201,10 +205,88 @@ hub:
           spawner.init_containers = containers
           spawner.volumes = volumes
 
+      def configure_digitafrica_hpc_source(spawner, workspace_role):
+          if workspace_role == "disabled":
+              # Preserve non-HPC spawns without imposing a seeder count.
+              # Remove any source configuration left by an earlier HPC spawn.
+              containers = deepcopy(list(spawner.init_containers or []))
+              for container in containers:
+                  for entry in container.get("env", []):
+                      if entry.get("name") == "DIGITAFRICA_HPC_WORKSPACE_ROLE":
+                          entry.pop("valueFrom", None)
+                          entry["value"] = "disabled"
+                  if "volumeMounts" in container:
+                      container["volumeMounts"] = [
+                          mount for mount in container["volumeMounts"]
+                          if mount.get("name") != HPC_SOURCE_VOLUME
+                      ]
+              spawner.init_containers = containers
+              spawner.volumes = {
+                  key: volume
+                  for key, volume in dict(spawner.volumes or {}).items()
+                  if volume.get("name") != HPC_SOURCE_VOLUME
+              }
+              return
+
+          # Work on copies: never mutate the shared init-container configuration.
+          containers = deepcopy(list(spawner.init_containers or []))
+          seeders = [
+              container for container in containers
+              if any(
+                  mount.get("mountPath") == "/seed/beginner"
+                  for mount in container.get("volumeMounts", [])
+              )
+          ]
+          if len(seeders) != 1:
+              raise RuntimeError("Expected exactly one DIGITAfrica tutorial seed container.")
+
+          seeder = seeders[0]
+          environment = [
+              entry for entry in seeder.get("env", [])
+              if entry.get("name") != "DIGITAFRICA_HPC_WORKSPACE_ROLE"
+          ]
+          environment.append({
+              "name": "DIGITAFRICA_HPC_WORKSPACE_ROLE",
+              "value": workspace_role,
+          })
+          seeder["env"] = environment
+
+          mounts = [
+              mount for mount in seeder.get("volumeMounts", [])
+              if mount.get("name") != HPC_SOURCE_VOLUME
+          ]
+          volumes = {
+              key: volume
+              for key, volume in dict(spawner.volumes or {}).items()
+              if volume.get("name") != HPC_SOURCE_VOLUME
+          }
+
+          if workspace_role == "participant":
+              volumes[HPC_SOURCE_VOLUME] = {
+                  "name": HPC_SOURCE_VOLUME,
+                  "hostPath": {
+                      "path": HPC_SOURCE_HOST_PATH,
+                      "type": "Directory",
+                  },
+              }
+              mounts.append({
+                  "name": HPC_SOURCE_VOLUME,
+                  "mountPath": HPC_SOURCE_SEED_PATH,
+                  "readOnly": True,
+              })
+
+          seeder["volumeMounts"] = mounts
+          spawner.init_containers = containers
+          spawner.volumes = volumes
+
       async def configure_digitafrica_group_workspace(spawner):
           configure_digitafrica_spark_source(
               spawner,
               "administrator" if BIG_DATA_WORKSPACE_ENABLED else "disabled",
+          )
+          configure_digitafrica_hpc_source(
+              spawner,
+              "administrator" if HPC_WORKSPACE_ENABLED else "disabled",
           )
           username = spawner.user.name.lower()
           if OIDC_ENABLED:
@@ -279,6 +361,9 @@ hub:
           if BIG_DATA_WORKSPACE_ENABLED:
               configure_digitafrica_spark_source(spawner, "participant")
 
+          if HPC_WORKSPACE_ENABLED:
+              configure_digitafrica_hpc_source(spawner, "participant")
+
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
   config:
@@ -351,6 +436,11 @@ singleuser:
     # mounted in the regular notebook container for backwards compatibility.
     # Advanced assets, solutions, and organiser state are init-container-only.
     extraVolumes:
+{% if hpc_runtime_enabled | default(false) | bool %}
+      - name: digitafrica-runtime-hpc
+        configMap:
+          name: digitafrica-runtime-hpc
+{% endif %}
       - name: digitafrica-seed-beginner
         configMap:
           name: digitafrica-notebooks-beginner
@@ -423,6 +513,68 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% if hpc_runtime_enabled | default(false) | bool %}
+    # Prepare only the PVC root; never recursively change participant files.
+    - name: prepare-hpc-home
+      image: alpine:3.20
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -eu
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; home preparation skipped."
+            exit 0
+          fi
+          chown 1000:100 /home/jovyan
+          chmod u+rwx /home/jovyan
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+
+    # Install only into the shared home PVC, never the worker host.
+    - name: prepare-hpc-runtime
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+{% else %}
+      image: jupyter/minimal-notebook:python-3.11
+{% endif %}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      env:
+        - name: HOME
+          value: /home/jovyan
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; installation skipped."
+            exit 0
+          fi
+          bash /runtime/hpc/prepare-hpc-environment.sh /runtime/hpc/environment.yml
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: digitafrica-runtime-hpc
+          mountPath: /runtime/hpc
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
     # Select and cache the pinned runtime profile for the active workshop.
     # Workshops without a profile are dependency-free and require no install.
@@ -551,6 +703,9 @@ singleuser:
               big-data)
                 workshop_module=spark
                 ;;
+              hpc)
+                workshop_module=openmp-01-basics
+                ;;
               none|federated-learning)
                 workshop_module=none
                 ;;
@@ -562,7 +717,7 @@ singleuser:
           fi
 
           case "$workshop_type" in
-            none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data) ;;
+            none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data|hpc) ;;
             *)
               echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
               exit 1
@@ -570,7 +725,7 @@ singleuser:
           esac
 
           case "$workshop_module" in
-            none|module1|module2|module3|spark) ;;
+            none|module1|module2|module3|spark|openmp-01-basics) ;;
             *)
               echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
               exit 1
@@ -578,7 +733,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|big-data:spark)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|big-data:spark|hpc:openmp-01-basics)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -642,7 +797,19 @@ singleuser:
             esac
           fi
 
-          copy_seed_file() {{ '{{' }}
+          # Initial HPC track: guided teaching files, no solution release.
+          if [ "$workshop_type" = "hpc" ]; then
+            if [ "$mode" != "beginner" ]; then
+              echo "[seed] ERROR: HPC currently supports beginner mode only." >&2
+              exit 1
+            fi
+            if [ "$solutions_released" != "false" ]; then
+              echo "[seed] ERROR: HPC solution release is unavailable." >&2
+              exit 1
+            fi
+          fi
+
+          copy_seed_file() {
             source_file="$1"
             destination_file="$2"
             overwrite="$3"
@@ -661,9 +828,9 @@ singleuser:
             cp -L "$source_file" "$destination_file"
             chown 1000:100 "$destination_file"
             chmod 0644 "$destination_file"
-          }}
+          }
 
-          write_receipt_if_absent() {{ '{{' }}
+          write_receipt_if_absent() {
             receipt="$1"
             provenance_file="$2"
 
@@ -677,9 +844,53 @@ singleuser:
             ) > "$receipt"
             chown 1000:100 "$receipt"
             chmod 0644 "$receipt"
-          }}
+          }
 
           mkdir -p "$workspace"
+
+          # HPC: explicit teaching-file allowlist; preserve participant edits.
+          # Do not copy runtime definitions into the teaching workspace.
+          if [ "$workshop_type" = "hpc" ] && [ "$workshop_module" = "openmp-01-basics" ]; then
+            case "${DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled}" in
+              administrator)
+                echo "[seed] Administrator: participant HPC workspace skipped."
+                ;;
+              participant)
+                hpc_source=/seed/hpc
+                hpc_workspace=/home/jovyan/HPC
+
+                mkdir -p \
+                  "$hpc_workspace/openmp-01-basics/01-beginner" \
+                  "$hpc_workspace/openmp-01-basics/02-intermediate"
+                for directory in \
+                  "$hpc_workspace" \
+                  "$hpc_workspace/openmp-01-basics" \
+                  "$hpc_workspace/openmp-01-basics/01-beginner" \
+                  "$hpc_workspace/openmp-01-basics/02-intermediate"; do
+                  chown 1000:100 "$directory"
+                  chmod 0755 "$directory"
+                done
+
+                for filename in \
+                  README.md \
+                  LICENSE \
+                  PROVENANCE.md \
+                  openmp-01-basics/01-beginner/hello.c \
+                  openmp-01-basics/02-intermediate/pi_serial.c; do
+                  copy_seed_file "$hpc_source/$filename" "$hpc_workspace/$filename" false
+                done
+
+                # Delivery receipt only, not proof of runtime readiness.
+                write_receipt_if_absent \
+                  "$hpc_workspace/HPC_SEED_RECEIPT.txt" \
+                  "HPC OpenMP basics source files, licence and provenance"
+                ;;
+              *)
+                echo "[seed] ERROR: HPC source delivery is not enabled; reconcile workshop applications before participant startup." >&2
+                exit 1
+                ;;
+            esac
+          fi
 
           # Spark: preserve participant edits on subsequent spawns.
           if [ "$workshop_type" = "big-data" ] && [ "$workshop_module" = "spark" ]; then

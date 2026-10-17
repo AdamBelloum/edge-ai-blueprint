@@ -1,0 +1,9 @@
+---
+hpc_workspace_source: "{{ playbook_dir }}/../workshop_assets/hpc"
+hpc_workspace_host_path: /opt/digitafrica/hpc
+hpc_workspace_files:
+  - README.md
+  - LICENSE
+  - openmp-01-basics/01-beginner/hello.c
+  - openmp-01-basics/02-intermediate/pi_serial.c
+  - PROVENANCE.md

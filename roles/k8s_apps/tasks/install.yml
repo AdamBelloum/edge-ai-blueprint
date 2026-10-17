@@ -570,9 +570,13 @@
   tags:
     - workshop_application_reconciliation
 
-- name: Select Big Data workspace delivery for the active workshop
+# Active HPC selection preserves runtime integration on ordinary reconciliation.
+# Explicit runtime opt-in also permits staging before HPC activation.
+- name: Select participant source delivery and HPC runtime integration
   ansible.builtin.set_fact:
     big_data_workspace_enabled: "{{ (big_data_active_workshop_type.stdout | trim) == 'big-data' }}"
+    hpc_workspace_enabled: "{{ (big_data_active_workshop_type.stdout | trim) == 'hpc' }}"
+    hpc_runtime_enabled: "{{ (hpc_runtime_enabled | default(false) | bool) or ((big_data_active_workshop_type.stdout | trim) == 'hpc') }}"
   tags:
     - workshop_application_reconciliation
 
@@ -759,7 +763,7 @@
     )"
 
     case "$workshop_module" in
-      none|module1|module2|module3|spark)
+      none|module1|module2|module3|spark|openmp-01-basics)
         echo "preserved"
         exit 0
         ;;
@@ -793,6 +797,9 @@
         ;;
       big-data)
         workshop_module=spark
+        ;;
+      hpc)
+        workshop_module=openmp-01-basics
         ;;
       none|federated-learning)
         workshop_module=none
@@ -834,6 +841,18 @@
     executable: /bin/bash
   register: introduction_to_ai_module1_configmap
   changed_when: "'created' in introduction_to_ai_module1_configmap.stdout"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Reconcile the opt-in HPC runtime ConfigMap
+  ansible.builtin.include_tasks:
+    file: hpc-runtime.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  when: hpc_runtime_enabled | default(false) | bool
   tags:
     - workshop_assets
     - workshop_application_reconciliation

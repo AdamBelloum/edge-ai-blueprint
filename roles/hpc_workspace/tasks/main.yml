@@ -1,0 +1,21 @@
+---
+- name: Ensure HPC participant source directories exist
+  ansible.builtin.file:
+    path: "{{ hpc_workspace_host_path }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - ""
+    - openmp-01-basics/01-beginner
+    - openmp-01-basics/02-intermediate
+
+- name: Stage explicitly allowlisted HPC participant files
+  ansible.builtin.copy:
+    src: "{{ hpc_workspace_source }}/{{ item }}"
+    dest: "{{ hpc_workspace_host_path }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ hpc_workspace_files }}"

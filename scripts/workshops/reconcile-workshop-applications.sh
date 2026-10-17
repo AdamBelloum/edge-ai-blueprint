@@ -9,6 +9,28 @@
 
 set -Eeuo pipefail
 
+# Accept only the scoped HPC runtime opt-in; reject unknown arguments
+# before loading deployment context or contacting the deployment.
+HPC_RUNTIME_ARGS=()
+while (($#)); do
+  case "$1" in
+    --enable-hpc-runtime)
+      HPC_RUNTIME_ARGS=(-e '{"hpc_runtime_enabled":true}')
+      shift
+      ;;
+    -h|--help)
+      printf 'Usage: %s [--enable-hpc-runtime]\n' "${0##*/}"
+      printf 'The HPC option stages runtime definitions and enables pod integration.\n'
+      printf 'It does not activate HPC or install packages on worker hosts.\n'
+      exit 0
+      ;;
+    *)
+      printf 'ERROR: Unknown reconciliation option: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="${SCRIPT_DIR}/lib/workshop-context.sh"
 
@@ -36,4 +58,5 @@ printf '%s\n' \
 exec ansible-playbook \
   -i "${DIGITAFRICA_INVENTORY}" \
   "${WORKSHOP_DEPLOYMENT_PLAYBOOK}" \
-  --tags workshop_application_reconciliation
+  --tags workshop_application_reconciliation \
+  "${HPC_RUNTIME_ARGS[@]}"
