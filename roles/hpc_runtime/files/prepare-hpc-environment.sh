@@ -49,5 +49,49 @@ command -v mpicc >/dev/null || fail "MPI compiler wrapper is unavailable."
 command -v mpirun >/dev/null || fail "MPI launcher is unavailable."
 command -v make >/dev/null || fail "Make is unavailable."
 
+# Verify compilation and execution before recording successful preparation.
+smoke_dir="$(mktemp -d "$runtime_root/smoke.XXXXXX")"
+trap 'rm -rf "$smoke_dir"' EXIT
+
+cat > "$smoke_dir/openmp-smoke.c" <<'EOF'
+#include <stdio.h>
+#include <omp.h>
+
+int main(void) {
+    int threads = 0;
+    #pragma omp parallel num_threads(2) reduction(+:threads)
+    threads += 1;
+    printf("[hpc-runtime] OpenMP threads: %d\n", threads);
+    return threads == 2 ? 0 : 1;
+}
+EOF
+
+"$CC" -fopenmp "$smoke_dir/openmp-smoke.c" \
+  -o "$smoke_dir/openmp-smoke"
+OMP_DYNAMIC=FALSE OMP_THREAD_LIMIT=2 "$smoke_dir/openmp-smoke"
+
+cat > "$smoke_dir/mpi-smoke.c" <<'EOF'
+#include <stdio.h>
+#include <mpi.h>
+
+int main(int argc, char **argv) {
+    int rank, size, total;
+    int contribution = 1;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Allreduce(&contribution, &total, 1, MPI_INT, MPI_SUM,
+                  MPI_COMM_WORLD);
+    if (rank == 0)
+        printf("[hpc-runtime] MPI ranks: %d; collective sum: %d\n",
+               size, total);
+    MPI_Finalize();
+    return size == 2 && total == 2 ? 0 : 1;
+}
+EOF
+
+mpicc "$smoke_dir/mpi-smoke.c" -o "$smoke_dir/mpi-smoke"
+mpirun --oversubscribe -n 2 "$smoke_dir/mpi-smoke"
+
 printf '%s\n' "$expected" > "$marker"
 printf '[hpc-runtime] Toolchain available at %s\n' "$prefix"
