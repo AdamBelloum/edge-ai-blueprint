@@ -1,0 +1,24 @@
+---
+- name: Create the separate HPC runtime staging directory
+  ansible.builtin.file:
+    path: "{{ hpc_runtime_host_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Stage the HPC Conda environment definition
+  ansible.builtin.copy:
+    src: "{{ hpc_runtime_environment_source }}"
+    dest: "{{ hpc_runtime_host_path }}/environment.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Stage the in-container HPC installer without executing it
+  ansible.builtin.copy:
+    src: prepare-hpc-environment.sh
+    dest: "{{ hpc_runtime_host_path }}/prepare-hpc-environment.sh"
+    owner: root
+    group: root
+    mode: "0755"

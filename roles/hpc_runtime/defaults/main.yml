@@ -1,0 +1,4 @@
+---
+# Organiser-managed staging only; not the participant teaching directory.
+hpc_runtime_host_path: /opt/digitafrica/hpc-runtime
+hpc_runtime_environment_source: "{{ playbook_dir }}/../workshop_assets/hpc/runtime/environment.yml"
