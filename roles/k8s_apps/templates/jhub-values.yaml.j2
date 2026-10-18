@@ -85,12 +85,6 @@ hub:
   # assigned client VMs by the pre-spawn hook below.
   baseUrl: /jupyter
 
-  # Recheck the participant PVC on every spawn. This permits a workshop reset
-  # to remove workspace claims without leaving stale KubeSpawner PVC state.
-  config:
-    KubeSpawner:
-      remember_pvc_name: false
-
   extraConfig:
 {% if oidc.oidc_enabled %}
     05-digitafrica-oidc-secret: |
@@ -367,6 +361,10 @@ hub:
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
   config:
+    # Recheck the participant PVC on every spawn after a workshop reset.
+    KubeSpawner:
+      remember_pvc_name: false
+
     JupyterHub:
 {% if oidc.oidc_enabled %}
       authenticator_class: generic-oauth
