@@ -592,14 +592,29 @@ run_cloud_computing_soa_menu() {
     printf '%s\n' \
       '  1) Module 1 — REST API' \
       '  2) Module 2 — Microservices and JWT Authentication' \
+      '  5) Module 5 — OpenFaaS (pre-live preparation only)' \
       '  0) Back to workshops'
     printf '\nSelection: '
     read -r choice || return 0
 
     case "$choice" in
       1|2) run_cloud_computing_soa_module_menu "$choice" ;;
+      5) run_cloud_module5_menu ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 2.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, or 5.\n' >&2 ;;
     esac
   done
 }
+
+# Delegate OpenFaaS actions to its module-specific controller.
+CLOUD_COMPUTING_SOA_MODULE5_HELPER="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
+)/openfaas/module-main.sh"
+
+if [[ ! -r "$CLOUD_COMPUTING_SOA_MODULE5_HELPER" ]]; then
+  printf 'Missing OpenFaaS module controller: %s\n' \
+    "$CLOUD_COMPUTING_SOA_MODULE5_HELPER" >&2
+  return 1
+fi
+# shellcheck source=openfaas/module-main.sh
+source "$CLOUD_COMPUTING_SOA_MODULE5_HELPER"
