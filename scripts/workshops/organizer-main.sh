@@ -72,6 +72,9 @@ Actions:
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
                           Release Cloud Computing SOA Module 2 advanced reference solution.
+  cloud-module5-check     Check local OpenFaaS assets; no infrastructure access.
+  cloud-module5-status    Show authoring status, not live platform readiness.
+  cloud-module5-publish   Blocked pending reference-lab validation.
   spark-prepare           Stage Spark participant assets only; no runtime startup.
   spark-publish           Publish Spark beginner workspace and reconcile JupyterHub.
   spark-status            Show workshop selection; not Spark execution readiness.
@@ -348,7 +351,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -381,6 +384,24 @@ case "$ACTION" in
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with fl-prepare.'
     "$CONFIRM_COHORT_RESET" &&
       fail '--confirm-cohort-reset is valid only with --non-interactive fl-prepare.'
+    ;;
+esac
+
+# OpenFaaS pre-live actions bypass deployment context and identity services.
+# Keep these after option validation and before shared infrastructure loading.
+case "$ACTION" in
+  cloud-module5-check|cloud-module5-status|cloud-module5-publish)
+    module5_helper="$SCRIPT_DIR/cloud-computing-soa/openfaas/module-main.sh"
+    [[ -r "$module5_helper" ]] ||
+      fail "Missing OpenFaaS module controller: $module5_helper"
+    # shellcheck source=cloud-computing-soa/openfaas/module-main.sh
+    source "$module5_helper"
+    case "$ACTION" in
+      cloud-module5-check) cloud_module5_check ;;
+      cloud-module5-status) cloud_module5_status ;;
+      cloud-module5-publish) cloud_module5_publish ;;
+    esac
+    exit $?
     ;;
 esac
 
