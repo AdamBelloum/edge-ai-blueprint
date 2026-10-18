@@ -56,6 +56,36 @@ class OpenFaaSOrganizerTests(unittest.TestCase):
         self.assertIn("Pre-live checker is not yet staged", result.stderr)
         self.assertIn(str(self.root / "workshop_assets"), result.stderr)
 
+    def copy_assets(self):
+        """Stage authoring assets in the disposable checkout only."""
+        relative = Path("workshop_assets/cloud_computing_soa/module5_openfaas")
+        target = self.root / relative
+        shutil.copytree(
+            ROOT / relative, target,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "lab.local.json", "workspaces"),
+        )
+        return target
+
+    def test_check_runs_staged_assets_without_deployment_context(self):
+        """A successful check reports local evidence, never live readiness."""
+        assets = self.copy_assets()
+        result = self.run_action("cloud-module5-check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PASS: Required assets and local Python regressions", result.stdout)
+        self.assertIn("NOT VALIDATED:", result.stdout)
+        self.assertIn("publication remains blocked", result.stdout)
+        self.assertFalse(list(assets.rglob("__pycache__")))
+
+    def test_check_rejects_incomplete_staged_assets(self):
+        """Required test files cannot silently disappear from discovery."""
+        assets = self.copy_assets()
+        (assets / "tests/test_traffic.py").unlink()
+        result = self.run_action("cloud-module5-check")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Required pre-live assets are missing", result.stderr)
+        self.assertIn("tests/test_traffic.py", result.stderr)
+        self.assertNotIn("PASS:", result.stdout)
+
     def test_invalid_options_are_rejected_before_offline_dispatch(self):
         """Preserve the existing action-specific option validation."""
         result = self.run_action("--mode", "beginner", "cloud-module5-status")

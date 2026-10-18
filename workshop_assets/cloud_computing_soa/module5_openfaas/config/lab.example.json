@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "live_test_enabled": false,
+  "lab_id": "group-01",
+  "gateway_url": "https://gateway.example.invalid",
+  "monitoring_url": "https://monitoring.example.invalid",
+  "registry_repository": "registry.example.invalid/group-01",
+  "functions": {
+    "prepared_greeting": "group-01-prepared-greeting",
+    "greeting": "group-01-greeting",
+    "weather": "group-01-weather"
+  },
+  "image_tag": "v1",
+  "request_timeout_seconds": 10,
+  "readiness_timeout_seconds": 120,
+  "load": {
+    "requests": 20,
+    "interval_seconds": 0.5,
+    "concurrency": 1
+  }
+}

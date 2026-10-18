@@ -1,0 +1,2 @@
+# Organiser-supplied local configuration is never part of the teaching release.
+*.local.json

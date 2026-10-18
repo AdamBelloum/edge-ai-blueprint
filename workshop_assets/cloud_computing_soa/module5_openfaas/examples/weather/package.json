@@ -1,0 +1,13 @@
+{
+  "name": "workshop-weather",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deterministic beginner OpenFaaS weather exercise",
+  "main": "handler.js",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "test": "node --test handler.test.js"
+  }
+}
