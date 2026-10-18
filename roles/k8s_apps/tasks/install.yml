@@ -387,6 +387,16 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+- name: Publish Module 5 assets only when explicitly enabled
+  ansible.builtin.include_tasks:
+    file: openfaas-assets.yml
+    apply:
+      tags: &id001
+      - workshop_assets
+      - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
+  tags: *id001
+
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
     set -euo pipefail

@@ -499,6 +499,52 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-tests
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+      - name: digitafrica-seed-cloud-computing-soa-module5-beginner
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module5-beginner
+          items:
+            - key: asset_001
+              path: .gitignore
+            - key: asset_002
+              path: README.md
+            - key: asset_003
+              path: SOURCE.md
+            - key: asset_004
+              path: UPSTREAM-LICENSE.txt
+            - key: asset_005
+              path: beginner/01-explore-and-invoke.ipynb
+            - key: asset_006
+              path: beginner/02-develop-and-deploy.ipynb
+            - key: asset_007
+              path: beginner/03-data-and-observability.ipynb
+            - key: asset_008
+              path: config/.gitignore
+            - key: asset_009
+              path: config/lab.example.json
+            - key: asset_010
+              path: fixtures/weather-sample.json
+            - key: asset_011
+              path: helpers/invoke.py
+            - key: asset_012
+              path: helpers/lab_config.py
+            - key: asset_013
+              path: helpers/manifests.py
+            - key: asset_014
+              path: helpers/traffic.py
+            - key: asset_015
+              path: examples/greeting/handler.js
+            - key: asset_016
+              path: examples/greeting/handler.test.js
+            - key: asset_017
+              path: examples/greeting/package.json
+            - key: asset_018
+              path: examples/weather/handler.js
+            - key: asset_019
+              path: examples/weather/handler.test.js
+            - key: asset_020
+              path: examples/weather/package.json
+{% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
 {% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
       - name: digitafrica-runtime-{{ profile_name }}
@@ -725,7 +771,7 @@ singleuser:
           esac
 
           case "$workshop_module" in
-            none|module1|module2|module3|spark|openmp-01-basics) ;;
+            none|module1|module2|module3|module5|spark|openmp-01-basics) ;;
             *)
               echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
               exit 1
@@ -733,7 +779,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|big-data:spark|hpc:openmp-01-basics)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -808,6 +854,20 @@ singleuser:
               exit 1
             fi
           fi
+
+          # BEGIN CLOUD MODULE 5 VALIDATION
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
+            cloud_module5_delivery_enabled={{ 'true' if cloud_module5_delivery_enabled | default(false) | bool else 'false' }}
+            if [ "$cloud_module5_delivery_enabled" != "true" ]; then
+              echo "[seed] ERROR: Module 5 delivery is disabled; publication remains blocked." >&2
+              exit 1
+            fi
+            if [ "$mode" != "beginner" ] || [ "$solutions_released" != "false" ]; then
+              echo "[seed] ERROR: Module 5 requires beginner mode and solutions_released=false." >&2
+              exit 1
+            fi
+          fi
+          # END CLOUD MODULE 5 VALIDATION
 
           copy_seed_file() {
             source_file="$1"
@@ -1370,6 +1430,35 @@ singleuser:
             fi
           fi
 
+          # BEGIN CLOUD MODULE 5 SEEDING
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
+            cloud_module5_source=/seed/cloud-computing-soa/module5
+            cloud_module5_parent=/home/jovyan/Cloud-Computing-SOA
+            cloud_module5_workspace="$cloud_module5_parent/Module-5"
+            # Preflight all required sources before Module 5 workspace writes.
+            for filename in .gitignore README.md SOURCE.md UPSTREAM-LICENSE.txt beginner/01-explore-and-invoke.ipynb beginner/02-develop-and-deploy.ipynb beginner/03-data-and-observability.ipynb config/.gitignore config/lab.example.json fixtures/weather-sample.json helpers/invoke.py helpers/lab_config.py helpers/manifests.py helpers/traffic.py examples/greeting/handler.js examples/greeting/handler.test.js examples/greeting/package.json examples/weather/handler.js examples/weather/handler.test.js examples/weather/package.json; do
+              if [ ! -f "$cloud_module5_source/$filename" ]; then
+                echo "[seed] ERROR: missing required Module 5 seed file: $filename" >&2
+                exit 1
+              fi
+            done
+            mkdir -p "$cloud_module5_workspace"
+            chown 1000:100 "$cloud_module5_parent" "$cloud_module5_workspace"
+            chmod 0755 "$cloud_module5_parent" "$cloud_module5_workspace"
+            for directory in beginner config examples examples/greeting examples/weather fixtures helpers; do
+              mkdir -p "$cloud_module5_workspace/$directory"
+              chown 1000:100 "$cloud_module5_workspace/$directory"
+              chmod 0755 "$cloud_module5_workspace/$directory"
+            done
+            for filename in .gitignore README.md SOURCE.md UPSTREAM-LICENSE.txt beginner/01-explore-and-invoke.ipynb beginner/02-develop-and-deploy.ipynb beginner/03-data-and-observability.ipynb config/.gitignore config/lab.example.json fixtures/weather-sample.json helpers/invoke.py helpers/lab_config.py helpers/manifests.py helpers/traffic.py examples/greeting/handler.js examples/greeting/handler.test.js examples/greeting/package.json examples/weather/handler.js examples/weather/handler.test.js examples/weather/package.json; do
+              copy_seed_file "$cloud_module5_source/$filename" "$cloud_module5_workspace/$filename" false
+            done
+            # Receipt records initial delivery, not runtime readiness.
+            write_receipt_if_absent "$cloud_module5_workspace/MODULE5_BEGINNER_SEED_RECEIPT.txt" "SOURCE.md"
+            echo "[seed] Module 5 assets delivered; live readiness NOT VALIDATED."
+          fi
+          # END CLOUD MODULE 5 SEEDING
+
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] workshop module: $workshop_module"
           echo "[seed] workshop mode: $mode"
@@ -1432,6 +1521,11 @@ singleuser:
         - name: digitafrica-seed-cloud-computing-soa-module2-tests
           mountPath: /seed/cloud-computing-soa/module2/tests
           readOnly: true
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+        - name: digitafrica-seed-cloud-computing-soa-module5-beginner
+          mountPath: /seed/cloud-computing-soa/module5
+          readOnly: true
+{% endif %}
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
           mountPath: /home/jovyan
