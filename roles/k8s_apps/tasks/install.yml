@@ -619,6 +619,17 @@
   tags:
     - workshop_application_reconciliation
 
+- name: Reconcile Cloud Computing SOA Module 3 teaching assets
+  ansible.builtin.include_tasks:
+    file: cloud-soa-module3-assets.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Verify protected JupyterHub OIDC client secret record
   ansible.builtin.assert:
     that:

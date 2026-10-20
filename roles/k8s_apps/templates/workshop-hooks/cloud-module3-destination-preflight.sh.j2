@@ -1,0 +1,77 @@
+# Run after Module 3 source preflight; no filesystem writes.
+if [ "$workshop_type" = "cloud-computing-soa" ] &&
+   [ "$workshop_module" = "module3" ]; then
+  cloud_module3_workspace=/home/jovyan/Cloud-Computing-SOA/Module-3
+  cloud_module3_receipt_name=MODULE3_DELIVERY_RECEIPT.txt
+
+  cloud_module3_check_directory() {{ '{{' }}
+    cloud_module3_checked_directory="$1"
+    while :; do
+      if [ -L "$cloud_module3_checked_directory" ]; then
+        echo "[seed] ERROR: Module 3 destination directory is a symlink: $cloud_module3_checked_directory" >&2
+        exit 1
+      fi
+      if [ -e "$cloud_module3_checked_directory" ] &&
+         [ ! -d "$cloud_module3_checked_directory" ]; then
+        echo "[seed] ERROR: Module 3 destination directory has a conflicting object: $cloud_module3_checked_directory" >&2
+        exit 1
+      fi
+      [ "$cloud_module3_checked_directory" = "/" ] && break
+      cloud_module3_checked_directory="$(dirname "$cloud_module3_checked_directory")"
+    done
+  {{ '}}' }}
+
+  cloud_module3_check_file() {{ '{{' }}
+    cloud_module3_checked_file="$1"
+    cloud_module3_check_directory "$(dirname "$cloud_module3_checked_file")"
+    if [ -L "$cloud_module3_checked_file" ]; then
+      echo "[seed] ERROR: Module 3 destination file is a symlink: $cloud_module3_checked_file" >&2
+      exit 1
+    fi
+    if [ -e "$cloud_module3_checked_file" ] &&
+       [ ! -f "$cloud_module3_checked_file" ]; then
+      echo "[seed] ERROR: Module 3 destination file has a conflicting object: $cloud_module3_checked_file" >&2
+      exit 1
+    fi
+  {{ '}}' }}
+
+  # Reject map-internal file/directory collisions, even on a fresh home.
+  LC_ALL=C awk -F '\t' '
+    {{ '{{' }}
+      paths[$1 SUBSEP $3] = 1
+      tracks[NR] = $1
+      relatives[NR] = $3
+    {{ '}}' }}
+    END {{ '{{' }}
+      for (row = 1; row <= NR; row++) {{ '{{' }}
+        relative = relatives[row]
+        if (relative == "MODULE3_DELIVERY_RECEIPT.txt") {{ '{{' }}
+          print "[seed] ERROR: Module 3 map uses reserved receipt path" > "/dev/stderr"
+          exit 1
+        {{ '}}' }}
+        while (sub(/\/[^\/]+$/, "", relative)) {{ '{{' }}
+          if (relative == "MODULE3_DELIVERY_RECEIPT.txt" ||
+              paths[tracks[row] SUBSEP relative]) {{ '{{' }}
+            print "[seed] ERROR: Module 3 map has a file/directory collision" > "/dev/stderr"
+            exit 1
+          {{ '}}' }}
+        {{ '}}' }}
+      {{ '}}' }}
+    {{ '}}' }}
+  ' "$cloud_module3_map" || exit 1
+
+  cloud_module3_check_directory "$cloud_module3_workspace"
+  for cloud_module3_track in $cloud_module3_tracks; do
+    cloud_module3_track_workspace="$cloud_module3_workspace/$cloud_module3_track"
+    cloud_module3_check_directory "$cloud_module3_track_workspace"
+    cloud_module3_check_file \
+      "$cloud_module3_track_workspace/$cloud_module3_receipt_name"
+
+    while IFS="$cloud_module3_tab" read -r mapped_track mapped_key mapped_path ||
+          [ -n "$mapped_track" ]; do
+      [ "$mapped_track" = "$cloud_module3_track" ] || continue
+      cloud_module3_check_file "$cloud_module3_track_workspace/$mapped_path"
+    done < "$cloud_module3_map"
+  done
+  echo "[seed] Module 3 destination preflight passed; no files written."
+fi

@@ -31,6 +31,31 @@ Open `orchestration/`.
 
 Write at most half a page about your Kubernetes experience and challenges, and at most half a page about your load-balancing observations.
 
+## Runtime prerequisites and safety
+
+- Run container exercises on the organiser-approved Docker host.
+  Receiving these files in JupyterHub does not imply Docker access.
+- For Kubernetes, use the organiser-approved isolated lab namespace.
+  Follow the cluster-setup tutorial only when provisioning dedicated lab
+  VMs; do not reinstall or reconfigure an existing shared cluster.
+- Before deploying Kubernetes manifests, verify the configured images
+  are available to all eligible nodes and the required NFS/RWX storage
+  is provisioned for this lab. Node-local RWO storage is not a substitute.
+- For external-access evidence, record the client host, endpoint, and
+  access method. Label SSH-tunnel results explicitly; they do not prove
+  direct reachability of the published host or cluster endpoint.
+- A consistent view during sequential requests is an observation, not
+  proof of safe concurrent storage. Shared JSON files can suffer lost
+  updates or corruption with concurrent writers. Keep replica experiments
+  controlled; this storage design is not suitable for production.
+- Stop Compose services using the same file and project name used at
+  startup. Preserve volumes during persistence tests. Delete lab data
+  only through an explicit, scoped reset.
+- Remove only your lab-owned Kubernetes resources. Do not delete shared
+  namespaces, storage, or other workshop resources.
+- Keep generated private keys and credentials outside Git and shared
+  bundles. Do not include them in reports or request evidence.
+
 ## Completion
 
 Demonstrate the required results for both parts. Document actual deployment commands and identify the files used for each part. Keep optional extensions separate from required work. Follow Assignment 3 for report, submission and source-attribution requirements.

@@ -13,8 +13,13 @@ set -Eeuo pipefail
 # before loading deployment context or contacting the deployment.
 HPC_RUNTIME_ARGS=()
 OPENFAAS_REHEARSAL_ARGS=()
+CLOUD_MODULE3_DELIVERY_ARGS=()
 while (($#)); do
   case "$1" in
+    --enable-cloud-module3-delivery)
+      CLOUD_MODULE3_DELIVERY_ARGS=(-e '{"cloud_module3_delivery_enabled":true}')
+      shift
+      ;;
     --enable-hpc-runtime)
       HPC_RUNTIME_ARGS=(-e '{"hpc_runtime_enabled":true}')
       shift
@@ -24,12 +29,13 @@ while (($#)); do
       shift
       ;;
     -h|--help)
-      printf 'Usage: %s [--enable-hpc-runtime] [--enable-openfaas-offline-rehearsal]\n' "${0##*/}"
+      printf 'Usage: %s [--enable-hpc-runtime] [--enable-openfaas-offline-rehearsal] [--enable-cloud-module3-delivery]\n' "${0##*/}"
       printf 'The HPC option stages runtime definitions and enables pod integration.\n'
       printf 'It does not activate HPC or install packages on worker hosts.\n'
       printf 'The OpenFaaS option stages draft assets for a private test-cohort rehearsal.\n'
       printf 'It does not activate Module 5, install OpenFaaS, or enable live invocation.\n'
       printf 'This is not approval for real workshop publication.\n'
+      printf 'The Module 3 option enables teaching-file delivery only; no activation or exercise runtime.\n'
       exit 0
       ;;
     *)
@@ -68,4 +74,5 @@ exec ansible-playbook \
   "${WORKSHOP_DEPLOYMENT_PLAYBOOK}" \
   --tags workshop_application_reconciliation \
   "${HPC_RUNTIME_ARGS[@]}" \
-  "${OPENFAAS_REHEARSAL_ARGS[@]}"
+  "${OPENFAAS_REHEARSAL_ARGS[@]}" \
+  "${CLOUD_MODULE3_DELIVERY_ARGS[@]}"

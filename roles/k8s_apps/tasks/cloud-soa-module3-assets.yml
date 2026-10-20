@@ -101,14 +101,98 @@
         "digitafrica-notebooks-cloud-computing-soa-module3-$track" \
         "${arguments[@]}" \
         --from-file=asset_map_tsv="$root/asset-map.tsv" \
-        --dry-run=client -o yaml > "$temporary/$track.yaml"
+        --dry-run=client -o json > "$temporary/$track.json"
     done
 
+    # Validate every rendered manifest before the first API write.
+    python3 - "$temporary" "$namespace" <<'PY_PREFLIGHT'
+    import json
+    import sys
+    from pathlib import Path
+
+    temporary = Path(sys.argv[1])
+    namespace = sys.argv[2]
+    budget = 200 * 1024
+    annotation_key = "kubectl.kubernetes.io/last-applied-configuration"
+
+    for track in ("beginner", "advanced", "solutions", "tests"):
+        manifest = json.loads(
+            (temporary / f"{track}.json").read_text(encoding="utf-8")
+        )
+        expected_name = (
+            "digitafrica-notebooks-cloud-computing-soa-module3-" + track
+        )
+        metadata = manifest.get("metadata", {})
+        if (
+            manifest.get("apiVersion") != "v1"
+            or manifest.get("kind") != "ConfigMap"
+            or metadata.get("name") != expected_name
+            or metadata.get("namespace") != namespace
+        ):
+            raise SystemExit(f"ERROR: unexpected manifest identity for {track}")
+
+        # Never request removal of the server-managed creation timestamp.
+        metadata.pop("creationTimestamp", None)
+        # Match kubectl client-side apply annotation normalization.
+        metadata.setdefault("annotations", {})
+
+        data = manifest.get("data", {})
+        if (
+            not isinstance(data, dict)
+            or "asset_map_tsv" not in data
+            or not all(isinstance(value, str) for value in data.values())
+            or manifest.get("binaryData")
+        ):
+            raise SystemExit(f"ERROR: unexpected ConfigMap data for {track}")
+
+        data_bytes = sum(len(value.encode("utf-8")) for value in data.values())
+        serialized_bytes = len(
+            json.dumps(manifest, ensure_ascii=True).encode("utf-8")
+        ) + 1
+
+        # Conservatively estimate the generated last-applied annotation
+        # alongside any annotations already in the rendered manifest.
+        annotations = metadata.get("annotations") or {}
+        existing_bytes = sum(
+            len(key.encode("utf-8")) + len(value.encode("utf-8"))
+            for key, value in annotations.items()
+            if key != annotation_key
+        )
+        annotation_bytes = (
+            existing_bytes + len(annotation_key.encode("utf-8"))
+            + serialized_bytes
+        )
+
+        if max(data_bytes, serialized_bytes, annotation_bytes) > budget:
+            raise SystemExit(
+                f"ERROR: {track} rendered ConfigMap exceeds "
+                f"{budget}-byte project budget "
+                f"(data={data_bytes}, JSON={serialized_bytes}, "
+                f"annotation estimate={annotation_bytes})"
+            )
+        # Apply the same normalized manifest that passed the budget checks.
+        (temporary / f"{track}.json").write_text(
+            json.dumps(manifest, ensure_ascii=True) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            f"PASS: {track} rendered ConfigMap budget "
+            f"(data={data_bytes}, JSON={serialized_bytes}, "
+            f"annotation estimate={annotation_bytes})"
+        )
+    PY_PREFLIGHT
+
+    # Separate API writes: rerun reconciliation after a partial apply failure.
     for track in beginner advanced solutions tests; do
-      k3s kubectl -n "$namespace" apply -f "$temporary/$track.yaml"
+      k3s kubectl -n "$namespace" apply -f "$temporary/$track.json"
     done
   args:
     executable: /bin/bash
+  register: cloud_module3_asset_reconciliation
+  changed_when: >-
+    (cloud_module3_asset_reconciliation.stdout_lines
+     | select('match', '^configmap/[^ ]+ (created|configured)$')
+     | list | length) > 0
   tags:
     - workshop_assets
     - workshop_application_reconciliation

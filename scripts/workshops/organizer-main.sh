@@ -74,6 +74,12 @@ Actions:
                           Release Cloud Computing SOA Module 2 advanced reference solution.
   cloud-module3-check     Check local Module 3 assets for all tracks; no infrastructure access.
   cloud-module3-status    Show integration status, not deployed/runtime readiness.
+  cloud-module3-readiness Check deployed teaching-file readiness; runtime unvalidated.
+  cloud-module3-deployment-status
+                         Inspect deployed assets, delivery configuration and state.
+  cloud-module3-publish   Publish teaching files after safeguards and explicit confirmation.
+  cloud-module3-release-solutions
+                         Explicitly release solutions for active Module 3 advanced mode.
   cloud-module5-check     Check local OpenFaaS assets; no infrastructure access.
   cloud-module5-status    Show authoring status, not live platform readiness.
   cloud-module5-publish   Blocked pending reference-lab validation.
@@ -353,7 +359,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module3-readiness|cloud-module3-deployment-status|cloud-module3-publish|cloud-module3-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -630,6 +636,13 @@ case "$ACTION" in
     cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)"
     ;;
   cloud-module2-release-solutions) cloud_module2_release_solutions ;;
+  cloud-module3-readiness)
+    cloud_mode="$(cloud_module3_select_mode)" || exit $?
+    cloud_module3_check_activation_readiness "$cloud_mode"
+    ;;
+  cloud-module3-deployment-status) cloud_module3_show_deployment_status ;;
+  cloud-module3-publish) cloud_module3_activate ;;
+  cloud-module3-release-solutions) cloud_module3_release_solutions ;;
   spark-prepare) big_data_spark_prepare_workspace ;;
   spark-publish) big_data_spark_activate ;;
   spark-status) big_data_spark_show_status ;;

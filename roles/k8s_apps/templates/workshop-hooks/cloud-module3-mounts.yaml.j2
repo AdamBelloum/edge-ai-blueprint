@@ -1,0 +1,7 @@
+{% if cloud_module3_delivery_enabled | default(false) | bool %}
+{% for track in ['beginner', 'advanced', 'solutions', 'tests'] %}
+        - name: digitafrica-seed-cloud-computing-soa-module3-{{ track }}
+          mountPath: /seed/cloud-computing-soa/module3/{{ track }}
+          readOnly: true
+{% endfor %}
+{% endif %}

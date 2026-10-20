@@ -11,7 +11,7 @@ import tempfile
 import textwrap
 import unittest
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / 'workshop_assets/cloud_computing_soa/module5_openfaas'
@@ -26,7 +26,10 @@ class FullSeedScriptTests(unittest.TestCase):
         self.assertIn('      command: ["sh", "-lc"]', text.split(marker, 1)[1].split('      args:', 1)[0])
         self.source = textwrap.dedent(container.split(
             '      args:\n        - |\n', 1)[1].split('      volumeMounts:\n', 1)[0])
-        self.environment = Environment(undefined=StrictUndefined)
+        self.environment = Environment(
+            loader=FileSystemLoader(str(ROOT / 'roles/k8s_apps/templates')),
+            undefined=StrictUndefined,
+        )
         # Test inputs are actual booleans, not Ansible-style strings.
         self.environment.filters['bool'] = bool
         temporary = tempfile.TemporaryDirectory(prefix='full-openfaas-seed-')
