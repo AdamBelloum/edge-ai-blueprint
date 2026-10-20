@@ -131,6 +131,11 @@
         ):
             raise SystemExit(f"ERROR: unexpected manifest identity for {track}")
 
+        # Never request removal of the server-managed creation timestamp.
+        metadata.pop("creationTimestamp", None)
+        # Match kubectl client-side apply annotation normalization.
+        metadata.setdefault("annotations", {})
+
         data = manifest.get("data", {})
         if (
             not isinstance(data, dict)
@@ -165,6 +170,11 @@
                 f"(data={data_bytes}, JSON={serialized_bytes}, "
                 f"annotation estimate={annotation_bytes})"
             )
+        # Apply the same normalized manifest that passed the budget checks.
+        (temporary / f"{track}.json").write_text(
+            json.dumps(manifest, ensure_ascii=True) + "\n",
+            encoding="utf-8",
+        )
         print(
             f"PASS: {track} rendered ConfigMap budget "
             f"(data={data_bytes}, JSON={serialized_bytes}, "

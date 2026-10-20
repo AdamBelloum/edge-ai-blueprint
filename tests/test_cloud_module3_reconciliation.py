@@ -50,7 +50,11 @@ if operation == "create":
     manifest = {
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": {"name": name, "namespace": namespace},
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "creationTimestamp": None,
+        },
         "data": data,
     }
     if track == "tests":
@@ -72,7 +76,24 @@ elif operation == "apply":
     record("apply:" + track)
     if fault == "partial_apply" and track == "advanced":
         raise SystemExit(8)
-    print("configured")
+    # Minimal stateful apply model, not a full Kubernetes API emulator.
+    # Reject the exact server-managed field responsible for the live loop.
+    if "creationTimestamp" in manifest["metadata"]:
+        raise SystemExit("Applied manifest contains server-managed creationTimestamp")
+    if manifest["metadata"].get("annotations") != {}:
+        raise SystemExit("Applied manifest lacks normalized empty annotations")
+
+    state = log.parent / "applied"
+    state.mkdir(exist_ok=True)
+    saved = state / (track + ".json")
+    if not saved.exists():
+        status = "created"
+    elif json.loads(saved.read_text()) == manifest:
+        status = "unchanged"
+    else:
+        status = "configured"
+    saved.write_text(json.dumps(manifest, sort_keys=True))
+    print("configmap/" + manifest["metadata"]["name"] + " " + status)
 else:
     raise SystemExit("Unexpected mocked operation")
 '''
@@ -137,10 +158,55 @@ class Module3ReconciliationTests(unittest.TestCase):
             ["render:" + track for track in TRACKS]
             + ["apply:" + track for track in TRACKS]
         )
-        for _ in range(2):
+        for status in ("created", "unchanged"):
             result = self.run_task()
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [line for line in result.stdout.splitlines()
+                 if line.startswith("configmap/")],
+                [
+                    "configmap/digitafrica-notebooks-cloud-computing-soa-module3-"
+                    + track + " " + status
+                    for track in TRACKS
+                ],
+            )
         self.assertEqual(self.calls(), expected * 2)
+
+    def test_applied_manifests_are_normalized(self):
+        result = self.run_task()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for track in TRACKS:
+            with self.subTest(track=track):
+                manifest = json.loads(
+                    (self.directory / "applied" / (track + ".json")).read_text()
+                )
+                self.assertNotIn("creationTimestamp", manifest["metadata"])
+                self.assertEqual(manifest["metadata"]["annotations"], {})
+                self.assertEqual(manifest["data"]["example_txt"], "Teaching fixture\n")
+                self.assertEqual(
+                    manifest["data"]["asset_map_tsv"],
+                    (self.stage / "asset-map.tsv").read_text(),
+                )
+
+    def test_changed_asset_configures_only_its_track_then_converges(self):
+        initial = self.run_task()
+        self.assertEqual(initial.returncode, 0, initial.stderr)
+        (self.stage / "advanced/example_txt").write_text("Updated fixture\n")
+
+        for changed in (True, False):
+            result = self.run_task()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [line for line in result.stdout.splitlines()
+                 if line.startswith("configmap/")],
+                [
+                    "configmap/digitafrica-notebooks-cloud-computing-soa-module3-"
+                    + track + " "
+                    + ("configured" if changed and track == "advanced"
+                       else "unchanged")
+                    for track in TRACKS
+                ],
+            )
 
     def test_rendered_preflight_failures_prevent_every_apply(self):
         for fault in (
