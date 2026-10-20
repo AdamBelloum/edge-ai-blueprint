@@ -139,10 +139,63 @@ printf '%s\n' \
   'This permanently deletes only the selected participant JupyterHub workspaces,
    inventory-derived Keycloak users/groups, and matching local credential exports.' \
   'Ensure participants have first had time to copy any needed data from their running servers.' \
-  'Tutorial state, administrators, service accounts, and unrelated records are not changed.'
+  'Workshop selection and tutorial state will be reset to neutral.' \
+  'Administrators, service accounts, and unrelated realm records are preserved.'
 printf 'Delete these participant workspaces, Keycloak identities, and local credential exports? [y/N]: '
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
+
+
+# Persist retry context before the first destructive operation.
+# Existing incomplete resets retain their original workshop and module,
+# even if a previous attempt already changed the selection to none.
+run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+namespace="${DIGITAFRICA_NAMESPACE}"
+
+state="\$(k3s kubectl -n "\$namespace" \
+  get configmap digitafrica-workshop-state -o json)"
+
+patch="\$(printf '%s' "\$state" | python3 -c '
+import json, sys
+
+state = json.load(sys.stdin)
+data = state.get("data", {})
+status = data.get("cleanup_status", "legacy")
+allowed = {
+    "none", "introduction-to-ai", "federated-learning",
+    "cloud-computing-soa", "big-data", "hpc",
+}
+
+if status in {"in_progress", "failed"}:
+    workshop = data.get("cleanup_workshop_type")
+    module = data.get("cleanup_workshop_module")
+elif status in {"legacy", "complete"}:
+    workshop = data.get("workshop_type")
+    module = data.get("workshop_module", "none")
+else:
+    raise SystemExit("Unknown cleanup status; reset refused.")
+
+if workshop not in allowed or not isinstance(module, str) or not module:
+    raise SystemExit("Missing or invalid cleanup retry context; reset refused.")
+
+print(json.dumps({
+    "metadata": {
+        "resourceVersion": state["metadata"]["resourceVersion"],
+    },
+    "data": {
+        "cleanup_status": "in_progress",
+        "cleanup_workshop_type": workshop,
+        "cleanup_workshop_module": module,
+    },
+}))
+')"
+
+k3s kubectl -n "\$namespace" \
+  patch configmap digitafrica-workshop-state \
+  --type merge -p "\$patch"
+REMOTE
+)"
 
 printf '%s\n' 'Stopping the organiser-controlled Flower server before participant reset...'
 "$FLOWER_MANAGER" stop
@@ -175,4 +228,4 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
 REMOTE
 )"
 
-printf 'Full workshop cleanup completed; workshop state is now neutral.\n'
+fail 'Participant reset finished and selection is neutral, but full workshop cleanup is NOT verified. Activation remains blocked by cleanup_status=in_progress. Runtime teardown and neutral-Hub verification are not yet implemented.'

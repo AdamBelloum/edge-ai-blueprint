@@ -1,0 +1,91 @@
+# Allowlisted teaching files only; no runtime installation or activation.
+- name: Create Module 5 staging directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    mode: '0755'
+  loop:
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/beginner
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/config
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/greeting
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/weather
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/fixtures
+  - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers
+- name: Stage only allowlisted Module 5 files
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module5_openfaas/{{
+      item }}'
+    dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/{{ item
+      }}
+    mode: '0644'
+  loop:
+  - .gitignore
+  - README.md
+  - SOURCE.md
+  - UPSTREAM-LICENSE.txt
+  - beginner/01-explore-and-invoke.ipynb
+  - beginner/02-develop-and-deploy.ipynb
+  - beginner/03-data-and-observability.ipynb
+  - config/.gitignore
+  - config/lab.example.json
+  - fixtures/weather-sample.json
+  - helpers/invoke.py
+  - helpers/lab_config.py
+  - helpers/manifests.py
+  - helpers/traffic.py
+  - examples/greeting/handler.js
+  - examples/greeting/handler.test.js
+  - examples/greeting/package.json
+  - examples/weather/handler.js
+  - examples/weather/handler.test.js
+  - examples/weather/package.json
+- name: Render Module 5 asset ConfigMap
+  ansible.builtin.command:
+    argv:
+    - k3s
+    - kubectl
+    - -n
+    - '{{ digitafrica_deployment.digitafrica_namespace }}'
+    - create
+    - configmap
+    - digitafrica-notebooks-cloud-computing-soa-module5-beginner
+    - --from-file=asset_001=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/.gitignore
+    - --from-file=asset_002=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/README.md
+    - --from-file=asset_003=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/SOURCE.md
+    - --from-file=asset_004=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/UPSTREAM-LICENSE.txt
+    - --from-file=asset_005=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/beginner/01-explore-and-invoke.ipynb
+    - --from-file=asset_006=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/beginner/02-develop-and-deploy.ipynb
+    - --from-file=asset_007=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/beginner/03-data-and-observability.ipynb
+    - --from-file=asset_008=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/config/.gitignore
+    - --from-file=asset_009=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/config/lab.example.json
+    - --from-file=asset_010=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/fixtures/weather-sample.json
+    - --from-file=asset_011=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers/invoke.py
+    - --from-file=asset_012=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers/lab_config.py
+    - --from-file=asset_013=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers/manifests.py
+    - --from-file=asset_014=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers/traffic.py
+    - --from-file=asset_015=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/greeting/handler.js
+    - --from-file=asset_016=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/greeting/handler.test.js
+    - --from-file=asset_017=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/greeting/package.json
+    - --from-file=asset_018=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/weather/handler.js
+    - --from-file=asset_019=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/weather/handler.test.js
+    - --from-file=asset_020=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/examples/weather/package.json
+    - --dry-run=client
+    - -o
+    - yaml
+  register: cloud_module5_asset_configmap
+  changed_when: false
+- name: Apply Module 5 asset ConfigMap
+  ansible.builtin.command:
+    argv:
+    - k3s
+    - kubectl
+    - -n
+    - '{{ digitafrica_deployment.digitafrica_namespace }}'
+    - apply
+    - -f
+    - '-'
+    stdin: '{{ cloud_module5_asset_configmap.stdout }}'
+  register: cloud_module5_asset_apply
+  changed_when: '''created'' in cloud_module5_asset_apply.stdout or ''configured''
+    in cloud_module5_asset_apply.stdout'

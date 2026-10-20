@@ -9,6 +9,36 @@
 
 set -Eeuo pipefail
 
+# Accept scoped runtime and offline-rehearsal opt-ins; reject unknown arguments
+# before loading deployment context or contacting the deployment.
+HPC_RUNTIME_ARGS=()
+OPENFAAS_REHEARSAL_ARGS=()
+while (($#)); do
+  case "$1" in
+    --enable-hpc-runtime)
+      HPC_RUNTIME_ARGS=(-e '{"hpc_runtime_enabled":true}')
+      shift
+      ;;
+    --enable-openfaas-offline-rehearsal)
+      OPENFAAS_REHEARSAL_ARGS=(-e '{"cloud_module5_delivery_enabled":true}')
+      shift
+      ;;
+    -h|--help)
+      printf 'Usage: %s [--enable-hpc-runtime] [--enable-openfaas-offline-rehearsal]\n' "${0##*/}"
+      printf 'The HPC option stages runtime definitions and enables pod integration.\n'
+      printf 'It does not activate HPC or install packages on worker hosts.\n'
+      printf 'The OpenFaaS option stages draft assets for a private test-cohort rehearsal.\n'
+      printf 'It does not activate Module 5, install OpenFaaS, or enable live invocation.\n'
+      printf 'This is not approval for real workshop publication.\n'
+      exit 0
+      ;;
+    *)
+      printf 'ERROR: Unknown reconciliation option: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="${SCRIPT_DIR}/lib/workshop-context.sh"
 
@@ -36,4 +66,6 @@ printf '%s\n' \
 exec ansible-playbook \
   -i "${DIGITAFRICA_INVENTORY}" \
   "${WORKSHOP_DEPLOYMENT_PLAYBOOK}" \
-  --tags workshop_application_reconciliation
+  --tags workshop_application_reconciliation \
+  "${HPC_RUNTIME_ARGS[@]}" \
+  "${OPENFAAS_REHEARSAL_ARGS[@]}"

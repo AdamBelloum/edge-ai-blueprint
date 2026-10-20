@@ -1,0 +1,117 @@
+---
+- name: Validate the pinned Spark preparation inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_system == 'Linux'
+      - ansible_architecture == 'x86_64'
+      - big_data_spark_image is match('^apache/spark@sha256:[0-9a-f]{64}$')
+      - big_data_spark_runtime_host_path == '/opt/digitafrica/big-data/runtime/spark'
+    fail_msg: >-
+      Spark image preparation requires Linux x86_64, an explicit Apache Spark
+      digest and the separate organiser runtime directory.
+
+- name: Verify the existing Docker daemon is reachable
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+  changed_when: false
+
+- name: Verify Docker Compose V2 is available
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  changed_when: false
+
+- name: Inspect the pinned Spark image before preparation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ big_data_spark_image }}"
+  register: big_data_spark_image_before
+  changed_when: false
+  failed_when: false
+
+- name: Download the pinned Spark image if it is absent
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ big_data_spark_image }}"
+  when: big_data_spark_image_before.rc != 0
+  changed_when: true
+
+- name: Read the prepared Spark image identity
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ big_data_spark_image }}"
+  register: big_data_spark_image_after
+  changed_when: false
+
+- name: Verify the prepared image platform and repository digest
+  ansible.builtin.assert:
+    that:
+      - (big_data_spark_image_after.stdout | from_json)[0].Os == 'linux'
+      - (big_data_spark_image_after.stdout | from_json)[0].Architecture == 'amd64'
+      - >-
+        big_data_spark_image in
+        ((big_data_spark_image_after.stdout | from_json)[0].RepoDigests | default([]))
+    fail_msg: The prepared image does not match the required platform and digest.
+
+- name: Create the separate organiser runtime directory
+  ansible.builtin.file:
+    path: "{{ big_data_spark_runtime_host_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+# BEGIN managed Spark Compose staging
+- name: Validate the private pilot cluster staging inputs
+  ansible.builtin.assert:
+    that:
+      - big_data_spark_project_name == 'digitafrica-spark'
+      - (big_data_spark_worker_count | int) in [1, 2]
+      - (big_data_spark_master_ui_loopback_port | int) >= 1024
+      - (big_data_spark_master_ui_loopback_port | int) <= 65535
+      - (ansible_processor_vcpus | int) >= 4
+      - (ansible_memtotal_mb | int) >= 7168
+      - big_data_spark_master_container_memory == '512m'
+      - big_data_spark_worker_container_memory == '2048m'
+    fail_msg: >-
+      The pilot configuration requires at least 4 CPUs and 7 GiB total RAM,
+      one or two workers, the reviewed memory limits, and a valid UI port.
+      These checks do not reserve resources or prove notebook headroom.
+
+- name: Prepare the optional locked Livy runtime assets
+  ansible.builtin.include_tasks: livy.yml
+  when: big_data_livy_enabled | bool
+
+- name: Stage the organiser-managed private Spark Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: Validate the staged Spark Compose configuration without starting services
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ big_data_spark_project_name }}"
+      - --file
+      - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+      - config
+      - --quiet
+  changed_when: false
+# END managed Spark Compose staging

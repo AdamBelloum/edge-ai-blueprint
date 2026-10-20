@@ -1,0 +1,83 @@
+---
+- name: Verify exactly one live Spark worker is registered
+  ansible.builtin.command:
+    argv: "{{ livy_start_compose_argv + ['exec', '-T', 'spark-master', 'python3', '-c', spark_registration_probe] }}"
+  vars:
+    spark_registration_probe: |
+      import json, urllib.request
+      with urllib.request.urlopen('http://spark-master:8080/json/', timeout=3) as response:
+          data = json.load(response)
+      workers = data.get('workers', [])
+      assert len(workers) == 1 and workers[0].get('state') == 'ALIVE', 'Expected one live worker'
+      print('Spark master reports exactly one live worker; computation is not yet tested.')
+  register: livy_spark_registration
+  changed_when: false
+  until: livy_spark_registration.rc == 0
+  retries: 15
+  delay: 4
+
+- name: Verify Livy REST readiness and the actual server heap arguments
+  ansible.builtin.command:
+    argv: "{{ livy_start_compose_argv + ['exec', '-T', 'spark-livy', 'python3', '-c', livy_readiness_probe] }}"
+  vars:
+    livy_readiness_probe: |
+      import json, pathlib, urllib.request
+      with urllib.request.urlopen('http://127.0.0.1:8998/sessions?from=0&size=1', timeout=3) as response:
+          data = json.load(response)
+      assert isinstance(data.get('sessions'), list), 'Unexpected REST response'
+      assert data.get('total') == 0, 'Expected an empty organiser-only test runtime'
+      java_commands = []
+      for process in pathlib.Path('/proc').iterdir():
+          if not process.name.isdigit():
+              continue
+          try:
+              args = (process / 'cmdline').read_bytes().split(b'\0')
+          except (FileNotFoundError, PermissionError, ProcessLookupError):
+              continue
+          if args and (args[0] == b'java' or args[0].endswith(b'/java')):
+              java_commands.append(args)
+      assert any(
+          [arg for arg in args if arg.startswith(b'-Xmx')] == [b'-Xmx512m']
+          and [arg for arg in args if arg.startswith(b'-Xms')] == [b'-Xms128m']
+          for args in java_commands
+      ), 'Livy server heap arguments not verified'
+      print('Livy REST responds; no sessions exist; server heap arguments verified.')
+  register: livy_rest_readiness
+  changed_when: false
+  until: livy_rest_readiness.rc == 0
+  retries: 15
+  delay: 4
+
+- name: Verify the running Livy image, container memory and unpublished ports
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, subprocess, sys
+        ids = subprocess.check_output([
+            'docker', 'ps', '--quiet', '--filter',
+            'label=com.docker.compose.project=digitafrica-spark', '--filter',
+            'label=com.docker.compose.service=spark-livy'
+        ], text=True).split()
+        assert len(ids) == 1, 'Expected exactly one running Livy container'
+        container = json.loads(subprocess.check_output(['docker', 'inspect', ids[0]], text=True))[0]
+        assert container['State']['Running'], 'Livy is not running'
+        assert container['Image'] == sys.argv[1], 'Unexpected Livy image identity'
+        assert container['HostConfig']['Memory'] == 2147483648, 'Unexpected memory limit'
+        assert not container['HostConfig'].get('PortBindings'), 'Livy host ports must not be published'
+        assert container['HostConfig']['NetworkMode'] != 'host', 'Host networking is not allowed'
+        print('Running Livy image and 2 GiB container limit verified; no host ports published.')
+      - "{{ (livy_built_image.stdout | from_json)[0].Id }}"
+  register: livy_running_verification
+  changed_when: false
+
+- name: Report the limited startup evidence
+  ansible.builtin.debug:
+    msg:
+      - "{{ livy_spark_registration.stdout }}"
+      - "{{ livy_rest_readiness.stdout }}"
+      - "{{ livy_running_verification.stdout }}"
+      - Educational proof of concept only; no scaling or cohort capacity has been established.
+      - Spark computation, driver memory budgeting and participant access remain unverified.
+      - If validation fails after startup, containers may remain running; inspect them before retrying.

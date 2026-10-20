@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "workshop_type": "cloud-computing-soa",
+  "workshop_module": "module5",
+  "mode": "beginner",
+  "solutions_released": false,
+  "workspace_relative_path": "Cloud-Computing-SOA/Module-5",
+  "configmap_name": "digitafrica-notebooks-cloud-computing-soa-module5-beginner",
+  "files": [
+    {
+      "key": "asset_001",
+      "path": ".gitignore"
+    },
+    {
+      "key": "asset_002",
+      "path": "README.md"
+    },
+    {
+      "key": "asset_003",
+      "path": "SOURCE.md"
+    },
+    {
+      "key": "asset_004",
+      "path": "UPSTREAM-LICENSE.txt"
+    },
+    {
+      "key": "asset_005",
+      "path": "beginner/01-explore-and-invoke.ipynb"
+    },
+    {
+      "key": "asset_006",
+      "path": "beginner/02-develop-and-deploy.ipynb"
+    },
+    {
+      "key": "asset_007",
+      "path": "beginner/03-data-and-observability.ipynb"
+    },
+    {
+      "key": "asset_008",
+      "path": "config/.gitignore"
+    },
+    {
+      "key": "asset_009",
+      "path": "config/lab.example.json"
+    },
+    {
+      "key": "asset_010",
+      "path": "fixtures/weather-sample.json"
+    },
+    {
+      "key": "asset_011",
+      "path": "helpers/invoke.py"
+    },
+    {
+      "key": "asset_012",
+      "path": "helpers/lab_config.py"
+    },
+    {
+      "key": "asset_013",
+      "path": "helpers/manifests.py"
+    },
+    {
+      "key": "asset_014",
+      "path": "helpers/traffic.py"
+    },
+    {
+      "key": "asset_015",
+      "path": "examples/greeting/handler.js"
+    },
+    {
+      "key": "asset_016",
+      "path": "examples/greeting/handler.test.js"
+    },
+    {
+      "key": "asset_017",
+      "path": "examples/greeting/package.json"
+    },
+    {
+      "key": "asset_018",
+      "path": "examples/weather/handler.js"
+    },
+    {
+      "key": "asset_019",
+      "path": "examples/weather/handler.test.js"
+    },
+    {
+      "key": "asset_020",
+      "path": "examples/weather/package.json"
+    }
+  ]
+}

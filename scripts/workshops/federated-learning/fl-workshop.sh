@@ -20,7 +20,7 @@ FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/workshops/federated-learning/fl-workshop.sh [ACTION]
+Usage: scripts/workshops/fl-workshop.sh [ACTION]
 
 Actions:
   menu              Show the interactive workshop-organiser menu. Default.

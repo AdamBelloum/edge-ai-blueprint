@@ -1,0 +1,7 @@
+---
+- name: Stage HPC participant assets on the selected worker VMs
+  hosts: "{{ hpc_worker_group }}"
+  become: true
+  gather_facts: false
+  roles:
+    - role: hpc_workspace

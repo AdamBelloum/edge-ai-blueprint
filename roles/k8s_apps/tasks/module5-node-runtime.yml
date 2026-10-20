@@ -1,0 +1,45 @@
+---
+# Included only when cloud_module5_delivery_enabled is true.
+# Stages small installer/configuration files, never the Node.js archive.
+# Does not change workshop state, participant accounts or OpenFaaS services.
+
+- name: Ensure Module 5 Node.js runtime staging directory exists
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-runtime/module5-node
+    state: directory
+    mode: "0755"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage the Module 5 Node.js installer and pinned configuration
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/opt/digitafrica/k8s-runtime/module5-node/{{ item }}"
+    mode: "0644"
+  loop:
+    - prepare-module5-node-runtime.py
+    - module5-node-runtime.json
+    - module5-node-launch.sh
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Create or update the Module 5 Node.js runtime ConfigMap
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace | quote }} \
+      create configmap digitafrica-runtime-module5-node \
+      --from-file=prepare-module5-node-runtime.py=/opt/digitafrica/k8s-runtime/module5-node/prepare-module5-node-runtime.py \
+      --from-file=module5-node-runtime.json=/opt/digitafrica/k8s-runtime/module5-node/module5-node-runtime.json \
+      --from-file=module5-node-launch.sh=/opt/digitafrica/k8s-runtime/module5-node/module5-node-launch.sh \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  register: module5_node_runtime_configmap
+  changed_when: >-
+    ' created' in module5_node_runtime_configmap.stdout or
+    ' configured' in module5_node_runtime_configmap.stdout
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation

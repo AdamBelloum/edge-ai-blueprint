@@ -1,0 +1,38 @@
+---
+# Read-only checks: no preparation, pulls, builds, service startup or deletion.
+- name: Check the running one-worker Spark and Livy educational pilot
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars_files:
+    - ../roles/big_data_spark_runtime/defaults/main.yml
+  tasks:
+    - name: Validate already staged runtime inputs without building
+      ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+
+    - name: Validate the already built Livy image
+      ansible.builtin.import_tasks: tasks/big-data-livy-image-validation.yml
+
+    - name: Require the fixed one-worker pilot and explicit server heap settings
+      ansible.builtin.assert:
+        that:
+          - big_data_spark_project_name == 'digitafrica-spark'
+          - (livy_build_worker_count | int) == 1
+          - "'spark-worker-1' in livy_build_compose.services"
+          - livy_build_compose.services['spark-master'].image == big_data_spark_image
+          - livy_build_compose.services['spark-livy'].environment.LIVY_SERVER_JAVA_OPTS == '-Xms128m -Xmx512m'
+        fail_msg: Startup is restricted to the explicitly staged one-worker educational pilot with the reviewed heap settings.
+
+    - name: Assemble the explicit Compose command prefix
+      ansible.builtin.set_fact:
+        livy_start_compose_argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ big_data_spark_project_name }}"
+          - --file
+          - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+
+    - name: Check the limited pilot readiness evidence
+      ansible.builtin.import_tasks: tasks/big-data-spark-livy-readiness.yml

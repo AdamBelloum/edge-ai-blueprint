@@ -1,167 +1,82 @@
-# Operations and validation
+# Federated-learning application
 
-## Current administrator and workshop validation
+This guide is for researchers and application developers using the DIGITAfrica Edge-AI Blueprint to prepare and run federated-learning experiments.
 
-For infrastructure health checks, run `bash scripts/admin/admin-main.sh` from the repository root, choose **Run infrastructure health check**, and select Tier-1 or Tier-2. The menu uses the selected tier's local workshop inventory and control-plane group. This health-check action is read-only; deployment, reconciliation, and reset actions are not.
+It describes the application boundary: a Flower server, independently operated Silo workspaces, experiment inputs, execution evidence, and reproducibility. It does not describe how to install k3s, JupyterHub, TLS, or OIDC; see [Infrastructure deployment](infrastructure-deployment.md) for platform administration.
 
-Check workshop readiness through the organiser's selected workshop/module readiness actions. Record participant execution separately: successful infrastructure checks or structural asset checks do not prove that login, server spawning, practical instructions, containers/services, or FL training work end to end.
+## Scope and current automation boundary
 
-**Legacy reference scope:** the raw Ansible commands, production inventory, fixed namespace assumptions, and two named Silo Deployments below describe the older Tier-1 arrangement. They have not been revalidated in this documentation sprint. Do not apply them unchanged to Tier-2 or assume they validate the current participant workspace model. Reconciliation commands later in this guide modify deployed state; for updated workshops/modules, use the organiser's application-reconciliation entry point after reviewing its impact.
+The Tier-1 Ansible playbook prepares an execution environment for a federated-learning application:
 
-See the [architecture](architecture.md) and [workshop organiser guide](workshop-organiser.md) for current boundaries and workflow.
+- it prepares the server-side application source on the Tier-1 control-plane node;
+- it deploys independent Silo A and Silo B Kubernetes workspaces on worker nodes; and
+- each Silo bootstrap installs the required Python packages, installs Git, and checks out the configured tutorial/application source into `/home/jovyan/digitafrica`.
 
-This guide is for operators, testers, and maintainers validating the DIGITAfrica Edge-AI Blueprint after deployment or diagnosing a deployment issue.
+The deployment does **not** automatically:
 
-It separates three levels of evidence:
+- launch a Flower server;
+- launch Flower clients;
+- distribute private datasets;
+- execute aggregation rounds;
+- store experiment results in an experiment registry; or
+- stop workloads after an experiment completes.
 
-1. **Infrastructure health** — k3s, Helm, ingress, and core workloads are available.
-2. **Workspace readiness** — Silo workspaces have completed dependency installation and source checkout.
-3. **Federated-learning execution** — a Flower server and intended clients completed a documented experiment.
-
-A successful result at one level does not automatically prove success at the next level.
-
-For deployment instructions, see [Infrastructure deployment](infrastructure-deployment.md). For the Flower application workflow, see [Federated-learning application](federated-learning-application.md).
+These are intentional application-level responsibilities. They must be performed under an experiment-specific workflow and recorded with the resulting evidence.
 
 ---
 
-## Operational conventions
+## Conceptual model
 
-The commands in this guide run from the Ansible control machine and use the Tier-1 server as the Kubernetes administration host.
+Federated learning trains a shared model without centrally pooling the underlying Silo datasets.
 
-- The default namespace is `digitafrica`.
-- The k3s administrative kubeconfig on the server is `/etc/rancher/k3s/k3s.yaml`.
-- `k3s kubectl` uses the k3s kubeconfig.
-- Direct `helm` commands require `KUBECONFIG=/etc/rancher/k3s/k3s.yaml`.
-- Silo Deployment names are `fl-client-silo-a` and `fl-client-silo-b`.
+1. The Flower server defines the experiment and aggregation strategy.
+2. Each Silo trains locally against data that remains under its own control.
+3. Each Silo sends model updates and permitted metrics to the server.
+4. The server aggregates the updates and coordinates subsequent rounds.
+5. The experiment produces an agreed set of model artefacts, metrics, logs, and provenance records.
 
-Set the inventory path to match the environment being tested. Examples below use:
+The technical deployment does not by itself establish legal, ethical, privacy, or governance permission to use any dataset. Those requirements remain the responsibility of the experiment owner and participating organisations.
+
+---
+
+## Application components
+
+| Component | Current role | Managed by |
+|---|---|---|
+| Flower server source | Server-side application source prepared on the Tier-1 control-plane node | Tier-1 playbook prepares source; researcher starts the process |
+| Silo A workspace | Kubernetes workspace for one independent client-side execution context | Tier-1 playbook deploys it; researcher runs the client workflow |
+| Silo B workspace | Kubernetes workspace for a second independent client-side execution context | Tier-1 playbook deploys it; researcher runs the client workflow |
+| Tutorial/application repository | Source material checked out in each Silo workspace | Silo bootstrap obtains it at container startup |
+| JupyterHub | User-facing notebook environment on the same platform | Infrastructure administrator |
+
+The Silo Deployments are separate Kubernetes workloads. They are not automatically the same thing as a user’s JupyterHub notebook server, and the current deployment does not automatically expose an interactive terminal for them through JupyterHub.
+
+---
+
+## Before running an experiment
+
+### 1. Confirm platform readiness
+
+Use [Operations and validation](operations-and-validation.md) to confirm:
+
+- the k3s cluster is healthy;
+- Silo A and Silo B Deployments are rolled out;
+- each Silo completed its startup bootstrap; and
+- the expected source revision is present in each Silo.
+
+A pod being `Running` is not, on its own, sufficient evidence: a container can be Kubernetes-ready while its startup script is still installing dependencies. The workspace bootstrap check verifies the source directory and Git revision explicitly.
+
+### 2. Identify the application source revision
+
+Record the exact source revision used by every role before starting an experiment.
+
+For the Silo workspaces, the application source is located at:
 
 ```text
-inventories/prod/hosts.ini
+/home/jovyan/digitafrica
 ```
 
----
-
-## 1. Infrastructure health validation
-
-Run this after a Tier-1 deployment, before application execution, or when a platform issue is suspected.
-
-```bash
-ANSIBLE_STDOUT_CALLBACK=default ansible \
-  -i inventories/prod/hosts.ini \
-  tier1_server \
-  -b \
-  -m ansible.builtin.shell \
-  -a '
-    set -e
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-    echo "===== k3s nodes ====="
-    k3s kubectl get nodes -o wide
-
-    echo
-    echo "===== JupyterHub Helm release ====="
-    helm -n digitafrica status jhub
-
-    echo
-    echo "===== DIGITAfrica workloads ====="
-    k3s kubectl -n digitafrica get deploy,sts,ds,po,svc,ingress -o wide
-
-    echo
-    echo "===== Recent namespace events ====="
-    k3s kubectl -n digitafrica get events --sort-by=.lastTimestamp | tail -n 40
-  '
-```
-
-### Expected result
-
-- all intended k3s nodes report `Ready`;
-- `helm -n digitafrica status jhub` reports a deployed release;
-- required JupyterHub workloads are available;
-- Silo pods are `Running` with no unexpected restart loop; and
-- recent events do not show unresolved image-pull, scheduling, mount, or crash-loop errors.
-
-### Public JupyterHub reachability
-
-For an ingress deployment, test the public endpoint from an appropriate network location:
-
-```bash
-curl -k -I https://<public-host>/jupyter/
-```
-
-Use `-k` only where `tls_mode: selfsigned` is intentionally configured. For a trusted certificate, omit `-k` and investigate certificate failures.
-
-A successful HTTP response confirms ingress reachability. It does not prove that a user can authenticate or spawn a notebook server.
-
----
-
-## 2. JupyterHub functional validation
-
-JupyterHub validation has two steps: the Hub route must be reachable, and a real user server must be able to spawn.
-
-### Manual user-server and notebook-seed test
-
-1. Open the configured JupyterHub URL, normally:
-
-   ```text
-   https://<public-host>/jupyter/
-   ```
-
-2. Authenticate using the configured authentication mode.
-3. Start a user server.
-4. Open JupyterLab.
-5. Verify that the expected seeded `digitafrica` content is present in the user home directory.
-6. Create a small test notebook or text file and confirm that it remains available after stopping and restarting the user server.
-
-### Interpretation
-
-| Result | Meaning |
-|---|---|
-| Route unavailable | Investigate Traefik, ingress, TLS, firewall rules, public URL configuration, and JupyterHub workload state |
-| Login fails | Investigate OIDC configuration or the selected JupyterHub authenticator |
-| Login succeeds but spawn fails | Inspect Hub and user-pod events/logs, PVC provisioning, image pull status, and resource limits |
-| Spawn succeeds but seeds are absent | Inspect the notebook seed ConfigMap, rendered Helm values, and the user pod’s mounted volumes/init-container logs |
-| File persists after restart | User PVC behaviour is working for the tested user |
-
-### Inspect JupyterHub logs and user pods
-
-```bash
-ANSIBLE_STDOUT_CALLBACK=default ansible \
-  -i inventories/prod/hosts.ini \
-  tier1_server \
-  -b \
-  -m ansible.builtin.shell \
-  -a '
-    set -e
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-    echo "===== JupyterHub pods ====="
-    k3s kubectl -n digitafrica get pods -o wide
-
-    echo
-    echo "===== Hub logs ====="
-    k3s kubectl -n digitafrica logs deployment/hub --tail=120 || true
-
-    echo
-    echo "===== PVCs ====="
-    k3s kubectl -n digitafrica get pvc -o wide
-  '
-```
-
-The Hub deployment name is expected to be `hub` for the JupyterHub release. If the chart configuration changes this naming, list pods first and use the actual deployment or pod name.
-
----
-
-## 3. Silo workspace readiness validation
-
-The Silo Deployments use a startup shell command to install packages and obtain source code. A Kubernetes rollout can report success before that command has completed because the Deployment has no bootstrap-aware readiness probe.
-
-Therefore, validate both:
-
-1. Kubernetes rollout; and
-2. completion of the workspace bootstrap and Git checkout.
-
-### Strict Silo bootstrap check
+The following command reports the checked-out revision for both deployed Silos:
 
 ```bash
 ANSIBLE_STDOUT_CALLBACK=default ansible \
@@ -174,128 +89,46 @@ ANSIBLE_STDOUT_CALLBACK=default ansible \
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
     for deployment in fl-client-silo-a fl-client-silo-b; do
-      echo "===== ${deployment}: Kubernetes rollout ====="
-      k3s kubectl -n digitafrica rollout status "deployment/${deployment}" --timeout=5m
-
-      echo "===== ${deployment}: waiting for bootstrap completion ====="
-      completed=false
-      for attempt in $(seq 1 30); do
-        if k3s kubectl -n digitafrica logs "deployment/${deployment}" 2>&1 \
-          | grep -Fq "workspace source is ready"; then
-          completed=true
-          break
-        fi
-        sleep 10
-      done
-
-      if [ "${completed}" != true ]; then
-        echo "ERROR: ${deployment} did not complete bootstrap within five minutes."
-        k3s kubectl -n digitafrica logs "deployment/${deployment}" --tail=80 || true
-        exit 1
-      fi
-
       pod=$(k3s kubectl -n digitafrica get pods \
         -l "app=${deployment}" \
         -o jsonpath="{.items[0].metadata.name}")
 
-      echo "===== ${deployment}: workspace verification ====="
-      k3s kubectl -n digitafrica exec "${pod}" -- sh -ec "
-        command -v git
-        test -d /home/jovyan/digitafrica/.git
+      printf "%s: " "${deployment}"
+      k3s kubectl -n digitafrica exec "${pod}" -- \
         git -C /home/jovyan/digitafrica rev-parse HEAD
-        echo Workspace source verified.
-      "
     done
   '
 ```
 
-### Acceptance evidence
+The bootstrap currently follows the configured repository branch. Therefore, record the commit SHA for every experiment. For stronger reproducibility, change the bootstrap to check out a pinned release tag or commit SHA before using the environment for comparative or published results.
 
-The check passes only when both Silo Deployments:
+### 3. Establish the experiment contract
 
-- complete Kubernetes rollout;
-- emit `workspace source is ready` in their current container logs;
-- have an executable `git` command;
-- contain `/home/jovyan/digitafrica/.git`; and
-- return a Git commit SHA.
+Before execution, make the following decisions explicit in an experiment configuration or record:
 
-During the validated deployment, both Silos reported commit `8879982`. This is an observation for that deployment only; always collect the actual commit SHA for a new deployment or experiment.
+- server address and transport/security settings;
+- Flower and Python dependency versions;
+- client identifiers and participating Silos;
+- dataset identity, version, provenance, and permitted use;
+- local preprocessing and train/validation/test splits;
+- model architecture and initial parameters;
+- aggregation strategy and its parameters;
+- number of rounds, local epochs, batch size, and optimizer settings;
+- metrics to report and how they are interpreted;
+- output locations for checkpoints, metrics, and logs; and
+- failure, retry, and participant-dropout behaviour.
 
----
-
-## 4. Federated-learning execution validation
-
-Infrastructure and workspace tests do not show that a Flower experiment has run.
-
-For an experiment-level acceptance test, record evidence of all of the following:
-
-1. the exact server command and application source revision;
-2. the exact client command and source revision for every participating Silo;
-3. server startup without an unhandled error;
-4. registration of every intended client;
-5. completion of the planned number of rounds, or documented deviations;
-6. expected metrics and model/checkpoint outputs; and
-7. retention location for logs and output artefacts.
-
-The experiment owner should define the application-specific pass conditions. Examples include a minimum number of connected clients, an expected number of completed rounds, a finite loss value, or production of an expected checkpoint. Do not set generic numerical thresholds without understanding the dataset and model.
-
-See [Federated-learning application](federated-learning-application.md) for the experiment lifecycle and reproducibility record.
+Do not assume that two Silo workspaces contain equivalent data or use the same preprocessing unless the experiment configuration explicitly establishes this.
 
 ---
 
-## Troubleshooting
+## Running the application
 
-### Ansible cannot connect to a node
+### Server lifecycle
 
-Check:
+The Tier-1 deployment prepares the server-side source, including a convenient `server.py` link in the control-plane user’s home directory. The exact command-line arguments, address, port, strategy, and round count are properties of the application source and experiment configuration, not infrastructure defaults.
 
-- inventory host address, user, and SSH settings;
-- VPN, bastion, firewall, and routing requirements;
-- availability of privilege escalation; and
-- the node’s network reachability from the control machine.
-
-Use a narrow connectivity test:
-
-```bash
-ansible -i inventories/prod/hosts.ini all -m ping
-```
-
-### k3s agent is missing or `NotReady`
-
-Check the control-plane node list and then inspect the affected node’s k3s-agent service through the relevant inventory host. Confirm that the agent is configured to join the intended server and that network rules permit required k3s traffic.
-
-Do not use `--limit tier1_server` to repair or add agents; run the full Tier-1 playbook when agent reconciliation is required.
-
-### Helm reports a schema validation failure
-
-A values key is in an unsupported location or has an unsupported type for the chart version in use.
-
-1. Read the exact JSON-schema error.
-2. Inspect the chart version and its values schema.
-3. Correct the source template, not only the generated file on the server.
-4. run Ansible syntax and whitespace checks;
-5. rerun the targeted Tier-1 reconciliation.
-
-For JupyterHub, settings that are dynamically consumed when a user server is spawned may not appear in the static output of `helm get manifest`. Chart schema validation is the authoritative check for accepted values placement.
-
-### JupyterHub route works but a user server does not spawn
-
-Typical causes include:
-
-- image pull failure;
-- insufficient cluster capacity;
-- failing init container;
-- StorageClass or PVC provisioning issue;
-- incorrectly configured mounted volume; or
-- an authentication or authorization issue.
-
-Inspect the user pod, events, PVCs, and Hub logs. Do not assume that the Hub route alone proves user-server functionality.
-
-### Silo pod is `Running` but source is absent
-
-A `Running` pod may still be executing package installation or Git checkout. First use the strict workspace bootstrap check.
-
-If the bootstrap completion message does not appear, inspect the current logs:
+Before running an experiment, inspect the currently deployed server entry point and its supported arguments on the control-plane node:
 
 ```bash
 ANSIBLE_STDOUT_CALLBACK=default ansible \
@@ -304,70 +137,134 @@ ANSIBLE_STDOUT_CALLBACK=default ansible \
   -b \
   -m ansible.builtin.shell \
   -a '
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    k3s kubectl -n digitafrica logs deployment/fl-client-silo-a --tail=120
-    k3s kubectl -n digitafrica logs deployment/fl-client-silo-b --tail=120
+    set -e
+    echo "===== Server entry point ====="
+    ls -l ~/server.py
+    python3 ~/server.py --help
   '
 ```
 
-Common root causes are a missing package, DNS or outbound network failure, failed Git authentication for a private repository, an incorrect repository URL, or a source checkout conflict.
+If the server entry point does not provide `--help`, inspect the source and document the exact invocation in the experiment record. Do not publish generic server commands in this guide until they are verified against the application implementation.
 
-### Silo bootstrap reports `git: not found`
+### Silo client lifecycle
 
-The workspace image is intentionally minimal and requires Git to be installed before cloning source. Ensure the manifest bootstrap performs package installation before invoking `git clone`, then reapply the manifest through the Tier-1 playbook.
+A Silo client must be started inside its own workspace using the client entry point and experiment configuration provided by the application source.
 
-### A Flower client cannot reach the server
+To open a non-interactive inspection shell command in Silo A or Silo B, use the corresponding Deployment name:
 
-This is an experiment/application issue rather than evidence that k3s deployment failed. Check:
+```bash
+ANSIBLE_STDOUT_CALLBACK=default ansible \
+  -i inventories/prod/hosts.ini \
+  tier1_server \
+  -b \
+  -m ansible.builtin.shell \
+  -a '
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-- the server address and listening interface;
-- server process state and logs;
-- client command-line configuration;
-- network policy, firewall, or routing constraints;
-- TLS and authentication settings, where used; and
-- compatibility of the server and client Flower versions.
+    deployment=fl-client-silo-a
+    pod=$(k3s kubectl -n digitafrica get pods \
+      -l "app=${deployment}" \
+      -o jsonpath="{.items[0].metadata.name}")
+
+    k3s kubectl -n digitafrica exec -it "${pod}" -- \
+      sh -lc "cd /home/jovyan/digitafrica && pwd && find . -maxdepth 2 -type f | sort | head -n 80"
+  '
+```
+
+Replace `fl-client-silo-a` with `fl-client-silo-b` for Silo B. The command is for source inspection; start client processes only with an experiment-specific invocation that has been reviewed against the current code.
+
+### Recommended execution sequence
+
+1. Record platform state and source revisions.
+2. Prepare or mount each Silo’s approved local dataset according to its data-governance requirements.
+3. Start the Flower server with the documented experiment configuration.
+4. Start one client process in each participating Silo workspace.
+5. Confirm that each intended client registers with the server.
+6. Run the planned number of rounds.
+7. Capture server logs, client logs, final metrics, and model/checkpoint artefacts.
+8. Stop application processes deliberately and retain the experiment record.
+
+If a client fails, do not silently substitute another Silo or dataset. Record the participant change and assess whether the experiment remains comparable to the original plan.
 
 ---
 
-## Reconciliation after a source change
+## Data handling and privacy
 
-After changing an infrastructure template or Silo manifest, run source checks before changing the live cluster:
+Federated learning reduces the need to centralise raw training data, but it does not remove all privacy or security risks.
 
-```bash
-ansible-playbook \
-  -i inventories/prod/hosts.ini \
-  playbooks/tier1.yml \
-  --syntax-check
+At minimum:
 
-git diff --check
-```
+- keep each Silo dataset in its approved local storage location;
+- do not place raw Silo data in the shared application repository;
+- do not include credentials, access tokens, private keys, or personal data in notebooks, logs, or Git commits;
+- assess whether model updates or reported metrics could reveal sensitive information;
+- use authenticated and protected network communication for non-demonstration deployments; and
+- apply the data-management, ethical-review, and institutional requirements applicable to the participating organisations.
 
-Then reconcile the control-plane deployment when only server-side application resources or Helm values changed:
-
-```bash
-ansible-playbook \
-  -i inventories/prod/hosts.ini \
-  playbooks/tier1.yml \
-  --limit tier1_server \
-  -e digitafrica_uninstall=false
-```
-
-Finally, repeat the relevant infrastructure, JupyterHub, and Silo validation sections in this guide.
+For sensitive or regulated data, involve the relevant data steward, security contact, and ethics or legal process before running an experiment.
 
 ---
 
-## Acceptance summary
+## Reproducibility record
 
-| Level | Pass condition | Evidence |
-|---|---|---|
-| Infrastructure | Nodes, Helm release, and required workloads are healthy | `kubectl`, Helm status, events, ingress check |
-| JupyterHub | A real user can authenticate, spawn, access seeded content, and retain a test file | Manual browser test plus pod/PVC evidence |
-| Silo workspaces | Both Silos complete bootstrap and expose a known source revision | Rollout, logs, Git and source-directory checks |
-| Federated-learning experiment | Intended server and clients complete the documented run | Server/client logs, round evidence, metrics, artefacts, configuration record |
+For every experiment, retain a compact but complete record containing:
+
+| Item | Evidence to retain |
+|---|---|
+| Experiment identifier | Unique name or identifier |
+| Date and operators | Start/end timestamps and responsible persons or roles |
+| Platform version | Blueprint revision and deployment configuration used |
+| Server source | Repository URL, branch/tag, and commit SHA |
+| Silo source | Repository URL, branch/tag, and commit SHA for each Silo |
+| Runtime dependencies | Python, Flower, and relevant package versions |
+| Data provenance | Dataset identifier, version, ownership, approvals, and local split description |
+| Experiment configuration | Model, strategy, hyperparameters, number of rounds, and client set |
+| Execution evidence | Server and client logs, registration evidence, and failure/retry events |
+| Outputs | Metrics, model/checkpoint locations, and integrity information |
+| Interpretation | Main result, limitations, and comparability with other runs |
+
+The previously validated Silo deployment showed both Silo workspaces at commit `8879982`. Treat that only as an observed deployment result, not as a permanent application version. Re-check and record the actual revision before every new experiment.
+
+---
+
+## Definition of success
+
+### Platform and workspace deployment success
+
+The infrastructure deployment is successful when:
+
+- the Tier-1 cluster is healthy;
+- JupyterHub is reachable according to the configured exposure mode;
+- Silo A and Silo B Deployments roll out successfully;
+- each Silo has the required runtime dependencies; and
+- the expected source is present and identifiable by Git revision.
+
+### Federated-learning experiment success
+
+A federated-learning experiment is successful only when:
+
+- the intended Flower server is running with the recorded configuration;
+- the intended Silo clients connect successfully;
+- the planned training rounds complete or deviations are documented;
+- expected metrics and artefacts are captured; and
+- the result can be associated with a complete reproducibility record.
+
+Do not conflate a successful Kubernetes rollout with a successful federated-learning experiment.
+
+---
+
+## Current limitations and recommended improvements
+
+- **Source pinning:** bootstrap follows a repository branch. Pin an immutable tag or commit for reproducible experiments.
+- **Runtime image:** dependencies are installed when a Silo starts. Use a versioned custom image containing Git and pinned Python dependencies to reduce startup time and package drift.
+- **Readiness:** Kubernetes readiness does not yet prove that source checkout and dependency installation are complete. Use an init container or a readiness probe based on a bootstrap-complete marker.
+- **Experiment automation:** introduce a reviewed launcher or workflow that starts the server and clients, captures evidence, and stops cleanly after a run.
+- **Results management:** define an approved persistent location and retention policy for models, metrics, and logs.
 
 ## Related documentation
 
 - [Project overview](../README.md)
 - [Infrastructure deployment](infrastructure-deployment.md)
-- [Federated-learning application](federated-learning-application.md)
+- [Operations and validation](operations-and-validation.md)
 - [Architecture](architecture.md)

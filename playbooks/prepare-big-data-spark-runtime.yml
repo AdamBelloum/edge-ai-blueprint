@@ -1,0 +1,8 @@
+---
+# Image and Compose staging only: no service startup, activation or account changes.
+- name: Prepare the pinned Spark image on the selected group VMs
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  roles:
+    - role: big_data_spark_runtime

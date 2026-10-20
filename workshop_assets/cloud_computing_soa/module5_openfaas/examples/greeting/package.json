@@ -1,0 +1,13 @@
+{
+  "name": "workshop-greeting",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beginner OpenFaaS greeting exercise",
+  "main": "handler.js",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "test": "node --test handler.test.js"
+  }
+}

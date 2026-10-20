@@ -1,0 +1,171 @@
+      def select_digitafrica_module5_node(state):
+          """Select Node.js only for active beginner Module 5."""
+          if not isinstance(state, dict):
+              raise RuntimeError("Workshop-state ConfigMap data must be a dictionary.")
+
+          def state_value(key):
+              value = state.get(key)
+              return value.strip() if isinstance(value, str) else ""
+
+          # Neutral and unrelated workshops do not require Module 5 fields.
+          if (state_value("workshop_type"), state_value("workshop_module")) != (
+              "cloud-computing-soa", "module5"
+          ):
+              return False
+
+          if (
+              state_value("mode") != "beginner"
+              or state_value("solutions_released") != "false"
+          ):
+              raise RuntimeError(
+                  "Module 5 requires beginner mode and solutions_released=false."
+              )
+          return True
+
+      def configure_digitafrica_module5_node_launch(spawner, state, runtime_bin):
+          """Configure Module 5 launch and undo it before subsequent selection."""
+          from copy import deepcopy
+
+          mount_key = "digitafrica-runtime-module5-node"
+          env_keys = (
+              "DIGITAFRICA_MODULE5_NODE_ENABLED",
+              "DIGITAFRICA_MODULE5_NODE_BIN",
+          )
+          saved_attr = "_digitafrica_module5_launch_original"
+          saved = getattr(spawner, saved_attr, None)
+
+          if saved is not None:
+              if spawner.cmd != saved["wrapped_cmd"]:
+                  raise RuntimeError(
+                      "Notebook command changed after Module 5 configuration; "
+                      "refusing to overwrite it."
+                  )
+
+              mounts = deepcopy(dict(spawner.volume_mounts or {}))
+              environment = dict(spawner.environment or {})
+              if saved["mount_present"]:
+                  mounts[mount_key] = deepcopy(saved["mount"])
+              else:
+                  mounts.pop(mount_key, None)
+
+              for key, (present, value) in saved["environment"].items():
+                  if present:
+                      environment[key] = value
+                  else:
+                      environment.pop(key, None)
+
+              spawner.cmd = deepcopy(saved["cmd"])
+              spawner.volume_mounts = mounts
+              spawner.environment = environment
+              delattr(spawner, saved_attr)
+
+          if not select_digitafrica_module5_node(state):
+              return
+
+          if not isinstance(runtime_bin, str) or not runtime_bin.startswith("/"):
+              raise RuntimeError("Module 5 requires an absolute runtime binary path.")
+
+          command = spawner.cmd
+          if command is None:
+              command = ["jupyterhub-singleuser"]
+          if (
+              not isinstance(command, (list, tuple))
+              or not command
+              or not all(isinstance(part, str) and part for part in command)
+          ):
+              raise RuntimeError("Unsupported notebook launch command.")
+
+          wrapper = "/runtime/module5-node/module5-node-launch.sh"
+          if list(command[:2]) == ["/bin/sh", wrapper]:
+              raise RuntimeError("Untracked Module 5 launch wrapper detected.")
+
+          mounts = deepcopy(dict(spawner.volume_mounts or {}))
+          environment = dict(spawner.environment or {})
+          wrapped_cmd = ["/bin/sh", wrapper] + list(command)
+          saved = {
+              "cmd": deepcopy(spawner.cmd),
+              "wrapped_cmd": list(wrapped_cmd),
+              "mount_present": mount_key in mounts,
+              "mount": deepcopy(mounts.get(mount_key)),
+              "environment": {
+                  key: (key in environment, environment.get(key))
+                  for key in env_keys
+              },
+          }
+
+          mounts[mount_key] = {
+              "name": mount_key,
+              "mountPath": "/runtime/module5-node",
+              "readOnly": True,
+          }
+          environment[env_keys[0]] = "true"
+          environment[env_keys[1]] = runtime_bin
+
+          setattr(spawner, saved_attr, saved)
+          spawner.volume_mounts = mounts
+          spawner.environment = environment
+          spawner.cmd = wrapped_cmd
+
+      async def read_digitafrica_module5_workshop_state(api, namespace):
+          """Read the one ConfigMap permitted by the state-reader Role."""
+          import asyncio
+
+          if not isinstance(namespace, str) or not namespace.strip():
+              raise RuntimeError("Workshop-state namespace is required.")
+
+          try:
+              response = await asyncio.wait_for(
+                  api.read_namespaced_config_map(
+                      name="digitafrica-workshop-state",
+                      namespace=namespace,
+                  ),
+                  timeout=15,
+              )
+          except Exception as error:
+              raise RuntimeError(
+                  "Cannot read current workshop state; refusing to guess "
+                  "Module 5 runtime selection."
+              ) from error
+
+          data = response.data
+          if not isinstance(data, dict):
+              raise RuntimeError("Workshop-state ConfigMap has no valid data.")
+          return dict(data)
+
+      def configure_digitafrica_module5_node_preparation(spawner, workspace_role):
+          """Enable runtime preparation only for authorized participants."""
+          from copy import deepcopy
+
+          if workspace_role not in ("administrator", "participant"):
+              raise RuntimeError("Invalid Module 5 workspace role.")
+
+          containers = list(spawner.init_containers or [])
+          target_name = "prepare-module5-node-runtime"
+          matches = [
+              index for index, container in enumerate(containers)
+              if (
+                  container.get("name") if isinstance(container, dict)
+                  else getattr(container, "name", None)
+              ) == target_name
+          ]
+          if len(matches) != 1:
+              raise RuntimeError("Expected exactly one Module 5 preparation container.")
+
+          index = matches[0]
+          container = deepcopy(containers[index])
+          if not isinstance(container, dict):
+              container = digitafrica_container_to_api(container)
+
+          arguments = list(container.get("args") or [])
+          if arguments.count("--delivery-enabled") != 1:
+              raise RuntimeError("Invalid Module 5 preparation delivery argument.")
+          position = arguments.index("--delivery-enabled") + 1
+          if position >= len(arguments) or arguments[position] not in ("true", "false"):
+              raise RuntimeError("Invalid Module 5 preparation delivery value.")
+
+          arguments[position] = (
+              "true" if workspace_role == "participant" else "false"
+          )
+          container["args"] = arguments
+          containers[index] = container
+          spawner.init_containers = containers

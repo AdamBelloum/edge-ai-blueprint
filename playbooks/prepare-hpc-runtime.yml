@@ -1,0 +1,7 @@
+---
+- name: Stage HPC runtime definitions on the selected central VM
+  hosts: "{{ hpc_server_group }}"
+  become: true
+  gather_facts: false
+  roles:
+    - role: hpc_runtime

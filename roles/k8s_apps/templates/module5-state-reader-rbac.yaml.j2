@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: digitafrica-module5-state-reader
+  namespace: {{ digitafrica_deployment.digitafrica_namespace | to_json }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["digitafrica-workshop-state"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: digitafrica-module5-state-reader
+  namespace: {{ digitafrica_deployment.digitafrica_namespace | to_json }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ module5_hub_service_account | to_json }}
+    namespace: {{ digitafrica_deployment.digitafrica_namespace | to_json }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: digitafrica-module5-state-reader

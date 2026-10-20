@@ -387,21 +387,15 @@
     - workshop_assets
     - workshop_application_reconciliation
 
-- name: Ensure namespace exists
-  ansible.builtin.shell: |
-    set -e
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
-  args:
-    executable: /bin/bash
-  tags:
-    - workshop_application_reconciliation
-
-- name: Deploy Cloud Computing SOA Module 3 mapped assets
-  ansible.builtin.import_tasks: cloud-soa-module3-assets.yml
-  tags:
-    - workshop_assets
-    - workshop_application_reconciliation
+- name: Publish Module 5 assets only when explicitly enabled
+  ansible.builtin.include_tasks:
+    file: openfaas-assets.yml
+    apply:
+      tags: &id001
+      - workshop_assets
+      - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
+  tags: *id001
 
 - name: Generate tutorial asset provenance
   ansible.builtin.shell: |
@@ -568,6 +562,34 @@
   tags:
     - workshop_application_reconciliation
 
+- name: Read active workshop before rendering JupyterHub
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - get
+      - configmap
+      - digitafrica-workshop-state
+      - --ignore-not-found
+      - -o
+      - "jsonpath={.data.workshop_type}"
+  register: big_data_active_workshop_type
+  changed_when: false
+  tags:
+    - workshop_application_reconciliation
+
+# Active HPC selection preserves runtime integration on ordinary reconciliation.
+# Explicit runtime opt-in also permits staging before HPC activation.
+- name: Select participant source delivery and HPC runtime integration
+  ansible.builtin.set_fact:
+    big_data_workspace_enabled: "{{ (big_data_active_workshop_type.stdout | trim) == 'big-data' }}"
+    hpc_workspace_enabled: "{{ (big_data_active_workshop_type.stdout | trim) == 'hpc' }}"
+    hpc_runtime_enabled: "{{ (hpc_runtime_enabled | default(false) | bool) or ((big_data_active_workshop_type.stdout | trim) == 'hpc') }}"
+  tags:
+    - workshop_application_reconciliation
+
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2
@@ -586,6 +608,16 @@
     helm version
   args:
     executable: /bin/bash
+
+- name: Ensure namespace exists
+  ansible.builtin.shell: |
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_application_reconciliation
 
 - name: Verify protected JupyterHub OIDC client secret record
   ansible.builtin.assert:
@@ -703,7 +735,7 @@
           -p '{"data":{"workshop_type":"none"}}'
         echo "initialised"
         ;;
-      none|introduction-to-ai|federated-learning|cloud-computing-soa)
+      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data)
         echo "preserved"
         ;;
       *)
@@ -741,7 +773,7 @@
     )"
 
     case "$workshop_module" in
-      none|module1|module2|module3)
+      none|module1|module2|module3|module5|spark|openmp-01-basics)
         echo "preserved"
         exit 0
         ;;
@@ -772,6 +804,12 @@
         ;;
       cloud-computing-soa)
         workshop_module=module1
+        ;;
+      big-data)
+        workshop_module=spark
+        ;;
+      hpc)
+        workshop_module=openmp-01-basics
         ;;
       none|federated-learning)
         workshop_module=none
@@ -813,6 +851,50 @@
     executable: /bin/bash
   register: introduction_to_ai_module1_configmap
   changed_when: "'created' in introduction_to_ai_module1_configmap.stdout"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Remove the HPC runtime ConfigMap when runtime integration is disabled
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - delete
+      - configmap
+      - digitafrica-runtime-hpc
+      - --ignore-not-found=true
+      - --wait=true
+      - --timeout=60s
+  register: hpc_runtime_configmap_removal
+  changed_when: hpc_runtime_configmap_removal.stdout | trim | length > 0
+  when: not (hpc_runtime_enabled | default(false) | bool)
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Reconcile the opt-in HPC runtime ConfigMap
+  ansible.builtin.include_tasks:
+    file: hpc-runtime.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  when: hpc_runtime_enabled | default(false) | bool
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Reconcile the opt-in Module 5 Node.js runtime ConfigMap
+  ansible.builtin.include_tasks:
+    file: module5-node-runtime.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
   tags:
     - workshop_assets
     - workshop_application_reconciliation
@@ -994,6 +1076,33 @@
     executable: /bin/bash
   tags:
     - workshop_seed
+    - workshop_application_reconciliation
+
+- name: Reconcile Module 5 workshop-state read permissions
+  ansible.builtin.include_tasks:
+    file: module5-state-reader.yml
+    apply:
+      tags:
+        - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
+  tags:
+    - workshop_application_reconciliation
+
+- name: Remove Module 5 workshop-state read permissions when delivery is disabled
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - delete
+      - role,rolebinding
+      - digitafrica-module5-state-reader
+      - --ignore-not-found=true
+  register: module5_state_reader_cleanup
+  changed_when: "'deleted' in module5_state_reader_cleanup.stdout"
+  when: not (cloud_module5_delivery_enabled | default(false) | bool)
+  tags:
     - workshop_application_reconciliation
 
 - name: List resources created by Helm release (debug)

@@ -107,6 +107,36 @@ hub:
       WORKSHOP_GROUP_NODES = {{ workshop_group_nodes | to_json }}
       WORKSHOP_ADMIN_USERS = {{ jupyterhub_admin_users | to_json }}
       OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
+      from copy import deepcopy
+
+      def digitafrica_container_to_api(value):
+          """Serialize container models without creating a Kubernetes client."""
+          if value is None or isinstance(value, (str, int, float, bool)):
+              return value
+          if isinstance(value, (list, tuple)):
+              return [digitafrica_container_to_api(item) for item in value]
+          if isinstance(value, dict):
+              return {
+                  key: digitafrica_container_to_api(item)
+                  for key, item in value.items()
+              }
+          attributes = getattr(value, "attribute_map", None)
+          if not isinstance(attributes, dict):
+              raise RuntimeError("Unsupported Kubernetes container value.")
+          return {
+              api_name: digitafrica_container_to_api(getattr(value, name))
+              for name, api_name in attributes.items()
+              if getattr(value, name) is not None
+          }
+
+      BIG_DATA_WORKSPACE_ENABLED = {{ 'True' if (big_data_workspace_enabled | default(false) | bool) else 'False' }}
+      SPARK_SOURCE_VOLUME = "digitafrica-spark-source"
+      SPARK_SOURCE_HOST_PATH = "/opt/digitafrica/big-data/spark"
+      SPARK_SOURCE_SEED_PATH = "/seed/big-data/spark"
+      HPC_WORKSPACE_ENABLED = {{ 'True' if ((hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool)) else 'False' }}
+      HPC_SOURCE_VOLUME = "digitafrica-hpc-source"
+      HPC_SOURCE_HOST_PATH = "/opt/digitafrica/hpc"
+      HPC_SOURCE_SEED_PATH = "/seed/hpc"
       WORKSHOP_HOST_PATH = "/opt/digitafrica/fl-workshop"
       WORKSHOP_MOUNT_PATH = "/home/jovyan/digitafrica/workshop"
 
@@ -115,7 +145,33 @@ hub:
       c.KubeSpawner.remember_pvc_name = False
       c.KubeSpawner.storage_pvc_ensure = True
 
+{% if big_data_workspace_enabled | default(false) | bool %}
+{% include 'workshop-hooks/spark.py.j2' %}
+{% endif %}
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+{% include 'workshop-hooks/hpc.py.j2' %}
+{% endif %}
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+{% include 'workshop-hooks/module5-node.py.j2' %}
+      MODULE5_STATE_NAMESPACE = {{ digitafrica_deployment.digitafrica_namespace | to_json }}
+      MODULE5_NODE_BIN = "/home/jovyan/.local/share/digitafrica/runtime/module5-node/node-v22.23.3-linux-x64/bin"
+{% endif %}
       async def configure_digitafrica_group_workspace(spawner):
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+          # Undo this helper's previous launch changes before authorization.
+          configure_digitafrica_module5_node_launch(spawner, {}, "")
+          configure_digitafrica_module5_node_preparation(
+              spawner, "administrator"
+          )
+{% endif %}
+          # Inactive workshop handlers must not participate in spawning.
+          # Participant setup is applied below after group authorization.
+{% if big_data_workspace_enabled | default(false) | bool %}
+          configure_digitafrica_spark_source(spawner, "administrator")
+{% endif %}
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+          configure_digitafrica_hpc_source(spawner, "administrator")
+{% endif %}
           username = spawner.user.name.lower()
           if OIDC_ENABLED:
               user_group_names = {
@@ -186,10 +242,31 @@ hub:
           environment["GROUP_ID"] = group_id
           spawner.environment = environment
 
+{% if big_data_workspace_enabled | default(false) | bool %}
+          configure_digitafrica_spark_source(spawner, "participant")
+{% endif %}
+
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+          configure_digitafrica_hpc_source(spawner, "participant")
+{% endif %}
+
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+          # Only authorized, assigned participants reach this point.
+          module5_state = await read_digitafrica_module5_workshop_state(
+              spawner.api, MODULE5_STATE_NAMESPACE
+          )
+          configure_digitafrica_module5_node_launch(
+              spawner, module5_state, MODULE5_NODE_BIN
+          )
+          configure_digitafrica_module5_node_preparation(
+              spawner, "participant"
+          )
+{% endif %}
+
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
   config:
-    # Recheck participant PVCs after workshop resets.
+    # Recheck the participant PVC on every spawn after a workshop reset.
     KubeSpawner:
       remember_pvc_name: false
 
@@ -262,6 +339,11 @@ singleuser:
     # mounted in the regular notebook container for backwards compatibility.
     # Advanced assets, solutions, and organiser state are init-container-only.
     extraVolumes:
+{% if hpc_runtime_enabled | default(false) | bool %}
+      - name: digitafrica-runtime-hpc
+        configMap:
+          name: digitafrica-runtime-hpc
+{% endif %}
       - name: digitafrica-seed-beginner
         configMap:
           name: digitafrica-notebooks-beginner
@@ -320,18 +402,55 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-tests
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
-      - name: digitafrica-seed-cloud-computing-soa-module3-beginner
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+      - name: digitafrica-runtime-module5-node
         configMap:
-          name: digitafrica-notebooks-cloud-computing-soa-module3-beginner
-      - name: digitafrica-seed-cloud-computing-soa-module3-advanced
+          name: digitafrica-runtime-module5-node
+      - name: digitafrica-seed-cloud-computing-soa-module5-beginner
         configMap:
-          name: digitafrica-notebooks-cloud-computing-soa-module3-advanced
-      - name: digitafrica-seed-cloud-computing-soa-module3-solutions
-        configMap:
-          name: digitafrica-notebooks-cloud-computing-soa-module3-solutions
-      - name: digitafrica-seed-cloud-computing-soa-module3-tests
-        configMap:
-          name: digitafrica-notebooks-cloud-computing-soa-module3-tests
+          name: digitafrica-notebooks-cloud-computing-soa-module5-beginner
+          items:
+            - key: asset_001
+              path: .gitignore
+            - key: asset_002
+              path: README.md
+            - key: asset_003
+              path: SOURCE.md
+            - key: asset_004
+              path: UPSTREAM-LICENSE.txt
+            - key: asset_005
+              path: beginner/01-explore-and-invoke.ipynb
+            - key: asset_006
+              path: beginner/02-develop-and-deploy.ipynb
+            - key: asset_007
+              path: beginner/03-data-and-observability.ipynb
+            - key: asset_008
+              path: config/.gitignore
+            - key: asset_009
+              path: config/lab.example.json
+            - key: asset_010
+              path: fixtures/weather-sample.json
+            - key: asset_011
+              path: helpers/invoke.py
+            - key: asset_012
+              path: helpers/lab_config.py
+            - key: asset_013
+              path: helpers/manifests.py
+            - key: asset_014
+              path: helpers/traffic.py
+            - key: asset_015
+              path: examples/greeting/handler.js
+            - key: asset_016
+              path: examples/greeting/handler.test.js
+            - key: asset_017
+              path: examples/greeting/package.json
+            - key: asset_018
+              path: examples/weather/handler.js
+            - key: asset_019
+              path: examples/weather/handler.test.js
+            - key: asset_020
+              path: examples/weather/package.json
+{% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
 {% for profile_name, profile in workshop_notebook_runtime_profiles.items() %}
       - name: digitafrica-runtime-{{ profile_name }}
@@ -346,6 +465,69 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% include 'workshop-hooks/module5-node-init.yaml.j2' %}
+{% if hpc_runtime_enabled | default(false) | bool %}
+    # Prepare only the PVC root; never recursively change participant files.
+    - name: prepare-hpc-home
+      image: alpine:3.20
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -eu
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; home preparation skipped."
+            exit 0
+          fi
+          chown 1000:100 /home/jovyan
+          chmod u+rwx /home/jovyan
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+
+    # Install only into the shared home PVC, never the worker host.
+    - name: prepare-hpc-runtime
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+{% else %}
+      image: jupyter/minimal-notebook:python-3.11
+{% endif %}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      env:
+        - name: HOME
+          value: /home/jovyan
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          workshop_type="$(tr -d '\r\n' < /state/workshop_type)"
+          if [ "$workshop_type" != "hpc" ]; then
+            echo "[hpc-runtime] HPC is not active; installation skipped."
+            exit 0
+          fi
+          bash /runtime/hpc/prepare-hpc-environment.sh /runtime/hpc/environment.yml
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: digitafrica-runtime-hpc
+          mountPath: /runtime/hpc
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
     # Select and cache the pinned runtime profile for the active workshop.
     # Workshops without a profile are dependency-free and require no install.
@@ -471,6 +653,12 @@ singleuser:
               cloud-computing-soa)
                 workshop_module=module1
                 ;;
+              big-data)
+                workshop_module=spark
+                ;;
+              hpc)
+                workshop_module=openmp-01-basics
+                ;;
               none|federated-learning)
                 workshop_module=none
                 ;;
@@ -482,7 +670,7 @@ singleuser:
           fi
 
           case "$workshop_type" in
-            none|introduction-to-ai|federated-learning|cloud-computing-soa) ;;
+            none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data|hpc) ;;
             *)
               echo "[seed] ERROR: unsupported workshop type: $workshop_type" >&2
               exit 1
@@ -490,7 +678,7 @@ singleuser:
           esac
 
           case "$workshop_module" in
-            none|module1|module2|module3) ;;
+            none|module1|module2|module3|module5|spark|openmp-01-basics) ;;
             *)
               echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
               exit 1
@@ -498,7 +686,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module3)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -562,29 +750,31 @@ singleuser:
             esac
           fi
 
-          # Cloud Module 3 state validation.
-          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module3" ]; then
-            case "$mode" in
-              beginner|advanced) ;;
-              *)
-                echo "[seed] ERROR: Cloud Module 3 requires mode=beginner or mode=advanced" >&2
-                exit 1
-                ;;
-            esac
-
-            case "$solutions_released" in
-              true|false) ;;
-              *)
-                echo "[seed] ERROR: invalid Cloud Module 3 solutions_released state: $solutions_released" >&2
-                exit 1
-                ;;
-            esac
-
-            if [ "$solutions_released" = "true" ] && [ "$mode" != "advanced" ]; then
-              echo "[seed] ERROR: Cloud Module 3 solutions require mode=advanced" >&2
+          # Initial HPC track: guided teaching files, no solution release.
+          if [ "$workshop_type" = "hpc" ]; then
+            if [ "$mode" != "beginner" ]; then
+              echo "[seed] ERROR: HPC currently supports beginner mode only." >&2
+              exit 1
+            fi
+            if [ "$solutions_released" != "false" ]; then
+              echo "[seed] ERROR: HPC solution release is unavailable." >&2
               exit 1
             fi
           fi
+
+          # BEGIN CLOUD MODULE 5 VALIDATION
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
+            cloud_module5_delivery_enabled={{ 'true' if cloud_module5_delivery_enabled | default(false) | bool else 'false' }}
+            if [ "$cloud_module5_delivery_enabled" != "true" ]; then
+              echo "[seed] ERROR: Module 5 delivery is disabled; publication remains blocked." >&2
+              exit 1
+            fi
+            if [ "$mode" != "beginner" ] || [ "$solutions_released" != "false" ]; then
+              echo "[seed] ERROR: Module 5 requires beginner mode and solutions_released=false." >&2
+              exit 1
+            fi
+          fi
+          # END CLOUD MODULE 5 VALIDATION
 
           copy_seed_file() {{ '{{' }}
             source_file="$1"
@@ -624,6 +814,88 @@ singleuser:
           {{ '}}' }}
 
           mkdir -p "$workspace"
+
+          # HPC: explicit teaching-file allowlist; preserve participant edits.
+          # Do not copy runtime definitions into the teaching workspace.
+          if [ "$workshop_type" = "hpc" ] && [ "$workshop_module" = "openmp-01-basics" ]; then
+            case "${{ '{{' }}DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
+              administrator)
+                echo "[seed] Administrator: participant HPC workspace skipped."
+                ;;
+              participant)
+                hpc_source=/seed/hpc
+                hpc_workspace=/home/jovyan/HPC
+
+                mkdir -p \
+                  "$hpc_workspace/openmp-01-basics/01-beginner" \
+                  "$hpc_workspace/openmp-01-basics/02-intermediate"
+                for directory in \
+                  "$hpc_workspace" \
+                  "$hpc_workspace/openmp-01-basics" \
+                  "$hpc_workspace/openmp-01-basics/01-beginner" \
+                  "$hpc_workspace/openmp-01-basics/02-intermediate"; do
+                  chown 1000:100 "$directory"
+                  chmod 0755 "$directory"
+                done
+
+                for filename in \
+                  README.md \
+                  LICENSE \
+                  PROVENANCE.md \
+                  openmp-01-basics/01-beginner/hello.c \
+                  openmp-01-basics/02-intermediate/pi_serial.c; do
+                  copy_seed_file "$hpc_source/$filename" "$hpc_workspace/$filename" false
+                done
+
+                # Delivery receipt only, not proof of runtime readiness.
+                write_receipt_if_absent \
+                  "$hpc_workspace/HPC_SEED_RECEIPT.txt" \
+                  "HPC OpenMP basics source files, licence and provenance"
+                ;;
+              *)
+                echo "[seed] ERROR: HPC source delivery is not enabled; reconcile workshop applications before participant startup." >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Spark: preserve participant edits on subsequent spawns.
+          if [ "$workshop_type" = "big-data" ] && [ "$workshop_module" = "spark" ]; then
+            case "${{ '{{' }}DIGITAFRICA_SPARK_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
+              administrator)
+                echo "[seed] Administrator: participant Spark workspace skipped."
+                ;;
+              participant)
+                if [ "$mode" != "beginner" ]; then
+                  echo "[seed] ERROR: Spark currently supports beginner mode only." >&2
+                  exit 1
+                fi
+                big_data_source=/seed/big-data/spark
+                big_data_parent=/home/jovyan/Big-Data
+                big_data_workspace="$big_data_parent/Spark"
+
+                mkdir -p "$big_data_workspace"
+                chown 1000:100 "$big_data_parent" "$big_data_workspace"
+                chmod 0755 "$big_data_parent" "$big_data_workspace"
+
+                for directory in data docs outputs; do
+                  mkdir -p "$big_data_workspace/$directory"
+                  chown 1000:100 "$big_data_workspace/$directory"
+                  chmod 0755 "$big_data_workspace/$directory"
+                done
+
+                for filename in README.md 01_spark_basics.ipynb 01_spark_basics.py 02_spark_via_livy.ipynb 02_spark_via_livy.py participants-instructions.md data/Bank_Personal_Loan_Modelling.csv docs/spark-DA.pdf; do
+                  copy_seed_file "$big_data_source/$filename" "$big_data_workspace/$filename" false
+                done
+
+                write_receipt_if_absent "$big_data_workspace/SPARK_SEED_RECEIPT.txt" "Spark README, notebook, code, dataset and PDF"
+                ;;
+              *)
+                echo "[seed] ERROR: Spark source delivery is not enabled; reconcile workshop applications before participant startup." >&2
+                exit 1
+                ;;
+            esac
+          fi
 
           if [ "$workshop_type" = "federated-learning" ]; then
           if [ "$mode" = "beginner" ]; then
@@ -1065,96 +1337,34 @@ singleuser:
             fi
           fi
 
-          # Cloud Module 3: reconstruct mapped participant directories.
-          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module3" ]; then
-            cloud_module3_parent=/home/jovyan/Cloud-Computing-SOA
-            cloud_module3_workspace="$cloud_module3_parent/Module-3"
-            mkdir -p "$cloud_module3_workspace"
-            chown 1000:100 "$cloud_module3_parent" "$cloud_module3_workspace"
-            chmod 0755 "$cloud_module3_parent" "$cloud_module3_workspace"
-
-            selected_tracks="$mode tests"
-            if [ "$solutions_released" = "true" ]; then
-              selected_tracks="$selected_tracks solutions"
-            fi
-
-            tab="$(printf '\t')"
-            for track in $selected_tracks; do
-              source_root="/seed/cloud-computing-soa/module3/$track"
-              destination_root="$cloud_module3_workspace/$track"
-              map_file="$source_root/asset_map_tsv"
-              if [ ! -f "$map_file" ]; then
-                echo "[seed] ERROR: missing Module 3 asset map: $map_file" >&2
+          # BEGIN CLOUD MODULE 5 SEEDING
+          if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
+            cloud_module5_source=/seed/cloud-computing-soa/module5
+            cloud_module5_parent=/home/jovyan/Cloud-Computing-SOA
+            cloud_module5_workspace="$cloud_module5_parent/Module-5"
+            # Preflight all required sources before Module 5 workspace writes.
+            for filename in .gitignore README.md SOURCE.md UPSTREAM-LICENSE.txt beginner/01-explore-and-invoke.ipynb beginner/02-develop-and-deploy.ipynb beginner/03-data-and-observability.ipynb config/.gitignore config/lab.example.json fixtures/weather-sample.json helpers/invoke.py helpers/lab_config.py helpers/manifests.py helpers/traffic.py examples/greeting/handler.js examples/greeting/handler.test.js examples/greeting/package.json examples/weather/handler.js examples/weather/handler.test.js examples/weather/package.json; do
+              if [ ! -f "$cloud_module5_source/$filename" ]; then
+                echo "[seed] ERROR: missing required Module 5 seed file: $filename" >&2
                 exit 1
               fi
-
-              mkdir -p "$destination_root"
-              chown 1000:100 "$destination_root"
-              chmod 0755 "$destination_root"
-              asset_count=0
-
-              while IFS="$tab" read -r mapped_track key relative; do
-                [ "$mapped_track" = "$track" ] || continue
-                case "$key" in
-                  ""|*[!A-Za-z0-9._-]*)
-                    echo "[seed] ERROR: invalid Module 3 asset key" >&2
-                    exit 1
-                    ;;
-                esac
-                case "$relative" in
-                  ""|/*)
-                    echo "[seed] ERROR: invalid Module 3 destination" >&2
-                    exit 1
-                    ;;
-                esac
-                case "/$relative/" in
-                  */../*|*/./*|*//*)
-                    echo "[seed] ERROR: unsafe Module 3 destination: $relative" >&2
-                    exit 1
-                    ;;
-                esac
-
-                destination="$destination_root/$relative"
-                directory="$(dirname "$destination")"
-
-                # Reject symlinked directories; never follow them when seeding.
-                probe="$directory"
-                while [ "$probe" != "/home/jovyan" ]; do
-                  if [ -L "$probe" ]; then
-                    echo "[seed] ERROR: symlinked workspace directory: $probe" >&2
-                    exit 1
-                  fi
-                  probe="$(dirname "$probe")"
-                done
-
-                mkdir -p "$directory"
-                probe="$directory"
-                while [ "$probe" != "$cloud_module3_parent" ]; do
-                  chown 1000:100 "$probe"
-                  chmod 0755 "$probe"
-                  probe="$(dirname "$probe")"
-                done
-
-                # Preserve participant files, including their existing permissions.
-                if [ -e "$destination" ] || [ -L "$destination" ]; then
-                  echo "[seed] preserving existing file: $destination"
-                else
-                  copy_seed_file "$source_root/$key" "$destination" false
-                  case "$relative" in
-                    *.sh) chmod 0755 "$destination" ;;
-                  esac
-                fi
-                asset_count=$((asset_count + 1))
-              done < "$map_file"
-
-              if [ "$asset_count" -eq 0 ]; then
-                echo "[seed] ERROR: no mapped Module 3 assets for $track" >&2
-                exit 1
-              fi
-
-              write_receipt_if_absent                 "$destination_root/MODULE3_SEED_RECEIPT.txt"                 "Module 3 $track mapped assets"
             done
+            mkdir -p "$cloud_module5_workspace"
+            chown 1000:100 "$cloud_module5_parent" "$cloud_module5_workspace"
+            chmod 0755 "$cloud_module5_parent" "$cloud_module5_workspace"
+            for directory in beginner config examples examples/greeting examples/weather fixtures helpers; do
+              mkdir -p "$cloud_module5_workspace/$directory"
+              chown 1000:100 "$cloud_module5_workspace/$directory"
+              chmod 0755 "$cloud_module5_workspace/$directory"
+            done
+            for filename in .gitignore README.md SOURCE.md UPSTREAM-LICENSE.txt beginner/01-explore-and-invoke.ipynb beginner/02-develop-and-deploy.ipynb beginner/03-data-and-observability.ipynb config/.gitignore config/lab.example.json fixtures/weather-sample.json helpers/invoke.py helpers/lab_config.py helpers/manifests.py helpers/traffic.py examples/greeting/handler.js examples/greeting/handler.test.js examples/greeting/package.json examples/weather/handler.js examples/weather/handler.test.js examples/weather/package.json; do
+              copy_seed_file "$cloud_module5_source/$filename" "$cloud_module5_workspace/$filename" false
+            done
+            # Receipt records initial delivery, not runtime readiness.
+            write_receipt_if_absent "$cloud_module5_workspace/MODULE5_BEGINNER_SEED_RECEIPT.txt" "SOURCE.md"
+            echo "[seed] Module 5 assets delivered; live readiness NOT VALIDATED."
           fi
+          # END CLOUD MODULE 5 SEEDING
 
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] workshop module: $workshop_module"
@@ -1218,18 +1428,11 @@ singleuser:
         - name: digitafrica-seed-cloud-computing-soa-module2-tests
           mountPath: /seed/cloud-computing-soa/module2/tests
           readOnly: true
-        - name: digitafrica-seed-cloud-computing-soa-module3-beginner
-          mountPath: /seed/cloud-computing-soa/module3/beginner
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+        - name: digitafrica-seed-cloud-computing-soa-module5-beginner
+          mountPath: /seed/cloud-computing-soa/module5
           readOnly: true
-        - name: digitafrica-seed-cloud-computing-soa-module3-advanced
-          mountPath: /seed/cloud-computing-soa/module3/advanced
-          readOnly: true
-        - name: digitafrica-seed-cloud-computing-soa-module3-solutions
-          mountPath: /seed/cloud-computing-soa/module3/solutions
-          readOnly: true
-        - name: digitafrica-seed-cloud-computing-soa-module3-tests
-          mountPath: /seed/cloud-computing-soa/module3/tests
-          readOnly: true
+{% endif %}
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
           mountPath: /home/jovyan

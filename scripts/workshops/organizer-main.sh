@@ -50,12 +50,6 @@ Usage:
   organizer-main.sh [OPTIONS] [ACTION]
 
 Actions:
-  cloud-module3-local-check MODE
-                          Validate local assets; MODE: beginner, advanced, or solutions.
-  cloud-module3-local-export MODE ARCHIVE.tar.gz [--confirm-solutions]
-                          Export selected assets plus tests without platform access.
-                          Solutions require --confirm-solutions.
-                          Local actions must come first; use positional MODE, not --mode.
   menu                    Show the hierarchical organiser menu. Default.
   initialise-identities   Provision participant identities and groups only.
   issue-credentials       Issue temporary passwords and write a protected TSV export.
@@ -78,10 +72,17 @@ Actions:
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
                           Release Cloud Computing SOA Module 2 advanced reference solution.
-  cloud-module3-publish   Activate Cloud Computing SOA Module 3 for new participant spawns.
-  cloud-module3-check     Check Module 3 mapped-asset delivery readiness.
-  cloud-module3-release-solutions
-                          Release Cloud Computing SOA Module 3 advanced reference solutions.
+  cloud-module5-check     Check local OpenFaaS assets; no infrastructure access.
+  cloud-module5-status    Show authoring status, not live platform readiness.
+  cloud-module5-publish   Blocked pending reference-lab validation.
+  spark-prepare           Stage Spark participant assets only; no runtime startup.
+  spark-publish           Publish Spark beginner workspace and reconcile JupyterHub.
+  spark-status            Show workshop selection; not Spark execution readiness.
+  spark-release-solutions
+                          Reserved for future advanced Spark solutions; currently unavailable.
+  hpc-prepare             Stage HPC teaching assets only; no activation or runtime installation.
+  hpc-openmp-publish      Publish HPC OpenMP basics beginner workspace and reconcile JupyterHub.
+  hpc-status             Show workshop selection; not HPC execution readiness.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
   reset                   Reset the active workshop cycle and participant cohort.
@@ -106,6 +107,14 @@ Workflow:
   2. Prepare the selected workshop after the participant cohort exists.
   3. Issue/export shared participant credentials when they are ready to distribute.
   4. Distribute credentials to participants.
+
+Spark mode selection: BIG_DATA_SPARK_MODE=beginner|advanced.
+Advanced Spark publication and solution release are currently unavailable.
+Spark publication does not start its runtime or prove participant execution readiness.
+
+HPC currently supports OpenMP basics in beginner mode only; no solution release.
+HPC runtime preparation occurs during participant pod startup.
+HPC publication does not prove asset delivery, runtime installation or OpenMP execution.
 
 Federated Learning preparation is independent from Introduction to AI.
 After pulling or adding a workshop or module, run reconcile-applications before publishing it.
@@ -300,23 +309,6 @@ prompt_for_server_url() {
     fail 'A public HTTPS Keycloak URL is required.'
 }
 
-# Standalone Module 3 actions bypass deployment-context loading.
-# Local actions must come first; remaining arguments go to the local helper.
-case "${1:-}" in
-  cloud-module3-local-check|cloud-module3-local-export)
-    module3_local_action="$1"
-    shift
-    module3_local_helper="$SCRIPT_DIR/cloud-computing-soa/module3-local.sh"
-    [[ -x "$module3_local_helper" ]] ||
-      fail "Missing executable local Module 3 helper: $module3_local_helper"
-    case "$module3_local_action" in
-      cloud-module3-local-check) "$module3_local_helper" check "$@" ;;
-      cloud-module3-local-export) "$module3_local_helper" export "$@" ;;
-    esac
-    exit $?
-    ;;
-esac
-
 # Parse options before loading deployment context so malformed invocations fail
 # early and without contacting Keycloak or the deployment environment.
 while (($#)); do
@@ -359,7 +351,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-publish|cloud-module3-check|cloud-module3-release-solutions|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -392,6 +384,24 @@ case "$ACTION" in
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with fl-prepare.'
     "$CONFIRM_COHORT_RESET" &&
       fail '--confirm-cohort-reset is valid only with --non-interactive fl-prepare.'
+    ;;
+esac
+
+# OpenFaaS pre-live actions bypass deployment context and identity services.
+# Keep these after option validation and before shared infrastructure loading.
+case "$ACTION" in
+  cloud-module5-check|cloud-module5-status|cloud-module5-publish)
+    module5_helper="$SCRIPT_DIR/cloud-computing-soa/openfaas/module-main.sh"
+    [[ -r "$module5_helper" ]] ||
+      fail "Missing OpenFaaS module controller: $module5_helper"
+    # shellcheck source=cloud-computing-soa/openfaas/module-main.sh
+    source "$module5_helper"
+    case "$ACTION" in
+      cloud-module5-check) cloud_module5_check ;;
+      cloud-module5-status) cloud_module5_status ;;
+      cloud-module5-publish) cloud_module5_publish ;;
+    esac
+    exit $?
     ;;
 esac
 
@@ -498,7 +508,7 @@ run_status() {
 }
 
 run_application_reconciliation() {
-  "$APPLICATION_RECONCILIATION_HELPER"
+  "$APPLICATION_RECONCILIATION_HELPER" "$@"
 }
 
 # The menu only routes to controllers; the controllers implement each
@@ -511,6 +521,8 @@ run_workshops_menu() {
     printf '  1) Introduction to AI\n'
     printf '  2) Federated Learning\n'
     printf '  3) Cloud Computing SOA\n'
+    printf '  4) Big Data\n'
+    printf '  5) HPC\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
     read -r choice
@@ -519,8 +531,10 @@ run_workshops_menu() {
       1) run_introduction_to_ai_menu ;;
       2) run_federated_learning_menu ;;
       3) run_cloud_computing_soa_menu ;;
+      4) run_big_data_menu ;;
+      5) run_hpc_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, or 3.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, 4, or 5.\n' >&2 ;;
     esac
   done
 }
@@ -563,6 +577,10 @@ source "$SCRIPT_DIR/controllers/introduction_to_ai.sh"
 source "$SCRIPT_DIR/controllers/federated_learning.sh"
 # shellcheck source=controllers/cloud_computing_soa.sh
 source "$SCRIPT_DIR/controllers/cloud_computing_soa.sh"
+# shellcheck source=controllers/big_data.sh
+source "$SCRIPT_DIR/controllers/big_data.sh"
+# shellcheck source=controllers/hpc.sh
+source "$SCRIPT_DIR/controllers/hpc.sh"
 
 # Dispatch only after all dependencies and controllers have been loaded.
 # Interactive menus require a terminal; explicit actions remain scriptable.
@@ -594,11 +612,13 @@ case "$ACTION" in
     cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)"
     ;;
   cloud-module2-release-solutions) cloud_module2_release_solutions ;;
-  cloud-module3-publish) cloud_module3_activate ;;
-  cloud-module3-check)
-    cloud_module3_check_activation_readiness "$(cloud_module3_select_mode)"
-    ;;
-  cloud-module3-release-solutions) cloud_module3_release_solutions ;;
+  spark-prepare) big_data_spark_prepare_workspace ;;
+  spark-publish) big_data_spark_activate ;;
+  spark-status) big_data_spark_show_status ;;
+  spark-release-solutions) big_data_spark_release_solutions ;;
+  hpc-prepare) hpc_openmp_prepare_workspace ;;
+  hpc-openmp-publish) hpc_openmp_publish ;;
+  hpc-status) hpc_openmp_show_status ;;
   reconcile-applications) run_application_reconciliation ;;
   fl-prepare) run_fl_prepare ;;
   reset) run_reset ;;

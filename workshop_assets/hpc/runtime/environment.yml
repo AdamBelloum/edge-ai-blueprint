@@ -1,0 +1,11 @@
+# Initial Linux x86_64 toolchain specification.
+# Versions will be locked after validation in the participant container.
+name: digitafrica-hpc
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - gcc_linux-64
+  - gxx_linux-64
+  - make
+  - openmpi

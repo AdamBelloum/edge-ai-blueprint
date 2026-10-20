@@ -66,34 +66,58 @@ run_introduction_to_ai_module3_release_solutions() {
   run_introduction_to_ai_module     "$INTRODUCTION_TO_AI_MODULE3_HELPER"     release-solutions
 }
 
+run_introduction_to_ai_module_menu() {
+  local module="$1"
+  local choice
+
+  while true; do
+    printf '\nIntroduction to AI — Module %s\n\n' "$module"
+    printf '  1) Publish and activate for new participant spawns\n'
+    printf '  2) Check publication readiness\n'
+    if [[ "$module" != "1" ]]; then
+      printf '  3) Release reference solutions after the workshop\n'
+    fi
+    printf '  0) Back\n\n'
+    printf 'Selection: '
+    read -r choice || return 0
+
+    case "$module:$choice" in
+      1:1) run_introduction_to_ai_prepare ;;
+      1:2) run_introduction_to_ai_module1_check ;;
+      2:1) run_introduction_to_ai_module2_publish ;;
+      2:2) run_introduction_to_ai_module2_check ;;
+      2:3) run_introduction_to_ai_module2_release_solutions ;;
+      3:1) run_introduction_to_ai_module3_publish ;;
+      3:2) run_introduction_to_ai_module3_check ;;
+      3:3) run_introduction_to_ai_module3_release_solutions ;;
+      *:0) return 0 ;;
+      *)
+        if [[ "$module" == "1" ]]; then
+          printf 'Choose a number from 0 to 2.\n' >&2
+        else
+          printf 'Choose a number from 0 to 3.\n' >&2
+        fi
+        ;;
+    esac
+  done
+}
+
 run_introduction_to_ai_menu() {
   local choice
 
   while true; do
     printf '\nIntroduction to AI\n\n'
-    printf '  1) Module 1 — publish and activate for new participant spawns\n'
-    printf '  2) Module 1 — check publication readiness\n'
-    printf '  3) Module 2 — activate guided beginner and advanced TODO material\n'
-    printf '  4) Module 2 — check selected track readiness\n'
-    printf '  5) Module 2 — release reference solutions after the workshop\n'
-    printf '  6) Module 3 — activate guided beginner and advanced TODO material\n'
-    printf '  7) Module 3 — check selected track readiness\n'
-    printf '  8) Module 3 — release reference solutions after the workshop\n'
+    printf '  1) Module 1\n'
+    printf '  2) Module 2\n'
+    printf '  3) Module 3\n'
     printf '  0) Back\n\n'
     printf 'Selection: '
-    read -r choice
+    read -r choice || return 0
 
     case "$choice" in
-      1) run_introduction_to_ai_prepare ;;
-      2) run_introduction_to_ai_module1_check ;;
-      3) run_introduction_to_ai_module2_publish ;;
-      4) run_introduction_to_ai_module2_check ;;
-      5) run_introduction_to_ai_module2_release_solutions ;;
-      6) run_introduction_to_ai_module3_publish ;;
-      7) run_introduction_to_ai_module3_check ;;
-      8) run_introduction_to_ai_module3_release_solutions ;;
+      1|2|3) run_introduction_to_ai_module_menu "$choice" ;;
       0) return 0 ;;
-      *) printf 'Choose a number from 0 to 8.\n' >&2 ;;
+      *) printf 'Choose a number from 0 to 3.\n' >&2 ;;
     esac
   done
 }
