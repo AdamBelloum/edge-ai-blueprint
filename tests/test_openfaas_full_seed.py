@@ -42,7 +42,7 @@ class FullSeedScriptTests(unittest.TestCase):
 
     def render(self, enabled):
         return self.environment.from_string(self.source).render(
-            cloud_module5_delivery_enabled=enabled)
+            cloud_module5_delivery_enabled=enabled).format(**{})
 
     def stage(self):
         for relative in self.paths:

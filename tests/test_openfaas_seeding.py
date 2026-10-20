@@ -44,13 +44,15 @@ class OpenFaaSSeedingTests(unittest.TestCase):
         text = TEMPLATE.read_text()
         self.validation = marked_block(text, "VALIDATION")
         self.seed = marked_block(text, "SEEDING")
-        start = "          copy_seed_file() {"
+        start = "          copy_seed_file() {{ '{{' }}"
         end = "          mkdir -p \"$workspace\""
         if text.count(start) != 1 or text.count(end) != 1:
             raise RuntimeError("Missing or ambiguous helper extraction anchors")
         self.helpers = textwrap.dedent(start + text.split(start, 1)[1].split(end, 1)[0])
         self.environment = Environment(undefined=StrictUndefined)
         self.environment.filters["bool"] = bool
+        # Match Jinja rendering followed by KubeSpawner string formatting.
+        self.helpers = self.environment.from_string(self.helpers).render().format(**{})
 
     def run_seed(self, enabled=True, mode="beginner", solutions="false",
                  workshop_type="cloud-computing-soa", module="module5"):

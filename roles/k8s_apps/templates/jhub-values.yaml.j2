@@ -109,6 +109,26 @@ hub:
       OIDC_ENABLED = {{ 'True' if (oidc.oidc_enabled | bool) else 'False' }}
       from copy import deepcopy
 
+      def digitafrica_container_to_api(value):
+          """Serialize container models without creating a Kubernetes client."""
+          if value is None or isinstance(value, (str, int, float, bool)):
+              return value
+          if isinstance(value, (list, tuple)):
+              return [digitafrica_container_to_api(item) for item in value]
+          if isinstance(value, dict):
+              return {
+                  key: digitafrica_container_to_api(item)
+                  for key, item in value.items()
+              }
+          attributes = getattr(value, "attribute_map", None)
+          if not isinstance(attributes, dict):
+              raise RuntimeError("Unsupported Kubernetes container value.")
+          return {
+              api_name: digitafrica_container_to_api(getattr(value, name))
+              for name, api_name in attributes.items()
+              if getattr(value, name) is not None
+          }
+
       BIG_DATA_WORKSPACE_ENABLED = {{ 'True' if (big_data_workspace_enabled | default(false) | bool) else 'False' }}
       SPARK_SOURCE_VOLUME = "digitafrica-spark-source"
       SPARK_SOURCE_HOST_PATH = "/opt/digitafrica/big-data/spark"
@@ -125,163 +145,33 @@ hub:
       c.KubeSpawner.remember_pvc_name = False
       c.KubeSpawner.storage_pvc_ensure = True
 
-      def configure_digitafrica_spark_source(spawner, workspace_role):
-          if workspace_role == "disabled":
-              # Preserve non-Spark spawns without imposing a seeder count.
-              # Remove any source configuration left by an earlier Spark spawn.
-              containers = deepcopy(list(spawner.init_containers or []))
-              for container in containers:
-                  for entry in container.get("env", []):
-                      if entry.get("name") == "DIGITAFRICA_SPARK_WORKSPACE_ROLE":
-                          entry.pop("valueFrom", None)
-                          entry["value"] = "disabled"
-                  if "volumeMounts" in container:
-                      container["volumeMounts"] = [
-                          mount for mount in container["volumeMounts"]
-                          if mount.get("name") != SPARK_SOURCE_VOLUME
-                      ]
-              spawner.init_containers = containers
-              spawner.volumes = {
-                  key: volume
-                  for key, volume in dict(spawner.volumes or {}).items()
-                  if volume.get("name") != SPARK_SOURCE_VOLUME
-              }
-              return
-
-          # Work on copies: never mutate the shared init-container configuration.
-          containers = deepcopy(list(spawner.init_containers or []))
-          seeders = [
-              container for container in containers
-              if any(
-                  mount.get("mountPath") == "/seed/beginner"
-                  for mount in container.get("volumeMounts", [])
-              )
-          ]
-          if len(seeders) != 1:
-              raise RuntimeError("Expected exactly one DIGITAfrica tutorial seed container.")
-
-          seeder = seeders[0]
-          environment = [
-              entry for entry in seeder.get("env", [])
-              if entry.get("name") != "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
-          ]
-          environment.append({
-              "name": "DIGITAFRICA_SPARK_WORKSPACE_ROLE",
-              "value": workspace_role,
-          })
-          seeder["env"] = environment
-
-          mounts = [
-              mount for mount in seeder.get("volumeMounts", [])
-              if mount.get("name") != SPARK_SOURCE_VOLUME
-          ]
-          volumes = {
-              key: volume
-              for key, volume in dict(spawner.volumes or {}).items()
-              if volume.get("name") != SPARK_SOURCE_VOLUME
-          }
-
-          if workspace_role == "participant":
-              volumes[SPARK_SOURCE_VOLUME] = {
-                  "name": SPARK_SOURCE_VOLUME,
-                  "hostPath": {
-                      "path": SPARK_SOURCE_HOST_PATH,
-                      "type": "Directory",
-                  },
-              }
-              mounts.append({
-                  "name": SPARK_SOURCE_VOLUME,
-                  "mountPath": SPARK_SOURCE_SEED_PATH,
-                  "readOnly": True,
-              })
-
-          seeder["volumeMounts"] = mounts
-          spawner.init_containers = containers
-          spawner.volumes = volumes
-
-      def configure_digitafrica_hpc_source(spawner, workspace_role):
-          if workspace_role == "disabled":
-              # Preserve non-HPC spawns without imposing a seeder count.
-              # Remove any source configuration left by an earlier HPC spawn.
-              containers = deepcopy(list(spawner.init_containers or []))
-              for container in containers:
-                  for entry in container.get("env", []):
-                      if entry.get("name") == "DIGITAFRICA_HPC_WORKSPACE_ROLE":
-                          entry.pop("valueFrom", None)
-                          entry["value"] = "disabled"
-                  if "volumeMounts" in container:
-                      container["volumeMounts"] = [
-                          mount for mount in container["volumeMounts"]
-                          if mount.get("name") != HPC_SOURCE_VOLUME
-                      ]
-              spawner.init_containers = containers
-              spawner.volumes = {
-                  key: volume
-                  for key, volume in dict(spawner.volumes or {}).items()
-                  if volume.get("name") != HPC_SOURCE_VOLUME
-              }
-              return
-
-          # Work on copies: never mutate the shared init-container configuration.
-          containers = deepcopy(list(spawner.init_containers or []))
-          seeders = [
-              container for container in containers
-              if any(
-                  mount.get("mountPath") == "/seed/beginner"
-                  for mount in container.get("volumeMounts", [])
-              )
-          ]
-          if len(seeders) != 1:
-              raise RuntimeError("Expected exactly one DIGITAfrica tutorial seed container.")
-
-          seeder = seeders[0]
-          environment = [
-              entry for entry in seeder.get("env", [])
-              if entry.get("name") != "DIGITAFRICA_HPC_WORKSPACE_ROLE"
-          ]
-          environment.append({
-              "name": "DIGITAFRICA_HPC_WORKSPACE_ROLE",
-              "value": workspace_role,
-          })
-          seeder["env"] = environment
-
-          mounts = [
-              mount for mount in seeder.get("volumeMounts", [])
-              if mount.get("name") != HPC_SOURCE_VOLUME
-          ]
-          volumes = {
-              key: volume
-              for key, volume in dict(spawner.volumes or {}).items()
-              if volume.get("name") != HPC_SOURCE_VOLUME
-          }
-
-          if workspace_role == "participant":
-              volumes[HPC_SOURCE_VOLUME] = {
-                  "name": HPC_SOURCE_VOLUME,
-                  "hostPath": {
-                      "path": HPC_SOURCE_HOST_PATH,
-                      "type": "Directory",
-                  },
-              }
-              mounts.append({
-                  "name": HPC_SOURCE_VOLUME,
-                  "mountPath": HPC_SOURCE_SEED_PATH,
-                  "readOnly": True,
-              })
-
-          seeder["volumeMounts"] = mounts
-          spawner.init_containers = containers
-          spawner.volumes = volumes
-
+{% if big_data_workspace_enabled | default(false) | bool %}
+{% include 'workshop-hooks/spark.py.j2' %}
+{% endif %}
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+{% include 'workshop-hooks/hpc.py.j2' %}
+{% endif %}
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+{% include 'workshop-hooks/module5-node.py.j2' %}
+      MODULE5_STATE_NAMESPACE = {{ digitafrica_deployment.digitafrica_namespace | to_json }}
+      MODULE5_NODE_BIN = "/home/jovyan/.local/share/digitafrica/runtime/module5-node/node-v22.23.3-linux-x64/bin"
+{% endif %}
       async def configure_digitafrica_group_workspace(spawner):
-          configure_digitafrica_spark_source(
-              spawner,
-              "administrator" if BIG_DATA_WORKSPACE_ENABLED else "disabled",
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+          # Undo this helper's previous launch changes before authorization.
+          configure_digitafrica_module5_node_launch(spawner, {}, "")
+          configure_digitafrica_module5_node_preparation(
+              spawner, "administrator"
           )
-          configure_digitafrica_hpc_source(
-              spawner,
-              "administrator" if HPC_WORKSPACE_ENABLED else "disabled",
-          )
+{% endif %}
+          # Inactive workshop handlers must not participate in spawning.
+          # Participant setup is applied below after group authorization.
+{% if big_data_workspace_enabled | default(false) | bool %}
+          configure_digitafrica_spark_source(spawner, "administrator")
+{% endif %}
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+          configure_digitafrica_hpc_source(spawner, "administrator")
+{% endif %}
           username = spawner.user.name.lower()
           if OIDC_ENABLED:
               user_group_names = {
@@ -352,11 +242,26 @@ hub:
           environment["GROUP_ID"] = group_id
           spawner.environment = environment
 
-          if BIG_DATA_WORKSPACE_ENABLED:
-              configure_digitafrica_spark_source(spawner, "participant")
+{% if big_data_workspace_enabled | default(false) | bool %}
+          configure_digitafrica_spark_source(spawner, "participant")
+{% endif %}
 
-          if HPC_WORKSPACE_ENABLED:
-              configure_digitafrica_hpc_source(spawner, "participant")
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+          configure_digitafrica_hpc_source(spawner, "participant")
+{% endif %}
+
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+          # Only authorized, assigned participants reach this point.
+          module5_state = await read_digitafrica_module5_workshop_state(
+              spawner.api, MODULE5_STATE_NAMESPACE
+          )
+          configure_digitafrica_module5_node_launch(
+              spawner, module5_state, MODULE5_NODE_BIN
+          )
+          configure_digitafrica_module5_node_preparation(
+              spawner, "participant"
+          )
+{% endif %}
 
       c.KubeSpawner.pre_spawn_hook = configure_digitafrica_group_workspace
 
@@ -498,6 +403,9 @@ singleuser:
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
+      - name: digitafrica-runtime-module5-node
+        configMap:
+          name: digitafrica-runtime-module5-node
       - name: digitafrica-seed-cloud-computing-soa-module5-beginner
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module5-beginner
@@ -557,6 +465,7 @@ singleuser:
         readOnly: true
 
   initContainers:
+{% include 'workshop-hooks/module5-node-init.yaml.j2' %}
 {% if hpc_runtime_enabled | default(false) | bool %}
     # Prepare only the PVC root; never recursively change participant files.
     - name: prepare-hpc-home
@@ -867,7 +776,7 @@ singleuser:
           fi
           # END CLOUD MODULE 5 VALIDATION
 
-          copy_seed_file() {
+          copy_seed_file() {{ '{{' }}
             source_file="$1"
             destination_file="$2"
             overwrite="$3"
@@ -886,9 +795,9 @@ singleuser:
             cp -L "$source_file" "$destination_file"
             chown 1000:100 "$destination_file"
             chmod 0644 "$destination_file"
-          }
+          {{ '}}' }}
 
-          write_receipt_if_absent() {
+          write_receipt_if_absent() {{ '{{' }}
             receipt="$1"
             provenance_file="$2"
 
@@ -902,14 +811,14 @@ singleuser:
             ) > "$receipt"
             chown 1000:100 "$receipt"
             chmod 0644 "$receipt"
-          }
+          {{ '}}' }}
 
           mkdir -p "$workspace"
 
           # HPC: explicit teaching-file allowlist; preserve participant edits.
           # Do not copy runtime definitions into the teaching workspace.
           if [ "$workshop_type" = "hpc" ] && [ "$workshop_module" = "openmp-01-basics" ]; then
-            case "${DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled}" in
+            case "${{ '{{' }}DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
               administrator)
                 echo "[seed] Administrator: participant HPC workspace skipped."
                 ;;
@@ -952,7 +861,7 @@ singleuser:
 
           # Spark: preserve participant edits on subsequent spawns.
           if [ "$workshop_type" = "big-data" ] && [ "$workshop_module" = "spark" ]; then
-            case "${DIGITAFRICA_SPARK_WORKSPACE_ROLE:-disabled}" in
+            case "${{ '{{' }}DIGITAFRICA_SPARK_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
               administrator)
                 echo "[seed] Administrator: participant Spark workspace skipped."
                 ;;

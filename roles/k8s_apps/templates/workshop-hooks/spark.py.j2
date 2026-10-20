@@ -1,0 +1,59 @@
+      def configure_digitafrica_spark_source(spawner, workspace_role):
+          # Work on copies: never mutate the shared init-container configuration.
+          containers = deepcopy(list(spawner.init_containers or []))
+          # KubeSpawner accepts dictionaries and Kubernetes V1Container models.
+          # Use the API serializer, not to_dict(): API field names are camelCase.
+          if any(not isinstance(container, dict) for container in containers):
+              containers = [
+                  container if isinstance(container, dict)
+                  else digitafrica_container_to_api(container)
+                  for container in containers
+              ]
+          seeders = [
+              container for container in containers
+              if any(
+                  mount.get("mountPath") == "/seed/beginner"
+                  for mount in container.get("volumeMounts", [])
+              )
+          ]
+          if len(seeders) != 1:
+              raise RuntimeError("Expected exactly one DIGITAfrica tutorial seed container.")
+
+          seeder = seeders[0]
+          environment = [
+              entry for entry in seeder.get("env", [])
+              if entry.get("name") != "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
+          ]
+          environment.append({
+              "name": "DIGITAFRICA_SPARK_WORKSPACE_ROLE",
+              "value": workspace_role,
+          })
+          seeder["env"] = environment
+
+          mounts = [
+              mount for mount in seeder.get("volumeMounts", [])
+              if mount.get("name") != SPARK_SOURCE_VOLUME
+          ]
+          volumes = {
+              key: volume
+              for key, volume in dict(spawner.volumes or {}).items()
+              if volume.get("name") != SPARK_SOURCE_VOLUME
+          }
+
+          if workspace_role == "participant":
+              volumes[SPARK_SOURCE_VOLUME] = {
+                  "name": SPARK_SOURCE_VOLUME,
+                  "hostPath": {
+                      "path": SPARK_SOURCE_HOST_PATH,
+                      "type": "Directory",
+                  },
+              }
+              mounts.append({
+                  "name": SPARK_SOURCE_VOLUME,
+                  "mountPath": SPARK_SOURCE_SEED_PATH,
+                  "readOnly": True,
+              })
+
+          seeder["volumeMounts"] = mounts
+          spawner.init_containers = containers
+          spawner.volumes = volumes

@@ -22,6 +22,13 @@ workshop_type="$(k3s kubectl -n "$namespace" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.workshop_type}')"
 
+cleanup_status="$(k3s kubectl -n "$namespace" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.cleanup_status}')"
+# Missing markers are legacy state, not evidence of completed cleanup.
+cleanup_status="${cleanup_status:-legacy}"
+printf 'cleanup_status=%s\n' "$cleanup_status"
+
 case "$workshop_type" in
   none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data|hpc) ;;
   *)
@@ -47,6 +54,10 @@ REMOTE
 
   state_output="$(run_deployment_remote "$remote_script")" || return $?
   printf '%s\n' "$state_output"
+
+  WORKSHOP_CLEANUP_STATUS="$(
+    sed -n 's/^cleanup_status=\([^[:space:]]*\)$/\1/p' <<<"$state_output"
+  )"
 
   WORKSHOP_TYPE="$(sed -n 's/.*workshop_type=\([^[:space:]]*\).*/\1/p' <<<"$state_output")"
   PARTICIPANT_WORKSPACE_STATUS="$(
@@ -85,17 +96,24 @@ ensure_workshop_activation_allowed() {
 
   check_workshop_runtime_state || return $?
 
+  case "${WORKSHOP_CLEANUP_STATUS:-unknown}" in
+    legacy|complete) ;;
+    in_progress|failed)
+      workshop_runtime_fail \
+        "Workshop cleanup is incomplete ($WORKSHOP_CLEANUP_STATUS). Resume reset before activating any workshop."
+      return $?
+      ;;
+    *)
+      workshop_runtime_fail \
+        'Could not determine workshop cleanup status. Activation is blocked.'
+      return $?
+      ;;
+  esac
+
   if [[ "$WORKSHOP_TYPE" == "$requested_type" || "$WORKSHOP_TYPE" == none ]]; then
     return 0
   fi
 
-  if [[ "$PARTICIPANT_WORKSPACE_STATUS" == clean ]]; then
-    printf '%s\n' \
-      "Changing workshop selection from $WORKSHOP_TYPE to $requested_type." \
-      'No participant workspace exists; participant identities and credentials are preserved.'
-    return 0
-  fi
-
   workshop_runtime_fail \
-    "Cannot change the active workshop from $WORKSHOP_TYPE to $requested_type while participant workspaces exist. Use Reset active workshop cycle → Reset active workshop and participant cohort first."
+    "Cannot change the active workshop from $WORKSHOP_TYPE to $requested_type before completing workshop cleanup, even when no participant workspaces exist. Use Reset active workshop cycle → Reset active workshop and participant cohort first."
 }

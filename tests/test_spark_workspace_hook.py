@@ -17,7 +17,7 @@ import textwrap
 from types import SimpleNamespace
 import unittest
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 TEMPLATE_PATH = "roles/k8s_apps/templates/jhub-values.yaml.j2"
 ROOT = Path(subprocess.check_output(
@@ -32,12 +32,18 @@ SPARK_ENV = "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
 GROUP_NODES = {"group_01": "inventory-worker-a", "group_02": "inventory-worker-b"}
 
 
-def load_hook(source, enabled=False, oidc=True):
+def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module5=False):
     marker = "    10-digitafrica-group-workspace: |\n"
     if marker not in source:
         raise RuntimeError("Group-workspace extraConfig block was not found.")
     block = source.split(marker, 1)[1].split("\n  config:", 1)[0]
-    environment = Environment(undefined=StrictUndefined)
+    environment = Environment(
+        loader=FileSystemLoader(str(ROOT / "roles/k8s_apps/templates")),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=False,
+        keep_trailing_newline=False,
+    )
     environment.filters["to_json"] = json.dumps
     # All bool-filter inputs in this isolated block are actual Python booleans.
     environment.filters["bool"] = bool
@@ -46,6 +52,10 @@ def load_hook(source, enabled=False, oidc=True):
         jupyterhub_admin_users=["admin"],
         oidc={"oidc_enabled": oidc},
         big_data_workspace_enabled=enabled,
+        hpc_workspace_enabled=hpc,
+        hpc_runtime_enabled=runtime,
+        cloud_module5_delivery_enabled=module5,
+        digitafrica_deployment={"digitafrica_namespace": "test-workshop"},
     )
     namespace = {"c": SimpleNamespace(KubeSpawner=SimpleNamespace())}
     exec(compile(textwrap.dedent(rendered), TEMPLATE_PATH + ":workspace-hook", "exec"), namespace)
@@ -168,18 +178,43 @@ class WorkspaceHookTests(unittest.TestCase):
         self.assertFalse(any(mount.get("name") == SPARK_VOLUME
                              for mount in admin.init_containers[0]["volumeMounts"]))
 
-    def test_disabling_spark_cleans_up_previous_source_configuration(self):
+    def test_inactive_workshop_hooks_are_absent(self):
+        namespace = load_hook(CURRENT, enabled=False)
+        for name in (
+            "configure_digitafrica_spark_source",
+            "configure_digitafrica_hpc_source",
+        ):
+            self.assertNotIn(name, namespace)
+
+    def test_neutral_spawn_does_not_inspect_init_container_objects(self):
         instance = spawner()
-        namespace = load_hook(CURRENT, enabled=True)
-        run_hook(namespace, instance)
-        self.assertIn(SPARK_VOLUME, instance.volumes)
-        namespace["BIG_DATA_WORKSPACE_ENABLED"] = False
-        run_hook(namespace, instance)
-        self.assertNotIn(SPARK_VOLUME, instance.volumes)
-        self.assertFalse(any(mount.get("name") == SPARK_VOLUME
-                             for mount in instance.init_containers[0]["volumeMounts"]))
-        self.assertIn({"name": SPARK_ENV, "value": "disabled"},
-                      instance.init_containers[0]["env"])
+        # An object without dictionary methods reproduces the original
+        # interface mismatch. Inactive integrations must not inspect it.
+        container = SimpleNamespace(name="tutorial-seed")
+        instance.init_containers = [container]
+        run_hook(load_hook(CURRENT, enabled=False), instance)
+        self.assertIs(instance.init_containers[0], container)
+        self.assertEqual(instance.environment["GROUP_ID"], "group_01")
+        self.assertEqual(
+            instance.node_selector["kubernetes.io/hostname"],
+            GROUP_NODES["group_01"],
+        )
+
+    def test_fresh_neutral_configuration_has_no_spark_resources(self):
+        # Workshop transitions use cleanup and fresh reconciliation,
+        # not mutation of an earlier workshop's live spawner.
+        spark_instance = spawner()
+        run_hook(load_hook(CURRENT, enabled=True), spark_instance)
+        self.assertIn(SPARK_VOLUME, spark_instance.volumes)
+
+        neutral_instance = spawner()
+        run_hook(load_hook(CURRENT, enabled=False), neutral_instance)
+        self.assertNotIn(SPARK_VOLUME, neutral_instance.volumes)
+        self.assertFalse(any(
+            entry.get("name") == SPARK_ENV
+            for container in neutral_instance.init_containers
+            for entry in container.get("env", [])
+        ))
 
 
 if __name__ == "__main__":

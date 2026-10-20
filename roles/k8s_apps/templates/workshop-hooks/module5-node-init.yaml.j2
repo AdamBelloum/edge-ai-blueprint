@@ -1,0 +1,37 @@
+{% if cloud_module5_delivery_enabled | default(false) | bool %}
+    # State is checked before the installer writes to the home PVC.
+    - name: prepare-module5-node-runtime
+{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
+{% else %}
+      image: jupyter/minimal-notebook:python-3.11
+{% endif %}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      env:
+        - name: HOME
+          value: /home/jovyan
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+      command: ["python3"]
+      args:
+        - /runtime/module5-node/prepare-module5-node-runtime.py
+        - --config
+        - /runtime/module5-node/module5-node-runtime.json
+        - --state-dir
+        - /state
+        - --delivery-enabled
+        - "true"
+      volumeMounts:
+        - name: digitafrica-workshop-state
+          mountPath: /state
+          readOnly: true
+        - name: digitafrica-runtime-module5-node
+          mountPath: /runtime/module5-node
+          readOnly: true
+        - name: home
+          mountPath: /home/jovyan
+{% endif %}

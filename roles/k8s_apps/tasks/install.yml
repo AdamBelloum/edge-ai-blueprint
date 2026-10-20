@@ -855,6 +855,26 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+- name: Remove the HPC runtime ConfigMap when runtime integration is disabled
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - delete
+      - configmap
+      - digitafrica-runtime-hpc
+      - --ignore-not-found=true
+      - --wait=true
+      - --timeout=60s
+  register: hpc_runtime_configmap_removal
+  changed_when: hpc_runtime_configmap_removal.stdout | trim | length > 0
+  when: not (hpc_runtime_enabled | default(false) | bool)
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Reconcile the opt-in HPC runtime ConfigMap
   ansible.builtin.include_tasks:
     file: hpc-runtime.yml
@@ -863,6 +883,18 @@
         - workshop_assets
         - workshop_application_reconciliation
   when: hpc_runtime_enabled | default(false) | bool
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Reconcile the opt-in Module 5 Node.js runtime ConfigMap
+  ansible.builtin.include_tasks:
+    file: module5-node-runtime.yml
+    apply:
+      tags:
+        - workshop_assets
+        - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
   tags:
     - workshop_assets
     - workshop_application_reconciliation
@@ -1044,6 +1076,33 @@
     executable: /bin/bash
   tags:
     - workshop_seed
+    - workshop_application_reconciliation
+
+- name: Reconcile Module 5 workshop-state read permissions
+  ansible.builtin.include_tasks:
+    file: module5-state-reader.yml
+    apply:
+      tags:
+        - workshop_application_reconciliation
+  when: cloud_module5_delivery_enabled | default(false) | bool
+  tags:
+    - workshop_application_reconciliation
+
+- name: Remove Module 5 workshop-state read permissions when delivery is disabled
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - delete
+      - role,rolebinding
+      - digitafrica-module5-state-reader
+      - --ignore-not-found=true
+  register: module5_state_reader_cleanup
+  changed_when: "'deleted' in module5_state_reader_cleanup.stdout"
+  when: not (cloud_module5_delivery_enabled | default(false) | bool)
+  tags:
     - workshop_application_reconciliation
 
 - name: List resources created by Helm release (debug)

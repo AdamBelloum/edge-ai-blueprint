@@ -1,0 +1,63 @@
+---
+# Include after the JupyterHub Helm upgrade, only when delivery is enabled.
+# Discover the account from the release's actual Hub Deployment.
+
+- name: Read deployments belonging to the JupyterHub release
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - -n
+      - "{{ digitafrica_deployment.digitafrica_namespace }}"
+      - get
+      - deployments
+      - -l
+      - app.kubernetes.io/instance=jhub
+      - -o
+      - json
+  register: module5_release_deployments
+  changed_when: false
+
+- name: Initialise Hub service account discovery
+  ansible.builtin.set_fact:
+    module5_hub_service_accounts: []
+
+- name: Collect service accounts from Hub deployments
+  ansible.builtin.set_fact:
+    module5_hub_service_accounts: >-
+      {{ module5_hub_service_accounts +
+         [item.spec.template.spec.serviceAccountName | default('default', true)] }}
+  loop: "{{ (module5_release_deployments.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: >-
+    'hub' in (item.spec.template.spec.containers | map(attribute='name') | list)
+
+- name: Require exactly one Hub deployment
+  ansible.builtin.assert:
+    that:
+      - module5_hub_service_accounts | length == 1
+    fail_msg: >-
+      Expected exactly one deployment with a hub container in release jhub;
+      no Module 5 state-reader permissions have been applied.
+
+- name: Render the restricted Module 5 state-reader binding
+  ansible.builtin.template:
+    src: module5-state-reader-rbac.yaml.j2
+    dest: /opt/digitafrica/k8s/module5-state-reader-rbac.yaml
+    mode: "0644"
+  vars:
+    module5_hub_service_account: "{{ module5_hub_service_accounts[0] }}"
+
+- name: Apply the restricted Module 5 state-reader binding
+  ansible.builtin.command:
+    argv:
+      - k3s
+      - kubectl
+      - apply
+      - -f
+      - /opt/digitafrica/k8s/module5-state-reader-rbac.yaml
+  register: module5_state_reader_apply
+  changed_when: >-
+    ' created' in module5_state_reader_apply.stdout or
+    ' configured' in module5_state_reader_apply.stdout

@@ -20,7 +20,13 @@ class OpenFaaSDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((MODULE / "delivery-manifest.json").read_text())
         self.template = (ROOT / "roles/k8s_apps/templates/jhub-values.yaml.j2").read_text()
-        self.blocks = re.findall(PATTERN, self.template, flags=re.DOTALL)
+        self.all_blocks = re.findall(PATTERN, self.template, flags=re.DOTALL)
+        # Projection assertions concern singleuser volumes and mounts only.
+        marker = "\nsingleuser:\n"
+        if self.template.count(marker) != 1:
+            raise RuntimeError("Expected exactly one singleuser section.")
+        singleuser = self.template.split(marker, 1)[1]
+        self.blocks = re.findall(PATTERN, singleuser, flags=re.DOTALL)
         self.environment = Environment(undefined=StrictUndefined)
         # These isolated rendering tests pass actual booleans only.
         self.environment.filters["bool"] = bool
@@ -29,16 +35,31 @@ class OpenFaaSDeliveryTests(unittest.TestCase):
         defaults = yaml.safe_load((ROOT / "roles/k8s_apps/defaults/main.yml").read_text())
         self.assertIs(defaults[FLAG], False)
         self.assertEqual(len(self.blocks), 2)
-        for block in self.blocks:
+        for block in self.all_blocks:
             for settings in ({}, {FLAG: False}):
                 self.assertFalse(self.environment.from_string(block).render(**settings).strip())
 
     def test_enabled_projection_matches_manifest(self):
         self.assertEqual(len(self.blocks), 2)
-        volume, mount = [
-            yaml.safe_load(self.environment.from_string(block).render(**{FLAG: True}))[0]
+        volumes, mounts = [
+            yaml.safe_load(self.environment.from_string(block).render(**{FLAG: True}))
             for block in self.blocks
         ]
+        teaching_name = "digitafrica-seed-cloud-computing-soa-module5-beginner"
+        runtime_name = "digitafrica-runtime-module5-node"
+        self.assertEqual(
+            {entry["name"] for entry in volumes},
+            {teaching_name, runtime_name},
+        )
+        self.assertEqual(len(volumes), 2)
+        volume = next(entry for entry in volumes if entry["name"] == teaching_name)
+        runtime = next(entry for entry in volumes if entry["name"] == runtime_name)
+        self.assertEqual(runtime, {
+            "name": runtime_name,
+            "configMap": {"name": runtime_name},
+        })
+        self.assertEqual(len(mounts), 1)
+        mount = mounts[0]
         self.assertEqual(volume["configMap"]["name"], self.manifest["configmap_name"])
         self.assertEqual(volume["configMap"]["items"], self.manifest["files"])
         self.assertEqual(mount, {

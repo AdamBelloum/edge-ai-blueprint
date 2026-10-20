@@ -1,0 +1,8 @@
+{
+  "version": "v22.23.3",
+  "platform": "linux-x64",
+  "archive": "node-v22.23.3-linux-x64.tar.gz",
+  "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.gz",
+  "sha256": "1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af",
+  "npm_version": "10.9.9"
+}
