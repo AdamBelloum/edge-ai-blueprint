@@ -13,6 +13,8 @@ command -v python3 >/dev/null 2>&1 || {
 import argparse
 import csv
 import io
+import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -58,6 +60,12 @@ def validate_map():
                 fail(f"Row {number}: expected three TSV fields")
             track, key, relative = row
             path = Path(relative)
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", key):
+                fail(f"Row {number}: invalid ConfigMap key {key!r}")
+            if len(key) > 253:
+                fail(f"Row {number}: ConfigMap key exceeds 253 characters")
+            if key == "asset_map_tsv":
+                fail(f"Row {number}: asset_map_tsv is reserved for the map")
             if track not in tracks:
                 fail(f"Row {number}: unknown track {track!r}")
             if not key or not relative or path.is_absolute() or ".." in path.parts:
@@ -89,6 +97,47 @@ def validate_map():
             fail(f"No mapped assets for {track}")
         print(f"{track}: {counts[track]} mapped assets")
     return rows
+
+
+
+def validate_configmap_budget(rows):
+    # Conservative project budget, not Kubernetes' maximum object size.
+    # Actual kubectl-rendered manifests must also be checked before apply.
+    budget = 200 * 1024
+    map_text = (root / "asset-map.tsv").read_text(encoding="utf-8")
+    for track in tracks:
+        data = {"asset_map_tsv": map_text}
+        for mapped_track, key, relative, source in rows:
+            if mapped_track == track:
+                data[key] = source.read_text(encoding="utf-8")
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": (
+                    "digitafrica-notebooks-cloud-computing-soa-module3-"
+                    + track
+                ),
+                # Conservative namespace length for a local estimate.
+                "namespace": "n" * 63,
+            },
+            "data": data,
+        }
+        data_bytes = sum(len(value.encode("utf-8")) for value in data.values())
+        json_bytes = len(
+            json.dumps(manifest, ensure_ascii=True).encode("utf-8")
+        ) + 1
+        if data_bytes > budget or json_bytes > budget:
+            fail(
+                f"{track}: ConfigMap exceeds {budget}-byte project budget "
+                f"(data={data_bytes}, JSON estimate={json_bytes}); "
+                "split assets before reconciliation"
+            )
+        print(
+            f"{track}: ConfigMap budget PASS "
+            f"(data={data_bytes}, JSON estimate={json_bytes}, "
+            f"budget={budget} bytes)"
+        )
 
 
 def validate_syntax(selected):
@@ -174,6 +223,7 @@ def export_bundle(selected):
 
 try:
     rows = validate_map()
+    validate_configmap_budget(rows)
     selected = [row for row in rows if row[0] in (args.mode, "tests")]
     validate_syntax(selected)
     if args.action == "export":
