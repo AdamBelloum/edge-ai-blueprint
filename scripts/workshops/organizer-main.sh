@@ -621,6 +621,9 @@ source "$SCRIPT_DIR/controllers/hpc.sh"
 case "$ACTION" in
   menu)
     [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell.'
+    workshop_ui_heading "Welcome to DIGITAfrica"
+    workshop_ui_note "Prepare participant access, manage workshops, and verify readiness."
+    workshop_ui_note "Infrastructure deployment remains an administrator task."
     run_main_menu
     ;;
   initialise-identities) run_initialise_identities ;;

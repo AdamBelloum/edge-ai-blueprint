@@ -830,6 +830,9 @@ main() {
 
   case "${action}" in
     menu)
+      workshop_ui_heading "Welcome to DIGITAfrica Federated Learning"
+      workshop_ui_note "Prepare workshops, inspect readiness, and manage Flower."
+      workshop_ui_note "Fresh-cohort actions reset participant workspaces."
       interactive_menu
       ;;
     preflight)
