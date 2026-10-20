@@ -186,9 +186,15 @@ choose_deployment_tier() {
   digitafrica_ui_option 2 "Tier-2"
   digitafrica_ui_note "Configuration is stored separately for each tier."
   printf '\n'
+  digitafrica_ui_option 0 "Cancel setup / return"
+  printf '\n'
 
   local choice
-  prompt_choice choice "Deployment tier" "1" 1 2
+  prompt_choice choice "Deployment tier" "1" 0 1 2
+
+  if [[ "$choice" == "0" ]]; then
+    return 1
+  fi
 
   if [[ "$choice" == "1" ]]; then
     DEPLOYMENT_TIER="tier1"
@@ -920,7 +926,10 @@ main() {
 
   cd "$REPO_ROOT"
   check_prerequisites
-  choose_deployment_tier
+  if ! choose_deployment_tier; then
+    info "Setup cancelled; no configuration files were written or deployment started."
+    return 0
+  fi
   choose_profile
   collect_topology
   check_ssh_access
