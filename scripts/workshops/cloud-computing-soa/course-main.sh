@@ -592,6 +592,7 @@ run_cloud_computing_soa_menu() {
     printf '%s\n' \
       '  1) Module 1 — REST API' \
       '  2) Module 2 — Microservices and JWT Authentication' \
+      '  3) Module 3 — Containerization and Orchestration (local preparation only)' \
       '  5) Module 5 — OpenFaaS (pre-live preparation only)' \
       '  0) Back to workshops'
     printf '\nSelection: '
@@ -599,9 +600,10 @@ run_cloud_computing_soa_menu() {
 
     case "$choice" in
       1|2) run_cloud_computing_soa_module_menu "$choice" ;;
+      3) run_cloud_module3_menu ;;
       5) run_cloud_module5_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, or 5.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, or 5.\n' >&2 ;;
     esac
   done
 }
@@ -618,3 +620,16 @@ if [[ ! -r "$CLOUD_COMPUTING_SOA_MODULE5_HELPER" ]]; then
 fi
 # shellcheck source=openfaas/module-main.sh
 source "$CLOUD_COMPUTING_SOA_MODULE5_HELPER"
+
+# Delegate Module 3 local preparation to its module-specific controller.
+CLOUD_COMPUTING_SOA_MODULE3_HELPER="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
+)/module3-main.sh"
+
+if [[ ! -r "$CLOUD_COMPUTING_SOA_MODULE3_HELPER" ]]; then
+  printf 'Missing Module 3 controller: %s\n' \
+    "$CLOUD_COMPUTING_SOA_MODULE3_HELPER" >&2
+  return 1
+fi
+# shellcheck source=module3-main.sh
+source "$CLOUD_COMPUTING_SOA_MODULE3_HELPER"
