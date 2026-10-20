@@ -147,12 +147,15 @@ hub:
 
 {% if big_data_workspace_enabled | default(false) | bool %}
 {% include 'workshop-hooks/spark.py.j2' %}
+
 {% endif %}
 {% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
 {% include 'workshop-hooks/hpc.py.j2' %}
+
 {% endif %}
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
 {% include 'workshop-hooks/module5-node.py.j2' %}
+
       MODULE5_STATE_NAMESPACE = {{ digitafrica_deployment.digitafrica_namespace | to_json }}
       MODULE5_NODE_BIN = "/home/jovyan/.local/share/digitafrica/runtime/module5-node/node-v22.23.3-linux-x64/bin"
 {% endif %}
