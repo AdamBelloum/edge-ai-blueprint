@@ -93,3 +93,25 @@ run_reset_menu() {
     esac
   done
 }
+
+# Informational only: does not inspect state or change the deployment.
+show_new_workshop_workflow() {
+  cat <<'WORKFLOW'
+
+Expected workflow for a new workshop
+  1. Verify platform readiness and previous-cycle cleanup using status/readiness checks.
+     If cleanup is incomplete or activation is blocked, stop and contact the
+     administrator/maintainer. Do not manually bypass the cleanup marker.
+  2. Manage participant cohort: provision participant identities and groups.
+  3. After adding or updating a workshop/module, reconcile workshop applications.
+  4. Open Workshops: select the workshop/module and prepare/publish its supported mode.
+  5. Run the workshop-specific readiness checks before inviting participants.
+     Publication alone does not prove runtime or participant execution readiness.
+  6. Manage participant cohort: issue/export credentials when ready to distribute.
+     Issuing credentials resets participant passwords; do not repeat unnecessarily.
+  7. Distribute credentials securely. Do not commit credential exports to Git.
+
+Infrastructure deployment is a separate administrator task.
+Participant-only reset does not clean workspaces or stop existing runtimes.
+WORKFLOW
+}

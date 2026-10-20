@@ -538,6 +538,7 @@ run_application_reconciliation() {
 # The menu only routes to controllers; the controllers implement each
 # workshop's operational steps and domain-specific confirmation checks.
 run_workshops_menu() {
+  show_new_workshop_workflow
   local choice
 
   while true; do
@@ -567,6 +568,7 @@ run_workshops_menu() {
 
 # Top-level interactive navigation. Explicit actions are used for automation.
 run_main_menu() {
+  show_new_workshop_workflow
   local choice
 
   while true; do
