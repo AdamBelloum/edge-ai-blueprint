@@ -103,3 +103,37 @@ Integration implementation changes remained uncommitted during this check.
 
 Cross-workshop regression and integration-release acceptance are outside
 this M3-05 evidence record.
+
+## Integration closeout
+
+Scope: Module 3 teaching-file delivery and organiser lifecycle integration.
+Kubernetes exercise-runtime validation is explicitly deferred.
+M3-05 remains partially validated.
+
+Workshops are intended to operate independently from a fresh infrastructure
+deployment. Broader workshop-independence testing and dependency fixes are
+follow-up work, not prerequisites requiring another workshop to run first.
+
+Local tests passed on fs2 at HEAD `af30788` with the modified working tree,
+including the new, then-untracked hooks and tests:
+
+- `python3 -m unittest discover -s tests -p 'test_cloud_module3_*.py' -v`
+  — 74 tests passed.
+- `python3 -m unittest discover -s tests -p 'test_openfaas_full_seed.py' -v`
+  — 4 tests passed.
+- `git diff --check` — passed.
+
+Coverage includes mapped delivery, repeat-delivery preservation, source and
+destination safety, solution gating, state validation, publication
+confirmation, controller routing, mocked reconciliation, and rendered hooks.
+
+The Module 5 test is a local shared-seeder compatibility check, not a
+requirement to deploy or execute Module 5 before Module 3.
+
+These results do not establish live JupyterHub participant spawns, real
+ownership changes, full Helm rendering, independent clean-install success,
+or Kubernetes exercise readiness. Service-access validation also remains
+outstanding. No broader cross-workshop regression result is claimed.
+
+This closeout supplements the earlier M3-05 evidence; it does not mark
+the complete teaching runtime or deployment acceptance as passed.

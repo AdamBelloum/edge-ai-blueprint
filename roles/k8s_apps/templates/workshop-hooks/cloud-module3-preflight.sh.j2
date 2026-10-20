@@ -1,0 +1,82 @@
+# Source/map preflight only; no participant filesystem writes.
+if [ "$workshop_type" = "cloud-computing-soa" ] &&
+   [ "$workshop_module" = "module3" ]; then
+  cloud_module3_source=/seed/cloud-computing-soa/module3
+  cloud_module3_map="$cloud_module3_source/$mode/asset_map_tsv"
+  cloud_module3_tracks="$mode tests"
+  if [ "$solutions_released" = "true" ]; then
+    cloud_module3_tracks="$cloud_module3_tracks solutions"
+  fi
+
+  if [ ! -f "$cloud_module3_map" ]; then
+    echo "[seed] ERROR: missing Module 3 asset map." >&2
+    exit 1
+  fi
+
+  # Validate before interpreting any map row as a filesystem path.
+  LC_ALL=C awk -F '\t' '
+    function fail(message) {{ '{{' }}
+      print "[seed] ERROR: Module 3 map row " NR ": " message > "/dev/stderr"
+      failed = 1
+      exit 1
+    {{ '}}' }}
+    {{ '{{' }}
+      if (NF != 3) fail("expected three TSV fields")
+      track = $1; key = $2; relative = $3
+      if (track !~ /^(beginner|advanced|solutions|tests)$/)
+        fail("unknown track")
+      if (key !~ /^[A-Za-z0-9._-]+$/ || length(key) > 253 ||
+          key == "asset_map_tsv")
+        fail("invalid or reserved ConfigMap key")
+      # Canonical, conservative paths: no whitespace, absolute paths,
+      # empty components, dot components, or shell metacharacters.
+      if (relative !~ /^[A-Za-z0-9._\/-]+$/ ||
+          relative ~ /^\// || relative ~ /\/$/ || relative ~ /\/\//)
+        fail("unsafe destination path")
+      count = split(relative, parts, "/")
+      for (i = 1; i <= count; i++) {{ '{{' }}
+        if (parts[i] == "." || parts[i] == "..")
+          fail("unsafe destination component")
+        if (parts[i] ~ /^(keys|\.venv|__pycache__|\.git|secrets)$/)
+          fail("generated or secret destination")
+      {{ '}}' }}
+      lower = tolower(relative)
+      if (lower ~ /\.(pem|key|pyc|pyo)$/ || parts[count] == ".env")
+        fail("generated or secret destination")
+      if (seen_key[track SUBSEP key]++ ||
+          seen_path[track SUBSEP relative]++)
+        fail("duplicate key or destination")
+      counts[track]++
+    {{ '}}' }}
+    END {{ '{{' }}
+      if (!failed &&
+          (!counts["beginner"] || !counts["advanced"] ||
+           !counts["solutions"] || !counts["tests"])) {{ '{{' }}
+        print "[seed] ERROR: Module 3 map lacks a required track" > "/dev/stderr"
+        exit 1
+      {{ '}}' }}
+    {{ '}}' }}
+  ' "$cloud_module3_map" || exit 1
+
+  cloud_module3_tab="$(printf '\t')"
+  for cloud_module3_track in $cloud_module3_tracks; do
+    cloud_module3_track_source="$cloud_module3_source/$cloud_module3_track"
+    if [ ! -f "$cloud_module3_track_source/asset_map_tsv" ] ||
+       ! cmp -s "$cloud_module3_map" "$cloud_module3_track_source/asset_map_tsv"; then
+      echo "[seed] ERROR: missing or inconsistent Module 3 map: $cloud_module3_track" >&2
+      exit 1
+    fi
+    while IFS="$cloud_module3_tab" read -r mapped_track mapped_key mapped_path ||
+          [ -n "$mapped_track" ]; do
+      [ "$mapped_track" = "$cloud_module3_track" ] || continue
+      # ConfigMap projections use symlinks; require a readable file,
+      # rather than rejecting legitimate Kubernetes source projections.
+      if [ ! -f "$cloud_module3_track_source/$mapped_key" ] ||
+         [ ! -r "$cloud_module3_track_source/$mapped_key" ]; then
+        echo "[seed] ERROR: missing Module 3 source: $mapped_track/$mapped_key" >&2
+        exit 1
+      fi
+    done < "$cloud_module3_map"
+  done
+  echo "[seed] Module 3 source preflight passed; runtime readiness NOT VALIDATED."
+fi

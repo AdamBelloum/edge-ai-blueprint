@@ -405,6 +405,7 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-tests
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
+{% include 'workshop-hooks/cloud-module3-volumes.yaml.j2' %}
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
       - name: digitafrica-runtime-module5-node
         configMap:
@@ -689,7 +690,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module3|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -764,6 +765,12 @@ singleuser:
               exit 1
             fi
           fi
+
+          # BEGIN CLOUD MODULE 3 VALIDATION
+{% filter indent(10, true) %}{% include 'workshop-hooks/cloud-module3-validation.sh.j2' %}{% endfilter %}
+          # END CLOUD MODULE 3 VALIDATION
+{% filter indent(10, true) %}{% include 'workshop-hooks/cloud-module3-preflight.sh.j2' %}{% endfilter %}
+{% filter indent(10, true) %}{% include 'workshop-hooks/cloud-module3-destination-preflight.sh.j2' %}{% endfilter %}
 
           # BEGIN CLOUD MODULE 5 VALIDATION
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
@@ -1340,6 +1347,10 @@ singleuser:
             fi
           fi
 
+          # BEGIN CLOUD MODULE 3 SEEDING
+{% filter indent(10, true) %}{% include 'workshop-hooks/cloud-module3-seeding.sh.j2' %}{% endfilter %}
+          # END CLOUD MODULE 3 SEEDING
+
           # BEGIN CLOUD MODULE 5 SEEDING
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module5" ]; then
             cloud_module5_source=/seed/cloud-computing-soa/module5
@@ -1431,6 +1442,7 @@ singleuser:
         - name: digitafrica-seed-cloud-computing-soa-module2-tests
           mountPath: /seed/cloud-computing-soa/module2/tests
           readOnly: true
+{% include 'workshop-hooks/cloud-module3-mounts.yaml.j2' %}
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
         - name: digitafrica-seed-cloud-computing-soa-module5-beginner
           mountPath: /seed/cloud-computing-soa/module5

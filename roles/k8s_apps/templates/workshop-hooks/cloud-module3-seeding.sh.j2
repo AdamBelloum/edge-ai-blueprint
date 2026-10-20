@@ -1,0 +1,90 @@
+# Requires successful state, source and destination preflight.
+if [ "$workshop_type" = "cloud-computing-soa" ] &&
+   [ "$workshop_module" = "module3" ]; then
+  # Keep helper variables separate from callers: POSIX sh has no standard local.
+  cloud_module3_ensure_directory() {{ '{{' }}
+    cloud_module3_check_directory "$1"
+    if [ -d "$1" ]; then
+      return 0
+    fi
+    cloud_module3_ensure_directory "$(dirname "$1")"
+    cloud_module3_check_directory "$1"
+    mkdir "$1"
+    chown 1000:100 "$1"
+    chmod 0755 "$1"
+  {{ '}}' }}
+
+  # Stage complete content and permissions before publishing a new file.
+  # ln -T prevents treating a destination directory as a copy target.
+  # Existing files are never overwritten.
+  cloud_module3_publish_file() (
+    source_file="$1"
+    destination_file="$2"
+    file_mode="$3"
+
+    cloud_module3_check_file "$destination_file"
+    if [ -f "$destination_file" ]; then
+      echo "[seed] preserving existing Module 3 file: $destination_file"
+      exit 0
+    fi
+
+    cloud_module3_ensure_directory "$(dirname "$destination_file")"
+    temporary_file="$(mktemp "$(dirname "$destination_file")/.module3-seed.XXXXXX")"
+    trap 'rm -f "$temporary_file"' EXIT
+    trap 'exit 1' HUP INT TERM
+
+    cat "$source_file" > "$temporary_file"
+    chown 1000:100 "$temporary_file"
+    chmod "$file_mode" "$temporary_file"
+
+    cloud_module3_check_file "$destination_file"
+    if ! ln -T "$temporary_file" "$destination_file"; then
+      # Another invocation may have delivered a regular file first.
+      cloud_module3_check_file "$destination_file"
+      if [ ! -f "$destination_file" ]; then
+        echo "[seed] ERROR: cannot publish Module 3 file: $destination_file" >&2
+        exit 1
+      fi
+      echo "[seed] preserving concurrently created Module 3 file: $destination_file"
+    fi
+  )
+
+  for cloud_module3_track in $cloud_module3_tracks; do
+    cloud_module3_track_workspace="$cloud_module3_workspace/$cloud_module3_track"
+    cloud_module3_ensure_directory "$cloud_module3_track_workspace"
+
+    while IFS="$cloud_module3_tab" read -r mapped_track mapped_key mapped_path ||
+          [ -n "$mapped_track" ]; do
+      [ "$mapped_track" = "$cloud_module3_track" ] || continue
+      case "$mapped_path" in
+        *.sh) cloud_module3_file_mode=0755 ;;
+        *) cloud_module3_file_mode=0644 ;;
+      esac
+      cloud_module3_publish_file \
+        "$cloud_module3_source/$mapped_track/$mapped_key" \
+        "$cloud_module3_track_workspace/$mapped_path" \
+        "$cloud_module3_file_mode"
+    done < "$cloud_module3_map"
+
+    # Write the receipt only after all mapped files in this track are handled.
+    (
+      receipt="$cloud_module3_track_workspace/$cloud_module3_receipt_name"
+      cloud_module3_check_file "$receipt"
+      if [ -f "$receipt" ]; then
+        exit 0
+      fi
+
+      temporary_receipt="$(mktemp "$cloud_module3_track_workspace/.module3-receipt.XXXXXX")"
+      trap 'rm -f "$temporary_receipt"' EXIT
+      trap 'exit 1' HUP INT TERM
+      {{ '{{' }}
+        printf 'seeded_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'track=%s\n' "$cloud_module3_track"
+        printf 'delivery=mapped files copied if absent; existing files preserved\n'
+        printf 'runtime_readiness=NOT VALIDATED\n'
+      {{ '}}' }} > "$temporary_receipt"
+      cloud_module3_publish_file "$temporary_receipt" "$receipt" 0644
+    )
+  done
+  echo "[seed] Module 3 assets delivered; runtime readiness NOT VALIDATED."
+fi

@@ -592,7 +592,7 @@ run_cloud_computing_soa_menu() {
     printf '%s\n' \
       '  1) Module 1 — REST API' \
       '  2) Module 2 — Microservices and JWT Authentication' \
-      '  3) Module 3 — Containerization and Orchestration (local preparation only)' \
+      '  3) Module 3 — Containerization and Orchestration (teaching-file delivery)' \
       '  5) Module 5 — OpenFaaS (pre-live preparation only)' \
       '  0) Back to workshops'
     printf '\nSelection: '

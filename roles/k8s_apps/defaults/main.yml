@@ -26,3 +26,7 @@ hpc_runtime_enabled: false
 # Module 5 asset delivery only; not OpenFaaS runtime or publication approval.
 # Keep disabled while licensing and reference-lab validation remain pending.
 cloud_module5_delivery_enabled: false
+
+# Module 3 teaching-file delivery only; not lab execution readiness.
+# Opt in after delivery wiring and safety tests are complete.
+cloud_module3_delivery_enabled: false

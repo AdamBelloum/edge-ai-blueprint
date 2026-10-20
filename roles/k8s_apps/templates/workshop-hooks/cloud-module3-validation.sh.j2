@@ -1,0 +1,30 @@
+# Cloud SOA Module 3 only; no filesystem writes or workshop activation.
+if [ "$workshop_type" = "cloud-computing-soa" ] && \
+   [ "$workshop_module" = "module3" ]; then
+  cloud_module3_delivery_enabled={{ 'true' if cloud_module3_delivery_enabled | default(false) | bool else 'false' }}
+  if [ "$cloud_module3_delivery_enabled" != "true" ]; then
+    echo "[seed] ERROR: Cloud Module 3 delivery is disabled." >&2
+    exit 1
+  fi
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *)
+      echo "[seed] ERROR: invalid Cloud Module 3 mode: $mode" >&2
+      exit 1
+      ;;
+  esac
+
+  case "$solutions_released" in
+    true|false) ;;
+    *)
+      echo "[seed] ERROR: invalid Cloud Module 3 solutions_released state." >&2
+      exit 1
+      ;;
+  esac
+
+  if [ "$solutions_released" = "true" ] && [ "$mode" != "advanced" ]; then
+    echo "[seed] ERROR: Cloud Module 3 solutions require advanced mode." >&2
+    exit 1
+  fi
+fi
