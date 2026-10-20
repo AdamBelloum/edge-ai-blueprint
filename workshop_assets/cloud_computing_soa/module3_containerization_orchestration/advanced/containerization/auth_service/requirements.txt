@@ -1,0 +1,5 @@
+# TODO:
+# Add required Python dependencies for auth service.
+# Hint from guide:
+# flask
+# cryptography

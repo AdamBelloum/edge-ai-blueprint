@@ -1,0 +1,6 @@
+# Participant-generated keys and local runtime artefacts.
+**/keys/
+*.pem
+__pycache__/
+*.py[cod]
+.venv/

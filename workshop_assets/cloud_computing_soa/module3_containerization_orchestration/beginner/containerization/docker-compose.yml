@@ -1,0 +1,78 @@
+# Module 3 beginner: run the authentication and URL-shortener services.
+#
+# Run these commands from the directory containing this file, on your
+# assigned Docker-capable lab host (not necessarily your Jupyter server).
+# Prerequisites: Docker Engine running, Docker Compose v2 available, and
+# permission to use Docker. Do not change Docker socket permissions.
+#
+# Step 1: Check the Docker connection and Compose installation:
+#   docker info
+#   docker compose version
+# Step 2: Follow setup_local_keys.sh instructions, then run:
+#   bash setup_local_keys.sh
+# Step 3: Validate the resolved Compose configuration:
+#   docker compose config
+# Step 4: Build the images and start both services in the background:
+#   docker compose up --build -d
+# Step 5: Inspect service status and startup logs:
+#   docker compose ps
+#   docker compose logs --tail=50 auth shortener
+# Step 6: Test the APIs using the practical's request examples.
+#   Default addresses: http://<docker-host>:5001 for authentication and
+#   http://<docker-host>:5000 for the shortener. Replace <docker-host> with
+#   the assigned host address; localhost refers to the machine you are on.
+#   Port publication alone does not bypass host firewalls or network rules.
+# Step 7: After saving test data, recreate the containers and repeat your
+#   API checks to confirm that the data remains available:
+#   docker compose down
+#   docker compose up -d
+#   IMPORTANT: do NOT add -v to down; that removes these named volumes.
+#
+# If a host port is occupied, choose unused ports and export them before
+# running Compose (retain the same values for subsequent commands):
+#   export AUTH_HOST_PORT=15001 SHORTENER_HOST_PORT=15000
+# Container ports stay 5001 and 5000; use the new host ports in API requests.
+# Keep the same Compose project name/directory during persistence checks:
+# named volumes are project-scoped, so a new project uses different volumes.
+# These commands are instructions, not evidence of successful runtime tests.
+# Reference: https://docs.docker.com/compose/
+
+services:
+  auth:
+    # Build from the Dockerfile and files in the service directory.
+    build:
+      context: ./auth_service
+    # HOST:CONTAINER port mapping; the environment variable overrides HOST only.
+    ports:
+      - "${AUTH_HOST_PORT:-5001}:5001"
+    volumes:
+      # Named volume keeps user records when containers are removed.
+      - auth_data:/app/data
+      # Read-only host key directory: signing private key and public key.
+      # Prepare keys first; do not bake private keys into the image.
+      - ./auth_service/keys:/app/keys:ro
+    # Restart automatically unless explicitly stopped; not a readiness check.
+    restart: unless-stopped
+
+  shortener:
+    # Build from the Dockerfile and files in the service directory.
+    build:
+      context: ./shortener_service
+    # HOST:CONTAINER port mapping; the environment variable overrides HOST only.
+    ports:
+      - "${SHORTENER_HOST_PORT:-5000}:5000"
+    volumes:
+      # Separate named volume keeps URL records when containers are removed.
+      - shortener_data:/app/data
+      # Read-only verification directory: contains the public key only.
+      - ./shortener_service/keys:/app/keys:ro
+    # Start auth first; this does not wait for its API to become ready.
+    depends_on:
+      - auth
+    # Restart automatically unless explicitly stopped; not a readiness check.
+    restart: unless-stopped
+
+# Declare Docker-managed storage; actual volume names normally have a project prefix.
+volumes:
+  auth_data:
+  shortener_data:

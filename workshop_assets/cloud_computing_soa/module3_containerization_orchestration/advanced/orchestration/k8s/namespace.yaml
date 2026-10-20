@@ -1,0 +1,8 @@
+# TODO:
+# Create namespace for this assignment.
+# Expected name: websvc
+
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: websvc

@@ -1,0 +1,46 @@
+# TODO:
+# Create Deployment for auth service.
+# Requirements:
+# - name: auth, namespace: websvc
+# - replicas: 1
+# - label selector app=auth
+# - container name: auth
+# - image: <YOUR_DOCKERHUB_USERNAME>/auth-service:3.2
+# - containerPort: 5001
+# - mount PVC at /app/data
+# - mount secret auth-keys at /app/keys (readOnly)
+
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: auth
+#   namespace: websvc
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: auth
+#   template:
+#     metadata:
+#       labels:
+#         app: auth
+#     spec:
+#       containers:
+#         - name: auth
+#           image: <YOUR_DOCKERHUB_USERNAME>/auth-service:3.2
+#           imagePullPolicy: Always
+#           ports:
+#             - containerPort: 5001
+#           volumeMounts:
+#             - name: shared-data
+#               mountPath: /app/data
+#             - name: auth-keys
+#               mountPath: /app/keys
+#               readOnly: true
+#       volumes:
+#         - name: shared-data
+#           persistentVolumeClaim:
+#             claimName: websvc-shared-pvc
+#         - name: auth-keys
+#           secret:
+#             secretName: auth-keys

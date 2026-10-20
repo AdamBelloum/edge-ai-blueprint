@@ -1,0 +1,25 @@
+# TODO:
+# Define an NFS-backed PersistentVolume for shared data.
+# Requirements from guide:
+# - name: websvc-shared-pv
+# - capacity: 1Gi
+# - accessModes: ReadWriteMany
+# - storageClassName: ""
+# - reclaim policy: Retain
+# - nfs server: YOUR_NFS_SERVER_IP
+# - nfs path: /srv/nfs/websvc
+
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   name: websvc-shared-pv
+# spec:
+#   capacity:
+#     storage: 1Gi
+#   accessModes:
+#     - ReadWriteMany
+#   storageClassName: ""
+#   persistentVolumeReclaimPolicy: Retain
+#   nfs:
+#     server: YOUR_NFS_SERVER_IP
+#     path: /srv/nfs/websvc

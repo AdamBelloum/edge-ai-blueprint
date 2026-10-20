@@ -1,0 +1,12 @@
+# Module 03 service dependencies.
+# Selected from the Module 02 lock; container validation pending.
+Flask==3.1.3
+blinker==1.9.0
+click==8.5.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+Werkzeug==3.1.9
+cryptography==46.0.7
+cffi==2.1.1
+pycparser==3.0

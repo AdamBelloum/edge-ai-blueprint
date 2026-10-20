@@ -1,0 +1,5 @@
+# TODO:
+# Add required Python dependencies for shortener service.
+# Hint from guide:
+# flask
+# cryptography
