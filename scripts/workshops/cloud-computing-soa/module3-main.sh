@@ -35,17 +35,22 @@ cloud_module3_check() {
 run_cloud_module3_menu() {
   local choice mode
   while true; do
-    printf '\nModule 3 — teaching-file delivery; runtime NOT VALIDATED\n\n'
-    printf '%s\n' \
-      '  1) Check local assets — all tracks' \
-      '  2) Show integration status (offline)' \
-      '  3) Check deployed teaching-file readiness' \
-      '  4) Publish beginner teaching files' \
-      '  5) Publish advanced TODO teaching files' \
-      '  6) Release advanced reference solutions' \
-      '  7) Show deployed delivery status' \
-      '  0) Back to modules'
-    printf '\nSelection: '
+    workshop_ui_heading "Cloud SOA / Module 3"
+    workshop_ui_note "Containerization and Orchestration - teaching-file delivery."
+    workshop_ui_warning "Docker/Compose and Kubernetes runtime NOT VALIDATED."
+    workshop_ui_section "CHECK AND INSPECT"
+    workshop_ui_option 1 "Check local assets - all tracks"
+    workshop_ui_option 2 "Show integration status - offline"
+    workshop_ui_option 3 "Check deployed teaching-file readiness"
+    workshop_ui_option 7 "Show deployed delivery status"
+    workshop_ui_section "PUBLISH TEACHING FILES"
+    workshop_ui_option 4 "Beginner track"
+    workshop_ui_option 5 "Advanced TODO track"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 6 "Release advanced reference solutions"
+    printf '\n'
+    workshop_ui_option 0 "Back to Cloud Computing SOA"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) cloud_module3_check || printf 'Local checks failed.\n' >&2 ;;

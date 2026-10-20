@@ -31,8 +31,13 @@ big_data_spark_select_mode() {
   }
 
   while true; do
-    printf '\nSpark teaching mode\n\n' >&2
-    printf '  1) Beginner — guided notebook\n  2) Advanced — future sprint, unavailable\nSelection: ' >&2
+    {
+      workshop_ui_heading "Spark / Teaching mode"
+      workshop_ui_option 1 "Beginner - guided notebook"
+      workshop_ui_option 2 "Advanced - unavailable"
+      workshop_ui_note "Advanced mode is reserved for a future sprint."
+      workshop_ui_prompt
+    } >&2
     read -r choice || return 2
     case "$choice" in
       1) printf 'beginner\n'; return 0 ;;
@@ -125,15 +130,21 @@ big_data_spark_show_status() {
 run_big_data_spark_menu() {
   local choice
   while true; do
-    printf '\nBig Data — Spark\n\n'
-    printf '%s\n' \
-      '  1) Prepare participant assets only' \
-      '  2) Publish beginner workspace and reconcile JupyterHub' \
-      '  3) Publish advanced TODO workspace — future sprint, unavailable' \
-      '  4) Release advanced reference solution — future sprint, unavailable' \
-      '  5) Show workshop selection status' \
-      '  0) Back to Big Data'
-    printf '\nSelection: '
+    workshop_ui_heading "Big Data / Spark"
+    workshop_ui_section "PREPARE"
+    workshop_ui_option 1 "Stage participant assets"
+    workshop_ui_note "Assets only; no activation or runtime startup."
+    workshop_ui_option 2 "Publish beginner workspace"
+    workshop_ui_note "Reconciles JupyterHub; does not prove execution readiness."
+    workshop_ui_section "INSPECT"
+    workshop_ui_option 5 "Show workshop selection status"
+    workshop_ui_note "Does not validate asset delivery or distributed execution."
+    workshop_ui_section "UNAVAILABLE - FUTURE SPRINT"
+    workshop_ui_option 3 "Publish advanced TODO workspace"
+    workshop_ui_option 4 "Release advanced reference solution"
+    printf '\n'
+    workshop_ui_option 0 "Back to Big Data"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) big_data_spark_prepare_workspace ||

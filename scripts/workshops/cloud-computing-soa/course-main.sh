@@ -542,15 +542,19 @@ run_cloud_computing_soa_module_menu() {
   esac
 
   while true; do
-    printf '\n%s\n\n' "$title"
-    printf '%s\n' \
-      '  1) Check activation readiness' \
-      '  2) Activate beginner track' \
-      '  3) Activate advanced TODO track' \
-      '  4) Release advanced reference solution' \
-      '  5) Show deployment status' \
-      '  0) Back to modules'
-    printf '\nSelection: '
+    workshop_ui_heading "$title"
+    workshop_ui_section "VERIFY"
+    workshop_ui_option 1 "Check activation readiness"
+    workshop_ui_section "ACTIVATE"
+    workshop_ui_option 2 "Beginner track"
+    workshop_ui_option 3 "Advanced TODO track"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 4 "Release advanced reference solution"
+    workshop_ui_section "INSPECT"
+    workshop_ui_option 5 "Show deployment status"
+    printf '\n'
+    workshop_ui_option 0 "Back to Cloud Computing SOA"
+    workshop_ui_prompt
     read -r choice || return 0
 
     case "$choice" in
@@ -588,14 +592,17 @@ run_cloud_computing_soa_menu() {
   local choice
 
   while true; do
-    printf '\nCloud Computing SOA modules\n\n'
-    printf '%s\n' \
-      '  1) Module 1 — REST API' \
-      '  2) Module 2 — Microservices and JWT Authentication' \
-      '  3) Module 3 — Containerization and Orchestration (teaching-file delivery)' \
-      '  5) Module 5 — OpenFaaS (pre-live preparation only)' \
-      '  0) Back to workshops'
-    printf '\nSelection: '
+    workshop_ui_heading "Workshops / Cloud Computing SOA"
+    workshop_ui_section "SELECT A MODULE"
+    workshop_ui_option 1 "Module 1 - REST API"
+    workshop_ui_option 2 "Module 2 - Microservices and JWT Authentication"
+    workshop_ui_option 3 "Module 3 - Containerization and Orchestration"
+    workshop_ui_note "Teaching-file delivery; exercise runtime NOT VALIDATED."
+    workshop_ui_option 5 "Module 5 - OpenFaaS"
+    workshop_ui_note "Offline rehearsal only; live readiness NOT VALIDATED."
+    printf '\n'
+    workshop_ui_option 0 "Back to workshops"
+    workshop_ui_prompt
     read -r choice || return 0
 
     case "$choice" in

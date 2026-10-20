@@ -19,7 +19,13 @@ source "$BIG_DATA_SPARK_MODULE_MAIN"
 run_big_data_menu() {
   local choice
   while true; do
-    printf '\nBig Data workshops\n\n  1) Spark\n  0) Back to workshops\n\nSelection: '
+    workshop_ui_heading "Workshops / Big Data"
+    workshop_ui_section "SELECT A MODULE"
+    workshop_ui_option 1 "Spark"
+    workshop_ui_note "Beginner publication; Spark execution is not validated."
+    printf '\n'
+    workshop_ui_option 0 "Back to workshops"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) run_big_data_spark_menu ;;
