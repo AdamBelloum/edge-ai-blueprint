@@ -82,8 +82,16 @@ ConfigMap JSON estimates against the 204800-byte project budget:
 - Shared tests: 29066 bytes.
 
 These are local estimates, not validation of actual kubectl-rendered objects.
-Earlier bundle-export checks preceded the README edits; updated bundles
-have not yet been retested. No new runtime readiness is established.
+Earlier full bundle-export checks preceded the README edits.
+A focused post-edit export check passed at HEAD `8997874`:
+- Beginner and advanced exports succeeded.
+- Each exported README matched its updated source exactly and included
+  the runtime prerequisites and safety section.
+- Temporary archives were removed.
+
+This supplements the earlier full archive checks; it does not repeat
+all archive-safety assertions or establish new runtime readiness.
+Integration implementation changes remained uncommitted during this check.
 
 ## Remaining acceptance work
 
