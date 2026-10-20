@@ -72,6 +72,8 @@ Actions:
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
                           Release Cloud Computing SOA Module 2 advanced reference solution.
+  cloud-module3-check     Check local Module 3 assets for all tracks; no infrastructure access.
+  cloud-module3-status    Show integration status, not deployed/runtime readiness.
   cloud-module5-check     Check local OpenFaaS assets; no infrastructure access.
   cloud-module5-status    Show authoring status, not live platform readiness.
   cloud-module5-publish   Blocked pending reference-lab validation.
@@ -351,7 +353,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -384,6 +386,22 @@ case "$ACTION" in
     "$NON_INTERACTIVE" && fail '--non-interactive is valid only with fl-prepare.'
     "$CONFIRM_COHORT_RESET" &&
       fail '--confirm-cohort-reset is valid only with --non-interactive fl-prepare.'
+    ;;
+esac
+
+# Module 3 local actions bypass deployment context and identity services.
+case "$ACTION" in
+  cloud-module3-check|cloud-module3-status)
+    module3_helper="$SCRIPT_DIR/cloud-computing-soa/module3-main.sh"
+    [[ -r "$module3_helper" ]] ||
+      fail "Missing Module 3 controller: $module3_helper"
+    # shellcheck source=cloud-computing-soa/module3-main.sh
+    source "$module3_helper"
+    case "$ACTION" in
+      cloud-module3-check) cloud_module3_check ;;
+      cloud-module3-status) cloud_module3_status ;;
+    esac
+    exit $?
     ;;
 esac
 
