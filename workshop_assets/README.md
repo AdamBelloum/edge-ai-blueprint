@@ -36,22 +36,43 @@ Rules:
 
 ## Catalogue
 
-| Workshop (`workshop_type`) | Module (`workshop_module`) | Folder | Tracks | Participant folder |
-|---|---|---|---|---|
-| Introduction to AI (`introduction-to-ai`) | Module 1 – Symbolic AI (`module1`) | `introduction-to-ai/module1-symbolic-ai/` | single notebook | `~/Introduction-to-AI/Module-1/` |
-| | Module 2 – Foundations of ML (`module2`) | `introduction-to-ai/module2-foundations-of-ml/` | beginner, advanced, solutions | `~/Introduction-to-AI/Module-2/` |
-| | Module 3 – Deep learning (`module3`) | `introduction-to-ai/module3-deep-learning/` | beginner, advanced, solutions | `~/Introduction-to-AI/Module-3/` |
-| Federated Learning (`federated-learning`) | – (single module) | `federated-learning/` | beginner, advanced, solutions | `~/digitafrica/` (advanced: `advanced/`, solutions: `reference-solutions/`) |
-| Cloud Computing SOA (`cloud-computing-soa`) | Module 1 – REST API (`module1`) | `cloud-computing-soa/module1-rest-api/` | beginner, advanced, solutions, shared tests | `~/Cloud-Computing-SOA/Module-1/` |
-| | Module 2 – Microservices and JWT (`module2`) | `cloud-computing-soa/module2-microservices/` | beginner, advanced, solutions, shared tests | `~/Cloud-Computing-SOA/Module-2/` |
-| | Module 3 – Containerization and orchestration (`module3`) | `cloud-computing-soa/module3-containerization-orchestration/` | beginner, advanced, solutions, shared tests | `~/Cloud-Computing-SOA/Module-3/` |
-| | Module 5 – OpenFaaS (`module5`) | `cloud-computing-soa/module5-openfaas/` | beginner | `~/Cloud-Computing-SOA/Module-5/` |
-| Big Data (`big-data`) | Spark (`spark`) | `big-data/spark/` | beginner | `~/Big-Data/Spark/` |
-| HPC (`hpc`) | OpenMP basics (`openmp-01-basics`) | `hpc/openmp-01-basics/` | beginner (exercise folders `01-beginner` and `02-intermediate`, both delivered) | `~/HPC/` |
+### Workshops, tracks and status
 
-There is no Cloud Computing SOA Module 4. The organiser menu marks Cloud Module
-3 runtime and Module 5 live readiness as not validated, and Spark advanced and
-Spark solutions as unavailable.
+| Workshop | Module | Beginner | Advanced | Solutions | Status |
+|---|---|:-:|:-:|:-:|---|
+| Introduction to AI | Module 1 – Symbolic AI | – | – | – | One notebook, no tracks |
+| | Module 2 – Foundations of ML | ✓ | ✓ | ✓ | Available |
+| | Module 3 – Deep learning (2 notebooks) | ✓ | ✓ | ✓ | Available |
+| Federated Learning | single module (Flower) | ✓ | ✓ | ✓ | Available; the organiser also starts the Flower server |
+| Cloud Computing SOA | Module 1 – REST API | ✓ | ✓ | ✓ | Available |
+| | Module 2 – Microservices and JWT | ✓ | ✓ | ✓ | Available |
+| | Module 3 – Containerization and orchestration | ✓ | ✓ | ✓ | Teaching files only; exercise runtime not validated |
+| | Module 4 | – | – | – | Does not exist |
+| | Module 5 – OpenFaaS | ✓ | – | – | Offline rehearsal only; live readiness not validated, publication blocked |
+| Big Data | Spark | ✓ | planned | planned | Beginner pilot; advanced and solutions reserved for a future sprint |
+| HPC | OpenMP basics | ✓ | – | – | Beginner only, no solution release; toolchain not yet version-locked |
+
+Solutions are released only for the advanced track, after the workshop. Status
+follows the organiser menu and action descriptions (October 2026); update this
+table when a module changes. Spark and HPC run on x86_64 only.
+
+### Folders
+
+| Workshop (`workshop_type`) | Module (`workshop_module`) | Folder | Participant folder |
+|---|---|---|---|
+| `introduction-to-ai` | `module1` | `introduction-to-ai/module1-symbolic-ai/` | `~/Introduction-to-AI/Module-1/` |
+| | `module2` | `introduction-to-ai/module2-foundations-of-ml/` | `~/Introduction-to-AI/Module-2/` |
+| | `module3` | `introduction-to-ai/module3-deep-learning/` | `~/Introduction-to-AI/Module-3/` |
+| `federated-learning` | – | `federated-learning/` | `~/digitafrica/` (advanced: `advanced/`, solutions: `reference-solutions/`) |
+| `cloud-computing-soa` | `module1` | `cloud-computing-soa/module1-rest-api/` | `~/Cloud-Computing-SOA/Module-1/` |
+| | `module2` | `cloud-computing-soa/module2-microservices/` | `~/Cloud-Computing-SOA/Module-2/` |
+| | `module3` | `cloud-computing-soa/module3-containerization-orchestration/` | `~/Cloud-Computing-SOA/Module-3/` |
+| | `module5` | `cloud-computing-soa/module5-openfaas/` | `~/Cloud-Computing-SOA/Module-5/` |
+| `big-data` | `spark` | `big-data/spark/` | `~/Big-Data/Spark/` |
+| `hpc` | `openmp-01-basics` | `hpc/openmp-01-basics/` | `~/HPC/` |
+
+Cloud Computing SOA Modules 1–3 also have a `shared/tests/` folder that is
+delivered with the selected track.
 
 Course-specific notes:
 

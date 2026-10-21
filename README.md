@@ -24,7 +24,7 @@ The [Tutorials learning hub](https://adambelloum.github.io/Tutorials/) provides 
 
 This platform provides the infrastructure and operational workflows used to deliver supported materials to participants. Availability in the tutorial collection does not, by itself, mean that a workshop is integrated or runtime-validated on this platform.
 
-Beginner and advanced modes, guided notebooks, and organiser-controlled solution release are available only where implemented. Consult the organiser menu and relevant module documentation for current support and limitations.
+Beginner and advanced modes, guided notebooks, and organiser-controlled solution release are available only where implemented. [Workshop assets](workshop_assets/README.md) lists every workshop, module and track with its current status; the organiser menu and module documentation remain the reference for limitations.
 
 ## Who uses this repository?
 
