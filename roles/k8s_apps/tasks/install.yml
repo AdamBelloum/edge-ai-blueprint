@@ -268,8 +268,8 @@
 # ---------------------------------------------------------------------------
 # cloud-computing-soa / module1 REST API staging
 #
-# Cloud workshop source remains canonical under workshop_assets/. Unlike the
-# legacy notebook files, do not duplicate it under this Ansible role.
+# Workshop source is canonical under workshop_assets/ (see its README); do
+# not duplicate it under this Ansible role.
 # ---------------------------------------------------------------------------
 - name: Stage Cloud Computing SOA Module 1 beginner assets on central node
   ansible.builtin.copy:

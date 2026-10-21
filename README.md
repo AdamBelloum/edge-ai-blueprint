@@ -189,6 +189,7 @@ Workshop reset, participant-account removal, and VM cleanup have different scope
 | [Workshop organiser](docs/workshop-organiser.md) | Cohort preparation, delivery, and reset |
 | [Operations and validation](docs/operations-and-validation.md) | Health checks, troubleshooting, and acceptance evidence |
 | [Architecture](docs/architecture.md) | Component boundaries and interactions |
+| [Workshop assets](workshop_assets/README.md) | Where each workshop's material lives and how it reaches participants |
 
 Module-specific requirements and validation documents are maintained under `docs/`. Historical material under `docs/archive/` is not the default operational procedure.
 
@@ -199,7 +200,7 @@ scripts/lib/           Shared script utilities
 inventories/           Inventories and deployment configuration
 playbooks/             Ansible deployment playbooks
 roles/                 Ansible implementation roles
-workshop_assets/       Workshop delivery assets
+workshop_assets/       Teaching material for every workshop (catalogue in workshop_assets/README.md)
 tests/                 Automated checks and validation support
 docs/                  Operational and module-specific documentation
 data/                  Local/generated runtime data where applicable
