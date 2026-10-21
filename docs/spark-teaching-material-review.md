@@ -2,7 +2,7 @@
 
 ## Evidence, scope and status
 
-- Material: `workshop_assets/big_data/spark/docs/spark-DA.pdf`.
+- Material: `workshop_assets/big-data/spark/beginner/docs/spark-DA.pdf`.
 - SHA-256: `ca219fab04451bc614d9f2722d49a3b26897b73803d698d39d380eb083fa6c22`.
 - Reviewed evidence: supplied extracted text from all **32 physical PDF pages**.
 - Completed: text-level conceptual, pedagogical and managed-workshop alignment review.
