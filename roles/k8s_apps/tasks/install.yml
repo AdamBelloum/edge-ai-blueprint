@@ -210,7 +210,7 @@
 # ---------------------------------------------------------------------------
 - name: Stage introduction-to-ai module2 beginner assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module2/beginner/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module2-foundations-of-ml/beginner/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/beginner/
     mode: "0644"
   tags:
@@ -219,7 +219,7 @@
 
 - name: Stage introduction-to-ai module2 advanced assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module2/advanced/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module2-foundations-of-ml/advanced/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/advanced/
     mode: "0644"
   tags:
@@ -228,7 +228,7 @@
 
 - name: Stage introduction-to-ai module2 solutions assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module2/solutions/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module2-foundations-of-ml/solutions/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module2/solutions/
     mode: "0644"
   tags:
@@ -240,7 +240,7 @@
 # ---------------------------------------------------------------------------
 - name: Stage introduction-to-ai module3 beginner assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module3/beginner/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module3-deep-learning/beginner/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/beginner/
     mode: "0644"
   tags:
@@ -249,7 +249,7 @@
 
 - name: Stage introduction-to-ai module3 advanced assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module3/advanced/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module3-deep-learning/advanced/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/advanced/
     mode: "0644"
   tags:
@@ -258,7 +258,7 @@
 
 - name: Stage introduction-to-ai module3 solutions assets on central node
   ansible.builtin.copy:
-    src: notebooks/introduction-to-ai/module3/solutions/
+    src: "{{ playbook_dir }}/../workshop_assets/introduction-to-ai/module3-deep-learning/solutions/"
     dest: /opt/digitafrica/k8s-notebooks/introduction-to-ai/module3/solutions/
     mode: "0644"
   tags:
