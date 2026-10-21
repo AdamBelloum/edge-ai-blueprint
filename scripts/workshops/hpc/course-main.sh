@@ -17,13 +17,18 @@ source "$HPC_OPENMP_MODULE_MAIN"
 run_hpc_openmp_menu() {
   local choice
   while true; do
-    printf '\nHPC — OpenMP basics\n\n'
-    printf '%s\n' \
-      '  1) Stage participant teaching assets only' \
-      '  2) Publish beginner workspace and reconcile JupyterHub' \
-      '  3) Show workshop selection status' \
-      '  0) Back to HPC'
-    printf '\nSelection: '
+    workshop_ui_heading "HPC / OpenMP basics"
+    workshop_ui_section "PREPARE"
+    workshop_ui_option 1 "Stage teaching assets"
+    workshop_ui_note "Assets only; no activation or runtime installation."
+    workshop_ui_option 2 "Publish beginner workspace"
+    workshop_ui_note "Reconciles JupyterHub; runtime setup occurs at pod startup."
+    workshop_ui_section "INSPECT"
+    workshop_ui_option 3 "Show workshop selection"
+    workshop_ui_note "Selection status is not OpenMP execution readiness."
+    printf '\n'
+    workshop_ui_option 0 "Back to HPC"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) hpc_openmp_prepare_workspace ||
@@ -41,7 +46,13 @@ run_hpc_openmp_menu() {
 run_hpc_menu() {
   local choice
   while true; do
-    printf '\nHPC workshops\n\n  1) OpenMP basics\n  0) Back to workshops\n\nSelection: '
+    workshop_ui_heading "Workshops / HPC"
+    workshop_ui_section "SELECT A MODULE"
+    workshop_ui_option 1 "OpenMP basics"
+    workshop_ui_note "Beginner mode."
+    printf '\n'
+    workshop_ui_option 0 "Back to workshops"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) run_hpc_openmp_menu ;;

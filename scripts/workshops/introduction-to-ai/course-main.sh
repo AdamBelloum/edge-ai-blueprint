@@ -71,14 +71,19 @@ run_introduction_to_ai_module_menu() {
   local choice
 
   while true; do
-    printf '\nIntroduction to AI — Module %s\n\n' "$module"
-    printf '  1) Publish and activate for new participant spawns\n'
-    printf '  2) Check publication readiness\n'
+    workshop_ui_heading "Introduction to AI / Module $module"
+    workshop_ui_section "PREPARE"
+    workshop_ui_option 1 "Publish and activate"
+    workshop_ui_note "Applies to new participant spawns."
+    workshop_ui_section "VERIFY"
+    workshop_ui_option 2 "Check publication readiness"
     if [[ "$module" != "1" ]]; then
-      printf '  3) Release reference solutions after the workshop\n'
+      workshop_ui_section "AFTER THE WORKSHOP"
+      workshop_ui_option 3 "Release reference solutions"
     fi
-    printf '  0) Back\n\n'
-    printf 'Selection: '
+    printf '\n'
+    workshop_ui_option 0 "Back to Introduction to AI"
+    workshop_ui_prompt
     read -r choice || return 0
 
     case "$module:$choice" in
@@ -106,12 +111,14 @@ run_introduction_to_ai_menu() {
   local choice
 
   while true; do
-    printf '\nIntroduction to AI\n\n'
-    printf '  1) Module 1\n'
-    printf '  2) Module 2\n'
-    printf '  3) Module 3\n'
-    printf '  0) Back\n\n'
-    printf 'Selection: '
+    workshop_ui_heading "Workshops / Introduction to AI"
+    workshop_ui_section "SELECT A MODULE"
+    workshop_ui_option 1 "Module 1"
+    workshop_ui_option 2 "Module 2"
+    workshop_ui_option 3 "Module 3"
+    printf '\n'
+    workshop_ui_option 0 "Back to workshops"
+    workshop_ui_prompt
     read -r choice || return 0
 
     case "$choice" in

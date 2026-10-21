@@ -14,11 +14,10 @@ select_fl_mode() {
   fi
 
   while true; do
-    printf '%s\n' \
-      'Federated Learning mode:' \
-      '  1) Beginner' \
-      '  2) Advanced'
-    printf 'Selection: '
+    workshop_ui_heading "Federated Learning / Teaching mode"
+    workshop_ui_option 1 "Beginner"
+    workshop_ui_option 2 "Advanced"
+    workshop_ui_prompt
     read -r choice
 
     case "$choice" in
@@ -51,13 +50,18 @@ run_federated_learning_menu() {
   local choice
 
   while true; do
-    printf '\nFederated Learning\n\n'
-    printf '  1) Prepare beginner workshop and start Flower\n'
-    printf '  2) Prepare advanced workshop and start Flower\n'
-    printf '  3) Release advanced reference solutions\n'
-    printf '  4) Manage Flower server\n'
-    printf '  0) Back\n\n'
-    printf 'Selection: '
+    workshop_ui_heading "Workshops / Federated Learning"
+    workshop_ui_section "PREPARE AND START"
+    workshop_ui_option 1 "Beginner workshop"
+    workshop_ui_option 2 "Advanced workshop"
+    workshop_ui_note "Both preparation actions start Flower."
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 3 "Release advanced reference solutions"
+    workshop_ui_section "RUNTIME"
+    workshop_ui_option 4 "Manage Flower server"
+    printf '\n'
+    workshop_ui_option 0 "Back to workshops"
+    workshop_ui_prompt
     read -r choice
 
     case "$choice" in

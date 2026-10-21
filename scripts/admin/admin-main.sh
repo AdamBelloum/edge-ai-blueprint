@@ -16,6 +16,10 @@ SETUP_WIZARD="${SCRIPT_DIR}/setup-wizard.sh"
 HEALTH_CHECK="${SCRIPT_DIR}/health-check.sh"
 CLEAN_VMS="${SCRIPT_DIR}/clean-vms.sh"
 
+# Presentation only; does not load deployment context.
+# shellcheck source=../lib/ui.sh
+source "${SCRIPT_DIR}/../lib/ui.sh"
+
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARNING] %s\n' "$*" >&2; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
@@ -28,15 +32,16 @@ choose_tier() {
   local choice
 
   while true; do
-    cat >&2 <<'MENU'
+    {
+      digitafrica_ui_heading "Administrator / Deployment tier"
+      digitafrica_ui_option 1 "Tier-1"
+      digitafrica_ui_option 2 "Tier-2"
+      printf '\n'
+      digitafrica_ui_option 0 "Cancel"
+      digitafrica_ui_prompt
+    } >&2
 
-Select deployment tier:
-  1) Tier-1
-  2) Tier-2
-  0) Cancel
-MENU
-
-    read -r -p 'Selection: ' choice
+    read -r choice
     case "$choice" in
       1) printf 'tier1\n'; return 0 ;;
       2) printf 'tier2\n'; return 0 ;;
@@ -127,19 +132,31 @@ EOF
 main() {
   local choice
 
+  if [[ -t 0 ]]; then
+    digitafrica_ui_heading "Welcome to DIGITAfrica administration"
+    digitafrica_ui_note "Inspect, deploy, recover, or clean a selected deployment tier."
+    digitafrica_ui_note "Participant accounts and workshop preparation belong to the organiser."
+  fi
+
   while true; do
-    cat <<'MENU'
+    digitafrica_ui_heading "DIGITAfrica / Administrator"
+    digitafrica_ui_section "INSPECT"
+    digitafrica_ui_option 1 "Run infrastructure health check"
+    digitafrica_ui_note "Read-only checks for the selected tier."
+    digitafrica_ui_section "DEPLOY"
+    digitafrica_ui_option 2 "Configure and deploy infrastructure"
+    digitafrica_ui_note "Select the tier and profile in the setup wizard."
+    digitafrica_ui_section "RECOVER"
+    digitafrica_ui_option 4 "Resume paused Managed-Keycloak OIDC deployment"
+    digitafrica_ui_note "Checks trusted TLS before continuing the saved deployment."
+    digitafrica_ui_section "CLEANUP"
+    digitafrica_ui_option 3 "Clean VMs for a fresh deployment - DESTRUCTIVE"
+    digitafrica_ui_note "Dedicated disposable VMs only; mandatory dry run and confirmation."
+    printf '\n'
+    digitafrica_ui_option 0 "Exit"
+    digitafrica_ui_prompt
 
-DIGITAfrica administrator
-
-  1) Run infrastructure health check
-  2) Configure and deploy infrastructure
-  3) Clean VMs for a fresh deployment (destructive)
-  4) Resume paused Managed-Keycloak OIDC deployment
-  0) Exit
-MENU
-
-    read -r -p 'Selection: ' choice
+    read -r choice
     case "$choice" in
       1) run_health_check ;;
       2) deploy_infrastructure ;;

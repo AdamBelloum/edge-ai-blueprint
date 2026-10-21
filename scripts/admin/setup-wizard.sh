@@ -16,6 +16,10 @@ DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-infrastructure.sh"
 HEALTH_SCRIPT="${SCRIPT_DIR}/health-check.sh"
 KEYCLOAK_BOOTSTRAP="${SCRIPT_DIR}/keycloak-bootstrap.sh"
 
+# Presentation only; does not load deployment context.
+# shellcheck source=../lib/ui.sh
+source "${SCRIPT_DIR}/../lib/ui.sh"
+
 WORKSHOP_DIR=""
 INVENTORY=""
 VARS_DIR=""
@@ -177,15 +181,20 @@ check_prerequisites() {
 }
 
 choose_deployment_tier() {
-  cat <<'MENU'
-
-Choose deployment tier:
-  1) Tier-1
-  2) Tier-2
-MENU
+  digitafrica_ui_heading "Setup / Deployment tier"
+  digitafrica_ui_option 1 "Tier-1"
+  digitafrica_ui_option 2 "Tier-2"
+  digitafrica_ui_note "Configuration is stored separately for each tier."
+  printf '\n'
+  digitafrica_ui_option 0 "Cancel setup / return"
+  printf '\n'
 
   local choice
-  prompt_choice choice "Deployment tier" "1" 1 2
+  prompt_choice choice "Deployment tier" "1" 0 1 2
+
+  if [[ "$choice" == "0" ]]; then
+    return 1
+  fi
 
   if [[ "$choice" == "1" ]]; then
     DEPLOYMENT_TIER="tier1"
@@ -200,15 +209,12 @@ MENU
 }
 
 choose_profile() {
-  cat <<'MENU'
-
-Choose deployment profile:
-  1) Basic workshop
-     Self-signed TLS and JupyterHub dummy login.
-
-  2) Managed-Keycloak OIDC
-     Trusted TLS, PostgreSQL, Keycloak, and JupyterHub OIDC.
-MENU
+  digitafrica_ui_heading "Setup / Deployment profile"
+  digitafrica_ui_option 1 "Basic workshop"
+  digitafrica_ui_note "Self-signed TLS and JupyterHub dummy login."
+  digitafrica_ui_option 2 "Managed-Keycloak OIDC"
+  digitafrica_ui_note "Trusted TLS, PostgreSQL, Keycloak, and JupyterHub OIDC."
+  printf '\n'
 
   local choice
   prompt_choice choice "Deployment profile" "1" 1 2
@@ -223,12 +229,13 @@ MENU
   PROFILE="managed-keycloak-oidc"
   IDENTITY_ENABLED="true"
 
-  cat <<'MENU'
-
-Managed-Keycloak OIDC requires trusted HTTPS:
-  1) Let's Encrypt
-  2) Provided TLS certificate
-MENU
+  digitafrica_ui_heading "Setup / Trusted HTTPS"
+  digitafrica_ui_note "Managed-Keycloak OIDC requires trusted TLS."
+  digitafrica_ui_option 1 "Let's Encrypt"
+  digitafrica_ui_note "Requires an ACME registration email."
+  digitafrica_ui_option 2 "Provided TLS certificate"
+  digitafrica_ui_note "Requires local tls.crt and tls.key files."
+  printf '\n'
 
   prompt_choice choice "Trusted TLS mode" "1" 1 2
   case "$choice" in
@@ -652,14 +659,17 @@ keycloak_tls_recovery_menu() {
   local choice
 
   while true; do
-    cat <<'MENU'
-
-Managed OIDC deployment is paused because trusted TLS is not yet available.
-
-  1) Check Keycloak TLS certificate status
-  2) Resume managed OIDC deployment
-  3) Exit with deployment paused
-MENU
+    digitafrica_ui_heading "Recovery / Managed-Keycloak OIDC"
+    digitafrica_ui_warning "Deployment paused: trusted TLS is not yet available."
+    digitafrica_ui_section "INSPECT"
+    digitafrica_ui_option 1 "Check Keycloak TLS certificate status"
+    digitafrica_ui_section "CONTINUE"
+    digitafrica_ui_option 2 "Resume managed OIDC deployment"
+    digitafrica_ui_note "Continues only after trusted TLS is verified."
+    digitafrica_ui_section "PAUSE"
+    digitafrica_ui_option 3 "Exit with deployment paused"
+    digitafrica_ui_note "Resume later from the administrator menu."
+    printf '\n'
 
     prompt_choice choice "Choose an action" "1" 1 2 3
 
@@ -908,9 +918,18 @@ main() {
       ;;
   esac
 
+  if [[ -t 0 ]]; then
+    digitafrica_ui_heading "Welcome to DIGITAfrica infrastructure setup"
+    digitafrica_ui_note "Choose a tier and profile, review configuration, then confirm changes."
+    digitafrica_ui_note "Generated configuration and secrets are local-only; never commit them."
+  fi
+
   cd "$REPO_ROOT"
   check_prerequisites
-  choose_deployment_tier
+  if ! choose_deployment_tier; then
+    info "Setup cancelled; no configuration files were written or deployment started."
+    return 0
+  fi
   choose_profile
   collect_topology
   check_ssh_access

@@ -18,6 +18,10 @@ ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
 COHORT_MAPPING_HELPER="$SCRIPT_DIR/../identity/reconcile-cohort-mapping.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 
+# Shared presentation for this standalone executable.
+# shellcheck source=../lib/organizer-ui.sh
+source "$SCRIPT_DIR/../lib/organizer-ui.sh"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/workshops/fl-workshop.sh [ACTION]
@@ -239,20 +243,21 @@ run_flower_manager_menu() {
   local min_clients
 
   while true; do
-    cat <<'EOF'
-
-Flower server lifecycle
-
-  1) Show status and effective parameters
-  2) Start the server
-  3) Stop the server
-  4) Restart the server
-  5) Configure rounds and required clients (leaves server stopped)
-  6) Show recent server logs
-  0) Back
-EOF
-
-    read -r -p "Selection: " choice
+    workshop_ui_heading "Federated Learning / Flower server"
+    workshop_ui_section "INSPECT"
+    workshop_ui_option 1 "Show status and effective parameters"
+    workshop_ui_option 6 "Show recent server logs"
+    workshop_ui_section "LIFECYCLE"
+    workshop_ui_option 2 "Start server"
+    workshop_ui_option 3 "Stop server"
+    workshop_ui_option 4 "Restart server"
+    workshop_ui_section "CONFIGURE"
+    workshop_ui_option 5 "Set rounds and required clients"
+    workshop_ui_note "Configuration leaves the server stopped."
+    printf '\n'
+    workshop_ui_option 0 "Back"
+    workshop_ui_prompt
+    read -r choice
     case "$choice" in
       1) "$FLOWER_MANAGER" status ;;
       2)
@@ -760,25 +765,29 @@ interactive_menu() {
   local choice
 
   while true; do
-    print_heading "DIGITAfrica federated-learning workshop helper"
+    workshop_ui_heading "DIGITAfrica / Federated Learning helper"
     show_context
-    cat <<'EOF'
-
-Choose an action:
-  1) Run workshop platform preflight
-  2) Show source revisions and server entry-point evidence
-  3) Inspect all assigned participant workspaces
-  4) Show workshop readiness checklist
-  5) Show experiment record template
-  6) Show tutorial mode and solution-release state
-  7) Set tutorial mode for subsequent participant spawns
-  8) Release reference solutions for advanced workshop
-  9) Start a fresh beginner or advanced workshop cohort
- 10) Prepare a fresh beginner or advanced workshop and start Flower
- 11) Manage Flower server
-  0) Exit
-EOF
-    read -r -p "Selection: " choice
+    workshop_ui_section "CHECK AND INSPECT"
+    workshop_ui_option 1 "Run platform preflight"
+    workshop_ui_option 2 "Show source revisions and server entry-point evidence"
+    workshop_ui_option 3 "Inspect participant workspaces"
+    workshop_ui_option 6 "Show tutorial mode and solution-release state"
+    workshop_ui_section "WORKSHOP RECORDS"
+    workshop_ui_option 4 "Show readiness checklist"
+    workshop_ui_option 5 "Show experiment record template"
+    workshop_ui_section "PREPARE"
+    workshop_ui_option 7 "Set tutorial mode for new participant spawns"
+    workshop_ui_option 9 "Start a fresh cohort"
+    workshop_ui_option 10 "Prepare fresh workshop and start Flower"
+    workshop_ui_note "Options 9 and 10 reset participant workspaces."
+    workshop_ui_section "RUNTIME"
+    workshop_ui_option 11 "Manage Flower server"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 8 "Release advanced reference solutions"
+    printf '\n'
+    workshop_ui_option 0 "Exit"
+    workshop_ui_prompt
+    read -r choice
 
     case "${choice}" in
       1) run_preflight ;;
@@ -821,6 +830,9 @@ main() {
 
   case "${action}" in
     menu)
+      workshop_ui_heading "Welcome to DIGITAfrica Federated Learning"
+      workshop_ui_note "Prepare workshops, inspect readiness, and manage Flower."
+      workshop_ui_note "Fresh-cohort actions reset participant workspaces."
       interactive_menu
       ;;
     preflight)
