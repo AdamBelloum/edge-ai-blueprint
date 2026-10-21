@@ -46,7 +46,7 @@ Actions:
   issue-credentials       Issue temporary passwords and write a protected TSV export.
   status                  Show expected participant-account status.
   require-complete        Exit successfully only when the participant cohort is complete.
-  reset                   Reset the active workshop cycle and participant cohort.
+  reset                   Reset workshop cycle; choose keep accounts (default) or delete.
   reset-participants      Remove participant identities and credential exports only.
 
 Options:
@@ -124,8 +124,9 @@ ensure_admin_password_session() {
     if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
       ADMIN_PASSWORD_SESSION_VERIFIED=true
       return 0
+    else
+      status=$?
     fi
-    status=$?
     [[ "$status" -eq 10 ]] &&
       fail 'The supplied KEYCLOAK_ADMIN_PASSWORD_FILE was rejected by Keycloak.'
     fail 'Could not validate the supplied Keycloak administrator password file.'
@@ -136,8 +137,9 @@ ensure_admin_password_session() {
       if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
         ADMIN_PASSWORD_SESSION_VERIFIED=true
         return 0
+      else
+        status=$?
       fi
-      status=$?
     else
       status=$?
     fi
@@ -161,9 +163,9 @@ run_account_helper() {
   ensure_admin_password_session
   if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" "$@"; then
     return 0
+  else
+    status=$?
   fi
-
-  status=$?
   if [[ "$status" -ne 10 ]] ||
     [[ "$ADMIN_PASSWORD_SESSION_FILE_OWNED" != true ]]; then
     return "$status"
@@ -398,8 +400,56 @@ run_issue_credentials() {
 }
 
 run_reset() {
-  build_account_args
-  "$RESET_HELPER" "${ACCOUNT_ARGS[@]}"
+  local account_choice deletion_confirmation status
+
+  printf '\nReset workshop: participant accounts\n'
+  printf '  1) Keep accounts, groups, passwords and credential exports (default)\n'
+  printf '  2) Delete participant accounts, matching groups and credential exports\n'
+  printf '  0) Cancel reset\n'
+  printf 'Selection [1]: '
+  if ! IFS= read -r account_choice; then
+    printf 'Reset cancelled; no cleanup performed.\n'
+    return 0
+  fi
+
+  case "$account_choice" in
+    ""|1)
+      "$RESET_HELPER" --accounts keep
+      ;;
+    2)
+      printf 'Account deletion is permanent. Workshop cleanup is confirmed separately.\n'
+      printf 'Delete participant accounts and matching credential exports? [y/N]: '
+      if ! IFS= read -r deletion_confirmation; then
+        printf 'Reset cancelled; no cleanup performed.\n'
+        return 0
+      fi
+      case "$deletion_confirmation" in
+        y|Y|yes|YES) ;;
+        *)
+          printf 'Reset cancelled; no cleanup performed.\n'
+          return 0
+          ;;
+      esac
+
+      build_account_args
+      printf 'Checking Keycloak access before workshop cleanup...\n'
+      if run_account_helper --status; then
+        "$RESET_HELPER" --accounts delete "${ACCOUNT_ARGS[@]}"
+      else
+        status=$?
+        printf 'Keycloak preflight failed; workshop cleanup was not started.\n' >&2
+        return "$status"
+      fi
+      ;;
+    0)
+      printf 'Reset cancelled; no cleanup performed.\n'
+      return 0
+      ;;
+    *)
+      printf 'Invalid selection; no cleanup performed. Choose 0, 1 or 2.\n' >&2
+      return 2
+      ;;
+  esac
 }
 
 run_reset_participants() {
@@ -434,7 +484,7 @@ run_reset_menu() {
 
   while true; do
     printf '\nReset active workshop cycle\n\n'
-    printf '  1) Reset active workshop and participant cohort\n'
+    printf '  1) Reset active workshop (choose whether to keep accounts)\n'
     printf '  2) Remove participant identities and credential exports only\n'
     printf '  0) Back\n\n'
     printf 'Selection: '

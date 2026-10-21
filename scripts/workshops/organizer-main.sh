@@ -93,7 +93,7 @@ Actions:
   hpc-status             Show workshop selection; not HPC execution readiness.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
-  reset                   Reset the active workshop cycle and participant cohort.
+  reset                   Reset workshop cycle; choose keep accounts (default) or delete.
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
   flower                  Open the Flower lifecycle manager.
@@ -196,8 +196,9 @@ ensure_admin_password_session() {
     if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
       ADMIN_PASSWORD_SESSION_VERIFIED=true
       return 0
+    else
+      status=$?
     fi
-    status=$?
     [[ "$status" -eq 10 ]] &&
       fail 'The supplied KEYCLOAK_ADMIN_PASSWORD_FILE was rejected by Keycloak.'
     fail 'Could not validate the supplied Keycloak administrator password file.'
@@ -208,8 +209,9 @@ ensure_admin_password_session() {
       if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
         ADMIN_PASSWORD_SESSION_VERIFIED=true
         return 0
+      else
+        status=$?
       fi
-      status=$?
     else
       status=$?
     fi
@@ -235,9 +237,9 @@ run_account_helper() {
   ensure_admin_password_session
   if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" "$@"; then
     return 0
+  else
+    status=$?
   fi
-
-  status=$?
   if [[ "$status" -ne 10 ]] ||
     [[ "$ADMIN_PASSWORD_SESSION_FILE_OWNED" != true ]]; then
     return "$status"

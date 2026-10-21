@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Reset stable DIGITAfrica participant identities for a new workshop cohort.
+# Reset the workshop cycle; preserve identities unless deletion is selected.
 #
 # Order:
 #   1. After organiser confirmation, stop only selected participant Jupyter servers.
 #   2. Delete only their persistent JupyterHub workspaces.
-#   3. Delete only their inventory-derived Keycloak users and matching groups.
+#   3. Optionally delete inventory-derived Keycloak users and matching groups.
 #
 # The active workshop state is restored to neutral. Administrators, service accounts,
 # and unrelated realm records are preserved.
@@ -14,11 +14,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 IDENTITY_RESET_HELPER="$SCRIPT_DIR/../identity/reset-participant-environment.sh"
+ACCOUNT_HELPER="$SCRIPT_DIR/../identity/create-participant-accounts.sh"
+RESET_AUTH_SESSION="$SCRIPT_DIR/../lib/reset-auth-session.sh"
 COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 
+ACCOUNT_ACTION="keep"
 SERVER_URL=""
 REALM="digitafrica"
 ADMIN_REALM=""
@@ -29,16 +32,24 @@ ADMIN_CLIENT_SECRET_FILE=""
 usage() {
   cat <<'EOF'
 Usage:
-  reset-federated-learning-workshop.sh --server-url URL \
-    (--admin-user USER | --admin-client-id ID --admin-client-secret-file FILE) \
-    [--realm NAME] [--admin-realm NAME]
+  reset-federated-learning-workshop.sh [--accounts keep|delete] [identity options]
 
-Deletes the active workshop inventory's participant workspaces, Keycloak users,
-and same-named Keycloak groups. It does not change tutorial mode, release
-reference solutions, or recreate participant accounts.
+Deletes selected participant workspaces and restores neutral workshop state.
+Accounts, groups, passwords and credential exports are preserved by default.
 
-The Keycloak administrator password is read privately by
-create-participant-accounts.sh, or from KEYCLOAK_ADMIN_PASSWORD_FILE when set.
+  --accounts keep                 Preserve participant identities (default)
+  --accounts delete               Delete identities and matching exports
+
+Identity options, required only with --accounts delete:
+  --server-url URL                HTTPS Keycloak URL
+  --realm NAME                    Participant realm (default: digitafrica)
+  --admin-realm NAME               Administration realm
+  --admin-user USER                Administrator authentication
+  --admin-client-id ID --admin-client-secret-file FILE
+                                  Service-account authentication
+
+The administrator password is read privately by the account helper, or from
+KEYCLOAK_ADMIN_PASSWORD_FILE when set. This helper does not recreate accounts.
 EOF
 }
 
@@ -46,6 +57,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 while (($#)); do
   case "$1" in
+    --accounts) ACCOUNT_ACTION="${2:-}"; shift 2 ;;
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --realm) REALM="${2:-}"; shift 2 ;;
     --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
@@ -57,18 +69,24 @@ while (($#)); do
   esac
 done
 
-[[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
-[[ -x "$IDENTITY_RESET_HELPER" ]] || fail "Missing executable participant-environment reset helper: $IDENTITY_RESET_HELPER"
+case "$ACCOUNT_ACTION" in
+  keep|delete) ;;
+  *) fail '--accounts must be keep or delete.' ;;
+esac
 [[ -x "$COHORT_HELPER" ]] || fail "Missing executable cohort helper: $COHORT_HELPER"
 [[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
 [[ -r "$COMMON" ]] || fail "Missing common helper: $COMMON"
-[[ -z "$ADMIN_USER" || -z "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] || \
-  fail 'Choose either --admin-user or service-account authentication, not both.'
-if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
-  [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]] || \
-    fail 'Service-account authentication requires both client ID and secret-file options.'
-else
-  [[ -n "$ADMIN_USER" ]] || fail 'Supply --admin-user or service-account authentication.'
+if [[ "$ACCOUNT_ACTION" == delete ]]; then
+  [[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
+  [[ -x "$IDENTITY_RESET_HELPER" ]] || fail "Missing executable identity reset helper: $IDENTITY_RESET_HELPER"
+  [[ -z "$ADMIN_USER" || -z "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] || \
+    fail 'Choose either --admin-user or service-account authentication, not both.'
+  if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
+    [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]] || \
+      fail 'Service-account authentication requires both client ID and secret-file options.'
+  else
+    [[ -n "$ADMIN_USER" ]] || fail 'Supply --admin-user or service-account authentication.'
+  fi
 fi
 
 [[ -r "$WORKSHOP_CONTEXT" ]] ||
@@ -136,15 +154,56 @@ REMOTE
 printf '%s\n' \
   "Participant identities: ${GROUP_IDS[*]}" \
   '' \
-  'This permanently deletes only the selected participant JupyterHub workspaces,
-   inventory-derived Keycloak users/groups, and matching local credential exports.' \
+  'This permanently deletes the selected participant JupyterHub workspaces.' \
   'Ensure participants have first had time to copy any needed data from their running servers.' \
   'Workshop selection and tutorial state will be reset to neutral.' \
   'Administrators, service accounts, and unrelated realm records are preserved.'
-printf 'Delete these participant workspaces, Keycloak identities, and local credential exports? [y/N]: '
+if [[ "$ACCOUNT_ACTION" == delete ]]; then
+  printf '%s\n' 'Also DELETE participant Keycloak users/groups and matching credential exports.'
+  printf 'Delete selected workspaces AND participant identities/exports? [y/N]: '
+else
+  printf '%s\n' 'KEEP participant accounts, groups, passwords and credential exports.'
+  printf 'Delete selected workspaces while keeping participant accounts? [y/N]: '
+fi
 read -r answer
 case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
 
+
+# Authenticate before recording cleanup or removing any runtime/workspace.
+# Keep-account resets do not load the authentication library or call Keycloak.
+if [[ "$ACCOUNT_ACTION" == delete ]]; then
+  [[ -x "$ACCOUNT_HELPER" ]] ||
+    fail "Missing executable account helper: $ACCOUNT_HELPER"
+  [[ -r "$RESET_AUTH_SESSION" ]] ||
+    fail "Missing reset authentication library: $RESET_AUTH_SESSION"
+
+  ACCOUNT_ARGS=(--server-url "$SERVER_URL" --realm "$REALM")
+  [[ -n "$ADMIN_REALM" ]] && ACCOUNT_ARGS+=(--admin-realm "$ADMIN_REALM")
+  if [[ -n "$ADMIN_USER" ]]; then
+    ACCOUNT_ARGS+=(--admin-user "$ADMIN_USER")
+  else
+    ACCOUNT_ARGS+=(
+      --admin-client-id "$ADMIN_CLIENT_ID"
+      --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE"
+    )
+  fi
+
+  # shellcheck source=../lib/reset-auth-session.sh
+  source "$RESET_AUTH_SESSION"
+  trap clear_admin_password_session EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  printf '%s\n' 'Checking Keycloak access before destructive cleanup...'
+  if run_account_helper --status; then
+    :
+  else
+    auth_status=$?
+    printf '%s\n' 'Keycloak preflight failed; no destructive cleanup was started.' >&2
+    exit "$auth_status"
+  fi
+fi
 
 # Persist retry context before the first destructive operation.
 # Existing incomplete resets retain their original workshop and module,
@@ -205,19 +264,23 @@ stop_selected_participant_servers
 workspace_args=(delete-workspaces --yes)
 "$COHORT_HELPER" "${workspace_args[@]}"
 
-identity_reset_args=(
-  --server-url "$SERVER_URL"
-  --realm "$REALM"
-  --yes
-)
-[[ -n "$ADMIN_REALM" ]] && identity_reset_args+=(--admin-realm "$ADMIN_REALM")
-if [[ -n "$ADMIN_USER" ]]; then
-  identity_reset_args+=(--admin-user "$ADMIN_USER")
-else
-  identity_reset_args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
-fi
+if [[ "$ACCOUNT_ACTION" == delete ]]; then
+  identity_reset_args=(
+    --server-url "$SERVER_URL"
+    --realm "$REALM"
+    --yes
+  )
+  [[ -n "$ADMIN_REALM" ]] && identity_reset_args+=(--admin-realm "$ADMIN_REALM")
+  if [[ -n "$ADMIN_USER" ]]; then
+    identity_reset_args+=(--admin-user "$ADMIN_USER")
+  else
+    identity_reset_args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
+  fi
 
-"$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"
+  "$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"
+else
+  printf '%s\n' 'Participant identities and credential exports preserved.'
+fi
 
 run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
