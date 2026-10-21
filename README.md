@@ -69,7 +69,6 @@ The repository's deployment and workshop workflows have been tested in a three-n
 | Memory | Approximately 8 GiB; 7.8 GiB reported |
 | Storage | Approximately 100 GB root disk; 99 GB filesystem reported |
 | Operating system | Debian GNU/Linux 13 (trixie) |
-| Swap | None configured |
 
 This describes the hardware used for testing, not a guarantee that every module or profile has passed end-to-end validation. Consult the relevant guides for feature-specific validation status.
 
