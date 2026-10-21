@@ -133,3 +133,29 @@ if ((${#credential_files[@]})); then
 fi
 
 printf 'Participant identity environment cleanup completed.\n'
+
+# The full-reset controller invokes this helper with --yes.
+# Do not show standalone next-step guidance during that intermediate operation.
+if [[ "$assume_yes" != true ]]; then
+  cat <<'GUIDANCE'
+
+Participant-only reset completed — what to do next
+  Identities, matching groups, and local credential exports were removed.
+  Workspaces, JupyterHub servers, Flower, and workshop selection were NOT reset.
+  This does not establish a clean new-workshop cycle.
+
+  1. For a fresh workshop cycle, complete and verify full cleanup first.
+     If cleanup is incomplete, stop and contact the administrator/maintainer.
+     Do not bypass the cleanup marker or activation safeguards.
+  2. Manage participant cohort: provision participant identities and groups.
+  3. Reconcile applications after adding or updating a workshop/module.
+  4. Prepare/publish the selected workshop and its supported mode.
+     Review retained workspaces before giving a new cohort access.
+  5. Run workshop-specific readiness checks.
+     Publication alone does not prove participant execution readiness.
+  6. Issue/export fresh credentials when ready and distribute them securely.
+     Do not reuse old credential exports or commit credentials to Git.
+
+Infrastructure deployment remains a separate administrator task.
+GUIDANCE
+fi

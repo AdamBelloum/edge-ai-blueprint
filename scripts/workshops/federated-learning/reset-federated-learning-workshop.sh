@@ -228,4 +228,25 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
 REMOTE
 )"
 
+cat <<'GUIDANCE'
+
+RESET INCOMPLETE — do not start a new workshop
+  Participant cleanup finished and workshop selection is neutral.
+  Full workshop cleanup has NOT been verified. Activation remains blocked
+  by cleanup_status=in_progress.
+
+What to do next:
+  1. Contact the administrator/maintainer to resolve runtime teardown and
+     neutral-JupyterHub verification; these steps are not yet implemented.
+  2. Do not manually mark cleanup complete or bypass activation safeguards.
+  3. Do not publish a new workshop or distribute new credentials until
+     full cleanup has been completed and verified.
+  4. After verified cleanup, follow the normal organiser workflow:
+     provision identities/groups, reconcile updated applications,
+     prepare/publish the workshop, check readiness, then issue/export
+     and securely distribute participant credentials.
+
+Neutral selection alone does not prove a successful full reset.
+GUIDANCE
+
 fail 'Participant reset finished and selection is neutral, but full workshop cleanup is NOT verified. Activation remains blocked by cleanup_status=in_progress. Runtime teardown and neutral-Hub verification are not yet implemented.'

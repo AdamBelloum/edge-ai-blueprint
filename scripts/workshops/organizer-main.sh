@@ -538,17 +538,20 @@ run_application_reconciliation() {
 # The menu only routes to controllers; the controllers implement each
 # workshop's operational steps and domain-specific confirmation checks.
 run_workshops_menu() {
+  show_new_workshop_workflow
   local choice
 
   while true; do
-    printf '\nWorkshops\n\n'
-    printf '  1) Introduction to AI\n'
-    printf '  2) Federated Learning\n'
-    printf '  3) Cloud Computing SOA\n'
-    printf '  4) Big Data\n'
-    printf '  5) HPC\n'
-    printf '  0) Back\n\n'
-    printf 'Selection: '
+    workshop_ui_heading "Organiser / Workshops"
+    workshop_ui_section "SELECT A COURSE"
+    workshop_ui_option 1 "Introduction to AI"
+    workshop_ui_option 2 "Federated Learning"
+    workshop_ui_option 3 "Cloud Computing SOA"
+    workshop_ui_option 4 "Big Data"
+    workshop_ui_option 5 "HPC"
+    printf '\n'
+    workshop_ui_option 0 "Back to main menu"
+    workshop_ui_prompt
     read -r choice
 
     case "$choice" in
@@ -570,13 +573,17 @@ run_main_menu() {
   local choice
 
   while true; do
-    printf '\nDIGITAfrica workshop organiser\n\n'
-    printf '  1) Manage participant cohort\n'
-    printf '  2) Reset active workshop cycle\n'
-    printf '  3) Reconcile workshop applications after adding or updating a workshop/module\n'
-    printf '  4) Workshops\n'
-    printf '  0) Exit\n\n'
-    printf 'Selection: '
+    workshop_ui_heading "DIGITAfrica / Workshop organiser"
+    workshop_ui_section "PREPARATION"
+    workshop_ui_option 1 "Manage participant cohort"
+    workshop_ui_option 3 "Reconcile workshop applications"
+    workshop_ui_section "WORKSHOPS"
+    workshop_ui_option 4 "Open workshops"
+    workshop_ui_section "CLEANUP"
+    workshop_ui_option 2 "Reset workshop cycle"
+    printf '\n'
+    workshop_ui_option 0 "Exit"
+    workshop_ui_prompt
     read -r choice
 
     case "$choice" in
@@ -593,6 +600,9 @@ run_main_menu() {
 # Controllers rely on the context, authentication helpers, and menu functions
 # defined above, so they are sourced only after those shared dependencies exist.
 # Workflow controllers are loaded after shared organiser helpers.
+# shellcheck source=lib/organizer-ui.sh
+source "$SCRIPT_DIR/lib/organizer-ui.sh"
+
 # shellcheck source=controllers/cohort.sh
 source "$SCRIPT_DIR/controllers/cohort.sh"
 # shellcheck source=controllers/introduction_to_ai.sh
@@ -611,6 +621,9 @@ source "$SCRIPT_DIR/controllers/hpc.sh"
 case "$ACTION" in
   menu)
     [[ -t 0 ]] || fail 'Use an explicit action in a non-interactive shell.'
+    workshop_ui_heading "Welcome to DIGITAfrica"
+    workshop_ui_note "Prepare participant access, manage workshops, and verify readiness."
+    workshop_ui_note "Infrastructure deployment remains an administrator task."
     run_main_menu
     ;;
   initialise-identities) run_initialise_identities ;;

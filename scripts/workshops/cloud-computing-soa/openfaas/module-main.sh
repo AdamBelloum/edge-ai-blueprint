@@ -227,14 +227,17 @@ REMOTE
 run_cloud_module5_menu() {
   local choice
   while true; do
-    printf '\nOpenFaaS — pre-live preparation\n\n'
-    printf '%s\n' \
-      '  1) Check local pre-live assets' \
-      '  2) Show authoring status' \
-      '  3) Prepare offline rehearsal assets — private test cohort' \
-      '  4) Activate offline rehearsal — shared test cohort' \
-      '  0) Back to modules'
-    printf '\nSelection: '
+    workshop_ui_heading "Cloud SOA / Module 5 - OpenFaaS"
+    workshop_ui_warning "Offline rehearsal only; live readiness NOT VALIDATED."
+    workshop_ui_section "CHECK AND INSPECT"
+    workshop_ui_option 1 "Check local pre-live assets"
+    workshop_ui_option 2 "Show authoring status"
+    workshop_ui_section "OFFLINE REHEARSAL"
+    workshop_ui_option 3 "Prepare assets - private test cohort"
+    workshop_ui_option 4 "Activate rehearsal - shared test cohort"
+    printf '\n'
+    workshop_ui_option 0 "Back to Cloud Computing SOA"
+    workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) cloud_module5_check || printf 'Pre-live checks did not pass.\n' >&2 ;;
