@@ -259,7 +259,72 @@ REMOTE
 printf '%s\n' 'Stopping the organiser-controlled Flower server before participant reset...'
 "$FLOWER_MANAGER" stop
 
+
 stop_selected_participant_servers
+
+# BEGIN SAVED-CONTEXT RUNTIME DISPATCH
+# Read the persisted cleanup context, never the possibly neutral selection.
+runtime_context_output="$(run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+state="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state -o json)"
+
+printf '%s' "\$state" | python3 -c '
+import json, sys
+
+data = json.load(sys.stdin).get("data", {})
+if data.get("cleanup_status") != "in_progress":
+    raise SystemExit("Cleanup is not in progress; runtime dispatch refused.")
+
+workshop = data.get("cleanup_workshop_type")
+module = data.get("cleanup_workshop_module")
+allowed = {
+    "none", "introduction-to-ai", "federated-learning",
+    "cloud-computing-soa", "big-data", "hpc",
+}
+if workshop not in allowed or not isinstance(module, str) or not module:
+    raise SystemExit("Invalid saved cleanup context; runtime dispatch refused.")
+
+if workshop == "big-data":
+    if module != "spark":
+        raise SystemExit("Unsupported big-data cleanup module; reset refused.")
+    route = "spark"
+else:
+    route = "not-spark"
+
+print("RESET_RUNTIME_ROUTE=" + route)
+'
+REMOTE
+)")"
+
+mapfile -t runtime_routes < <(
+  printf '%s\n' "$runtime_context_output" |
+    sed -n 's/^RESET_RUNTIME_ROUTE=\(spark\|not-spark\)$/\1/p'
+)
+((${#runtime_routes[@]} == 1)) ||
+  fail 'Could not uniquely determine the saved runtime cleanup route.'
+
+case "${runtime_routes[0]}" in
+  spark)
+    spark_teardown="$SCRIPT_DIR/../big-data/spark/teardown-runtime.sh"
+    [[ -x "$spark_teardown" ]] ||
+      fail "Missing executable Spark teardown wrapper: $spark_teardown"
+    printf '%s\n' 'Tearing down Spark runtime using the saved cleanup context...'
+    if "$spark_teardown" --execute; then
+      printf '%s\n' 'Selected worker Spark runtime cleanup verified.'
+    else
+      teardown_status=$?
+      printf '%s\n' \
+        'Spark teardown failed; reset stopped and cleanup remains in_progress.' >&2
+      exit "$teardown_status"
+    fi
+    ;;
+  not-spark)
+    printf '%s\n' \
+      'Saved cleanup context does not select Spark; no Spark teardown dispatched.'
+    ;;
+esac
+# END SAVED-CONTEXT RUNTIME DISPATCH
 
 workspace_args=(delete-workspaces --yes)
 "$COHORT_HELPER" "${workspace_args[@]}"
@@ -299,8 +364,9 @@ RESET INCOMPLETE — do not start a new workshop
   by cleanup_status=in_progress.
 
 What to do next:
-  1. Contact the administrator/maintainer to resolve runtime teardown and
-     neutral-JupyterHub verification; these steps are not yet implemented.
+  1. Contact the administrator/maintainer to finish neutral-JupyterHub
+     verification and any remaining workshop-specific runtime cleanup.
+     Saved-context Spark teardown is integrated, but full reset is not verified.
   2. Do not manually mark cleanup complete or bypass activation safeguards.
   3. Do not publish a new workshop or distribute new credentials until
      full cleanup has been completed and verified.
@@ -312,4 +378,4 @@ What to do next:
 Neutral selection alone does not prove a successful full reset.
 GUIDANCE
 
-fail 'Participant reset finished and selection is neutral, but full workshop cleanup is NOT verified. Activation remains blocked by cleanup_status=in_progress. Runtime teardown and neutral-Hub verification are not yet implemented.'
+fail 'Participant reset finished and selection is neutral, but full workshop cleanup is NOT verified. Activation remains blocked by cleanup_status=in_progress. Neutral-Hub verification and complete workshop-runtime coverage remain pending.'
