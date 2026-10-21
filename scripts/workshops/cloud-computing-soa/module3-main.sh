@@ -177,7 +177,7 @@ import sys
 
 directory = Path(sys.argv[1])
 root = directory.parents[2]
-assets = root / "workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+assets = root / "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 map_text = (assets / "asset-map.tsv").read_bytes().decode("utf-8")
 mapped = {track: {} for track in ("beginner", "advanced", "solutions", "tests")}
 for track, key, relative in csv.reader(map_text.splitlines(), delimiter="\t"):

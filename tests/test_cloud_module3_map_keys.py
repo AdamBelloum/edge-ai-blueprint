@@ -9,7 +9,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[1]
 HELPER = Path("scripts/workshops/cloud-computing-soa/module3-local.sh")
 ASSETS = Path(
-    "workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+    "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 )
 
 

@@ -14,7 +14,7 @@
   - /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/helpers
 - name: Stage only allowlisted Module 5 files
   ansible.builtin.copy:
-    src: '{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module5_openfaas/{{
+    src: '{{ playbook_dir }}/../workshop_assets/cloud-computing-soa/module5-openfaas/{{
       item }}'
     dest: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module5/source/{{ item
       }}

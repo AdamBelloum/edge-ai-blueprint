@@ -36,7 +36,7 @@ export.add_argument("--confirm-solutions", action="store_true",
                     help="Explicitly authorise exporting reference solutions")
 args = parser.parse_args(sys.argv[2:])
 
-root = repository / "workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+root = repository / "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 tracks = {
     "beginner": root / "beginner",
     "advanced": root / "advanced",

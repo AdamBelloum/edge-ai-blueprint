@@ -14,7 +14,7 @@
 
 - name: Validate and stage mapped Cloud Computing SOA Module 3 assets
   vars:
-    cloud_module3_local_root: "{{ playbook_dir }}/../workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+    cloud_module3_local_root: "{{ playbook_dir }}/../workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
     cloud_module3_stage_root: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
     cloud_module3_map_rows: "{{ lookup('ansible.builtin.file', cloud_module3_local_root ~ '/asset-map.tsv').splitlines() | map('split', '\t') | list }}"
   block:
