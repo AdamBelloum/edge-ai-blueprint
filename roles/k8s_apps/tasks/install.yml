@@ -178,7 +178,7 @@
 
 - name: Stage beginner tutorial assets on central node
   ansible.builtin.copy:
-    src: notebooks/beginner/
+    src: "{{ playbook_dir }}/../workshop_assets/federated-learning/beginner/"
     dest: /opt/digitafrica/k8s-notebooks/beginner/
     mode: "0644"
   tags:
@@ -187,7 +187,7 @@
 
 - name: Stage advanced tutorial assets on central node
   ansible.builtin.copy:
-    src: notebooks/advanced/
+    src: "{{ playbook_dir }}/../workshop_assets/federated-learning/advanced/"
     dest: /opt/digitafrica/k8s-notebooks/advanced/
     mode: "0644"
   tags:
@@ -196,7 +196,7 @@
 
 - name: Stage reference-solution assets on central node
   ansible.builtin.copy:
-    src: notebooks/solutions/
+    src: "{{ playbook_dir }}/../workshop_assets/federated-learning/solutions/"
     dest: /opt/digitafrica/k8s-notebooks/solutions/
     mode: "0644"
   tags:
