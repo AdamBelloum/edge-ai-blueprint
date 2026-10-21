@@ -1,0 +1,75 @@
+---
+# Explicit scoped runtime removal; does not reset accounts or participant data.
+- name: Tear down ownership-verified Spark runtimes on selected worker VMs
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require explicit execution authorization and reject check mode
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - (big_data_spark_teardown_execute | default(false) | type_debug) == 'bool'
+          - big_data_spark_teardown_execute | default(false)
+        fail_msg: >-
+          Teardown requires boolean big_data_spark_teardown_execute=true.
+          Check mode is unsupported; use --syntax-check for parsing only.
+
+    - name: Create a temporary root-owned runner directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: digitafrica-spark-teardown-
+      register: spark_teardown_stage
+
+    - name: Stage and execute the scoped teardown runner
+      block:
+        - name: Protect the temporary runner directory
+          ansible.builtin.file:
+            path: "{{ spark_teardown_stage.path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Copy the reviewed teardown modules
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../scripts/workshops/big-data/spark/{{ item }}"
+            dest: "{{ spark_teardown_stage.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0600'
+          loop:
+            - teardown_cli.py
+            - teardown_directory.py
+            - teardown_docker.py
+            - teardown_evidence.py
+            - teardown_runner.py
+            - teardown_sequence.py
+            - teardown_validation.py
+
+        - name: Execute explicitly authorized host-local teardown
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -E
+              - -s
+              - -B
+              - "{{ spark_teardown_stage.path }}/teardown_cli.py"
+              - --execute
+          register: spark_teardown_result
+          changed_when: (spark_teardown_result.stdout | from_json).changed | bool
+
+        - name: Require verified absence of managed Spark runtime resources
+          ansible.builtin.assert:
+            that:
+              - (spark_teardown_result.stdout | from_json).cleanup_verified == true
+            fail_msg: Spark runtime cleanup was not verified.
+
+      always:
+        - name: Remove only the temporary runner directory
+          ansible.builtin.file:
+            path: "{{ spark_teardown_stage.path }}"
+            state: absent
