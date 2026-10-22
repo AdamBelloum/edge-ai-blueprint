@@ -62,7 +62,10 @@ def execute(payload, read=load, run=subprocess.run):
             require(mode == "advanced", "Solution release requires advanced mode.")
             tracks += ("solutions",)
 
-    values = read(["helm", "-n", namespace, "get", "values", "jhub", "-o", "json"])
+    values = read([
+        "helm", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml",
+        "-n", namespace, "get", "values", "jhub", "-o", "json"
+    ])
     singleuser = values.get("singleuser", {})
     seeders = [
         item for item in singleuser.get("initContainers", [])
