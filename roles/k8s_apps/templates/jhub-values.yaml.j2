@@ -214,6 +214,7 @@ hub:
           node_selector["kubernetes.io/hostname"] = assigned_node
           spawner.node_selector = node_selector
 
+{% if not (workshop_reset_neutral | default(false) | bool) %}
           volume_name = "digitafrica-workshop"
           volumes = {
               key: volume
@@ -241,6 +242,7 @@ hub:
           }
           spawner.volume_mounts = volume_mounts
 
+{% endif %}
           environment = dict(spawner.environment or {})
           environment["GROUP_ID"] = group_id
           spawner.environment = environment

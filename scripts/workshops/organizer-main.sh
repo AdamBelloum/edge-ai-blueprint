@@ -14,7 +14,7 @@ REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 # Executable helpers invoked directly by this organiser entry point.
 COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
-RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+RESET_HELPER="$SCRIPT_DIR/reset-workshops.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 # Shared libraries provide deployment context and common organiser safeguards.

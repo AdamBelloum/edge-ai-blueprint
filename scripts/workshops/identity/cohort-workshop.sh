@@ -17,7 +17,7 @@ WORKSHOP_SCRIPT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 REPOSITORY_ROOT="$(cd -- "$WORKSHOP_SCRIPT_DIR/../.." && pwd)"
 
 ACCOUNT_HELPER="$SCRIPT_DIR/create-participant-accounts.sh"
-RESET_HELPER="$WORKSHOP_SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+RESET_HELPER="$WORKSHOP_SCRIPT_DIR/reset-workshops.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/reset-participant-environment.sh"
 WORKSHOP_CONTEXT="$WORKSHOP_SCRIPT_DIR/lib/workshop-context.sh"
 COMMON_HELPER="$REPOSITORY_ROOT/scripts/lib/common.sh"
