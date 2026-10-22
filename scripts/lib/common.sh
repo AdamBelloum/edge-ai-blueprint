@@ -28,11 +28,11 @@ log() {
 }
 
 warn() {
-  printf '[WARN] %s\n' "$*" >&2
+  printf '\n------ WARNING: %s ------\n\n' "$*" >&2
 }
 
 die() {
-  printf '[ERROR] %s\n' "$*" >&2
+  printf '\n------ ERROR: %s ------\n\n' "$*" >&2
   exit 1
 }
 
