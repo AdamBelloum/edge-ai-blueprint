@@ -237,9 +237,11 @@ allowed = {
 if status in {"in_progress", "failed"}:
     workshop = data.get("cleanup_workshop_type")
     module = data.get("cleanup_workshop_module")
+    delivery_scope = data.get("cleanup_cloud_module3_delivery_scope", "unknown")
 elif status in {"legacy", "complete"}:
     workshop = data.get("workshop_type")
     module = data.get("workshop_module", "none")
+    delivery_scope = data.get("cloud_module3_delivery_scope", "unknown")
 else:
     raise SystemExit("Unknown cleanup status; reset refused.")
 
@@ -254,6 +256,9 @@ print(json.dumps({
         "cleanup_status": "in_progress",
         "cleanup_workshop_type": workshop,
         "cleanup_workshop_module": module,
+        **({"cleanup_cloud_module3_delivery_scope": delivery_scope}
+           if (workshop, module) == ("cloud-computing-soa", "module3")
+           else {}),
     },
 }))
 ')"
@@ -356,7 +361,33 @@ case "$cleanup_workshop" in
 
     printf 'Dispatching saved workshop runtime cleanup: %s / %s\n' \
       "$cleanup_workshop" "$cleanup_module"
-    if "$workshop_reset" --runtime-only --module "$cleanup_module"; then
+    # BEGIN MODULE3 RESET ATTESTATION
+    runtime_reset_args=(--runtime-only --module "$cleanup_module")
+    if [[ "$cleanup_workshop" == cloud-computing-soa &&
+          "$cleanup_module" == module3 ]]; then
+      printf '%s\n' \
+        'Module 3 external runtime cleanup is not implemented.' \
+        'Continue ONLY if this entire cycle published/inspected teaching files only.' \
+        'No organiser or participant may have created Module 3 Docker/Compose,' \
+        'Kubernetes, NFS or persistent-storage exercise resources on any host.' \
+        'This is operator attestation, NOT automated resource verification.' \
+        'If resources exist or their absence is unknown, decline and contact the administrator.'
+      printf 'Confirm no external Module 3 exercise resources were created [y/N]: '
+      runtime_answer=""
+      if ! read -r runtime_answer; then
+        fail 'No Module 3 attestation received; cleanup remains in_progress.'
+      fi
+      case "$runtime_answer" in
+        y|Y|yes|YES)
+          runtime_reset_args+=(--confirm-no-external-module3-runtime)
+          ;;
+        *)
+          fail 'Module 3 external-resource absence not confirmed; cleanup remains in_progress.'
+          ;;
+      esac
+    fi
+    # END MODULE3 RESET ATTESTATION
+    if "$workshop_reset" "${runtime_reset_args[@]}"; then
       printf '%s\n' \
         'Selected workshop runtime reset stage returned successfully.' \
         'Full workshop cleanup remains unverified.'

@@ -17,7 +17,7 @@ BLOCK = SOURCE.split(START, 1)[1].split(END, 1)[0]
 
 
 def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
-                 fl_cleanup_status=0, local_cleanup_status=None):
+                 fl_cleanup_status=0, local_cleanup_status=None, answer=""):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         script_dir = directory
@@ -101,7 +101,7 @@ run_deployment_remote() {
         result = subprocess.run(
             ["bash", "-c", setup + BLOCK +
              "\nprintf 'EVENT workspace-boundary\\n'\n"],
-            env=environment, capture_output=True, text=True, timeout=10,
+            input=answer, env=environment, capture_output=True, text=True, timeout=10,
         )
         calls = log.read_text().splitlines() if log.exists() else []
         return result, calls
@@ -203,11 +203,17 @@ class RuntimeDispatchTests(unittest.TestCase):
                         cleanup_workshop_type=workshop,
                         cleanup_workshop_module=module,
                     )
-                    result, calls = run_dispatch(data)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(
-                        calls, ["--runtime-only --module " + module]
+                    is_cloud_module3 = (
+                        workshop == "cloud-computing-soa" and module == "module3"
                     )
+                    result, calls = run_dispatch(
+                        data, answer="y\n" if is_cloud_module3 else ""
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    expected = "--runtime-only --module " + module
+                    if is_cloud_module3:
+                        expected += " --confirm-no-external-module3-runtime"
+                    self.assertEqual(calls, [expected])
                     self.assertIn(workshop + " / " + module, result.stdout)
 
     def test_neutral_skips_cleanup_and_fl_dispatches_only_data_cleanup(self):
@@ -257,11 +263,30 @@ class RuntimeDispatchTests(unittest.TestCase):
                     cleanup_workshop_type="cloud-computing-soa",
                     cleanup_workshop_module=module,
                 )
-                result, calls = run_dispatch(data, teardown_status=3)
-                self.assertEqual(result.returncode, 3)
-                self.assertEqual(
-                    calls, ["--runtime-only --module " + module]
+                result, calls = run_dispatch(
+                    data, teardown_status=3,
+                    answer="y\n" if module == "module3" else "",
                 )
+                self.assertEqual(result.returncode, 3)
+                expected = "--runtime-only --module " + module
+                if module == "module3":
+                    expected += " --confirm-no-external-module3-runtime"
+                self.assertEqual(calls, [expected])
+                self.assertNotIn("EVENT workspace-boundary", result.stdout)
+                self.assertIn("cleanup remains in_progress", result.stderr)
+
+    def test_module3_without_attestation_blocks_helper_and_workspace(self):
+        for answer in ("", "\n", "n\n", "unknown\n"):
+            with self.subTest(answer=answer):
+                data = spark_context()
+                data.update(
+                    cleanup_workshop_type="cloud-computing-soa",
+                    cleanup_workshop_module="module3",
+                    cleanup_cloud_module3_delivery_scope="teaching-files-only",
+                )
+                result, calls = run_dispatch(data, answer=answer)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
                 self.assertNotIn("EVENT workspace-boundary", result.stdout)
                 self.assertIn("cleanup remains in_progress", result.stderr)
 

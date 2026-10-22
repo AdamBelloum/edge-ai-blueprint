@@ -116,6 +116,32 @@ class ModuleResetBoundaryTests(unittest.TestCase):
                     self.assertIn("module=" + module, result.stdout)
                     self.assertIn("NOT verified", result.stdout)
 
+    def test_module3_explicit_no_external_runtime_confirmation(self):
+        result, calls = self.invoke(
+            "cloud-computing-soa",
+            ["--runtime-only", "--module", "module3",
+             "--confirm-no-external-module3-runtime"],
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("operator-attested", result.stdout)
+        self.assertIn("NOT verified", result.stdout)
+
+    def test_module3_confirmation_is_scoped_and_rejects_unknown_options(self):
+        for module, option in (
+            ("module1", "--confirm-no-external-module3-runtime"),
+            ("module4", "--confirm-no-external-module3-runtime"),
+            ("module5", "--confirm-no-external-module3-runtime"),
+            ("module3", "--unexpected"),
+        ):
+            with self.subTest(module=module, option=option):
+                result, calls = self.invoke(
+                    "cloud-computing-soa",
+                    ["--runtime-only", "--module", module, option],
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(calls, [])
+
     def test_unimplemented_external_cleanup_is_refused(self):
         for module in ("module3", "module4"):
             with self.subTest(module=module):

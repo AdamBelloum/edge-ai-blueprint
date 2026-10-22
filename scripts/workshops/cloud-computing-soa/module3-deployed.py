@@ -147,6 +147,7 @@ def execute(payload, read=load, run=subprocess.run):
             update = {
                 "workshop_type": "cloud-computing-soa",
                 "workshop_module": "module3",
+                "cloud_module3_delivery_scope": "teaching-files-only",
                 "mode": mode,
                 "solutions_released": "false",
             }
