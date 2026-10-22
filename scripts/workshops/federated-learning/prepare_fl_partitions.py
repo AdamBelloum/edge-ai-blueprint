@@ -35,6 +35,14 @@ parser.add_argument(
     required=True,
     help="Workshop data workspace containing source/train.csv and partitions/",
 )
+parser.add_argument(
+    "--partition-root",
+    type=Path,
+    help=(
+        "Optional generated-partition output directory. "
+        "The canonical source remains under --data-root/source/train.csv."
+    ),
+)
 args = parser.parse_args()
 
 if args.groups < 1:
@@ -87,7 +95,27 @@ for label in labels:
     for group_index, chunk in enumerate(np.array_split(indices, args.groups)):
         partitions[group_index].append(df.loc[chunk])
 
-partition_root = data_root / "partitions"
+partition_root = (
+    args.partition_root
+    if args.partition_root is not None
+    else data_root / "partitions"
+)
+# Never allow an output location whose cleanup could touch canonical source.
+resolved_output = partition_root.resolve()
+resolved_source = source.resolve()
+if resolved_output == resolved_source or resolved_output in resolved_source.parents:
+    raise SystemExit("Partition output must not contain the canonical source")
+# Explicit candidate output must not replace existing directory contents.
+# Default workshop partition regeneration retains its existing behaviour.
+if args.partition_root is not None:
+    if partition_root.is_symlink():
+        raise SystemExit("Explicit partition output must not be a symlink")
+    if partition_root.exists():
+        if not partition_root.is_dir() or any(partition_root.iterdir()):
+            raise SystemExit(
+                "Explicit partition output must be a new or empty directory"
+            )
+
 partition_root.mkdir(parents=True, exist_ok=True)
 
 # Remove previously generated partition directories and the manifest.
