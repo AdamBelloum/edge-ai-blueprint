@@ -32,7 +32,7 @@ SPARK_ENV = "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
 GROUP_NODES = {"group_01": "inventory-worker-a", "group_02": "inventory-worker-b"}
 
 
-def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module5=False):
+def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module5=False, neutral=False):
     marker = "    10-digitafrica-group-workspace: |\n"
     if marker not in source:
         raise RuntimeError("Group-workspace extraConfig block was not found.")
@@ -55,6 +55,7 @@ def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module
         hpc_workspace_enabled=hpc,
         hpc_runtime_enabled=runtime,
         cloud_module5_delivery_enabled=module5,
+        workshop_reset_neutral=neutral,
         digitafrica_deployment={"digitafrica_namespace": "test-workshop"},
     )
     namespace = {"c": SimpleNamespace(KubeSpawner=SimpleNamespace())}
@@ -215,6 +216,55 @@ class WorkspaceHookTests(unittest.TestCase):
             for container in neutral_instance.init_containers
             for entry in container.get("env", [])
         ))
+
+
+    def test_reset_neutral_participant_keeps_placement_without_data_mount(self):
+        instance = spawner()
+        before = snapshot(instance)
+        namespace = load_hook(CURRENT, neutral=True)
+        run_hook(namespace, instance)
+
+        self.assertEqual(
+            instance.node_selector["kubernetes.io/hostname"],
+            GROUP_NODES["group_01"],
+        )
+        self.assertEqual(instance.environment["GROUP_ID"], "group_01")
+        self.assertEqual(instance.volumes, before["volumes"])
+        self.assertEqual(instance.volume_mounts, before["volume_mounts"])
+        self.assertEqual(instance.init_containers, before["init_containers"])
+        for name in (
+            "configure_digitafrica_spark_source",
+            "configure_digitafrica_hpc_source",
+            "configure_digitafrica_module5_node_launch",
+        ):
+            self.assertNotIn(name, namespace)
+
+    def test_reset_neutral_legacy_participant_keeps_placement(self):
+        instance = spawner(username="group_02", groups=())
+        before = snapshot(instance)
+        run_hook(load_hook(CURRENT, oidc=False, neutral=True), instance)
+        self.assertEqual(
+            instance.node_selector["kubernetes.io/hostname"],
+            GROUP_NODES["group_02"],
+        )
+        self.assertEqual(instance.environment["GROUP_ID"], "group_02")
+        self.assertEqual(instance.volumes, before["volumes"])
+        self.assertEqual(instance.volume_mounts, before["volume_mounts"])
+
+    def test_reset_neutral_admin_configuration_is_unchanged(self):
+        instance = spawner(username="admin", groups=())
+        before = snapshot(instance)
+        run_hook(load_hook(CURRENT, neutral=True), instance)
+        self.assertEqual(snapshot(instance), before)
+
+    def test_reset_neutral_rejects_missing_or_ambiguous_groups(self):
+        for groups in ((), ("group_01", "group_02")):
+            with self.subTest(groups=groups):
+                instance = spawner(groups=groups)
+                before = snapshot(instance)
+                with self.assertRaises(RuntimeError):
+                    run_hook(load_hook(CURRENT, neutral=True), instance)
+                self.assertEqual(snapshot(instance), before)
 
 
 if __name__ == "__main__":

@@ -650,10 +650,32 @@ for group_id in "\${groups[@]}"; do
   fi
 
   if (( \${#pvc_names[@]} == 1 )); then
-    k3s kubectl -n "\$namespace" delete pvc "\${pvc_names[0]}" --wait=true
+    k3s kubectl -n "\$namespace" delete pvc "\${pvc_names[0]}" \
+      --wait=true --timeout=180s
     printf 'Deleted participant PVC: %s (identity: %s)\n' \
       "\${pvc_names[0]}" "\$group_id"
   fi
+
+  remaining_pods="\$(k3s kubectl -n "\$namespace" get pods \
+    -l "hub.jupyter.org/username=\$group_id" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"
+  [[ -z "\$remaining_pods" ]] || {
+    printf 'Workspace cleanup failed: participant pod remains for %s.\\n' \
+      "\$group_id" >&2
+    exit 1
+  }
+
+  remaining_pvcs="\$(k3s kubectl -n "\$namespace" get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"
+  while IFS= read -r remaining_pvc; do
+    if [[ -n "\$remaining_pvc" && "\$remaining_pvc" == "\$pvc_prefix"* ]]; then
+      printf 'Workspace cleanup failed: participant PVC remains for %s.\\n' \
+        "\$group_id" >&2
+      exit 1
+    fi
+  done <<< "\$remaining_pvcs"
+
+  printf 'Participant pod and PVC absence verified for %s.\\n' "\$group_id"
 done
 
 if [[ -n "\$mode" ]]; then

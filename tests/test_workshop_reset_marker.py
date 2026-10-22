@@ -8,8 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RESET = ROOT / (
-    "scripts/workshops/federated-learning/"
-    "reset-federated-learning-workshop.sh"
+    "scripts/workshops/reset-workshops.sh"
 )
 SOURCE = RESET.read_text()
 
@@ -123,7 +122,7 @@ class ResetMarkerTests(unittest.TestCase):
         )
         self.assertLess(confirmation_position, marker_position)
         for action in (
-            '"$FLOWER_MANAGER" stop',
+            '"$FL_RESET_HELPER" --runtime-only',
             '\nstop_selected_participant_servers\n',
             '"$COHORT_HELPER" "${workspace_args[@]}"',
             '"$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"',
