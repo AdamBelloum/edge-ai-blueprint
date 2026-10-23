@@ -45,7 +45,7 @@ run_cloud_module3_menu() {
     workshop_ui_option 7 "Show deployed delivery status"
     workshop_ui_section "PUBLISH TEACHING FILES"
     workshop_ui_option 4 "Beginner track"
-    workshop_ui_option 5 "Advanced TODO track"
+    workshop_ui_option 5 "Advanced - learner TODO exercises"
     workshop_ui_section "AFTER THE WORKSHOP"
     workshop_ui_option 6 "Release advanced reference solutions"
     printf '\n'

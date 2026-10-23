@@ -73,13 +73,20 @@ run_introduction_to_ai_module_menu() {
   while true; do
     workshop_ui_heading "Introduction to AI / Module $module"
     workshop_ui_section "PREPARE"
-    workshop_ui_option 1 "Publish and activate"
+    if [[ "$module" == "1" ]]; then
+      workshop_ui_option 1 "Beginner - publish and activate"
+      workshop_ui_note "Advanced - TODO: not implemented."
+    else
+      workshop_ui_option 1 "Beginner / Advanced - select level and activate"
+    fi
     workshop_ui_note "Applies to new participant spawns."
     workshop_ui_section "VERIFY"
     workshop_ui_option 2 "Check publication readiness"
-    if [[ "$module" != "1" ]]; then
-      workshop_ui_section "AFTER THE WORKSHOP"
-      workshop_ui_option 3 "Release reference solutions"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    if [[ "$module" == "1" ]]; then
+      workshop_ui_note "Release advanced reference solutions - TODO: not implemented."
+    else
+      workshop_ui_option 3 "Release advanced reference solutions"
     fi
     printf '\n'
     workshop_ui_option 0 "Back to Introduction to AI"

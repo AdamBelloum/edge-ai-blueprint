@@ -547,7 +547,7 @@ run_cloud_computing_soa_module_menu() {
     workshop_ui_option 1 "Check activation readiness"
     workshop_ui_section "ACTIVATE"
     workshop_ui_option 2 "Beginner track"
-    workshop_ui_option 3 "Advanced TODO track"
+    workshop_ui_option 3 "Advanced - learner TODO exercises"
     workshop_ui_section "AFTER THE WORKSHOP"
     workshop_ui_option 4 "Release advanced reference solution"
     workshop_ui_section "INSPECT"
@@ -598,6 +598,8 @@ run_cloud_computing_soa_menu() {
     workshop_ui_option 2 "Module 2 - Microservices and JWT Authentication"
     workshop_ui_option 3 "Module 3 - Containerization and Orchestration"
     workshop_ui_note "Teaching-file delivery; exercise runtime NOT VALIDATED."
+    workshop_ui_note "Module 4 - OpenStack - TODO: workshop menu integration."
+    workshop_ui_note "  Beginner / Advanced / post-workshop solutions: unavailable here."
     workshop_ui_option 5 "Module 5 - OpenFaaS"
     workshop_ui_note "Offline rehearsal only; live readiness NOT VALIDATED."
     printf '\n'
