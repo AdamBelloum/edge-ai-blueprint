@@ -8,7 +8,7 @@ import yaml
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "workshop_assets/cloud_computing_soa/module5_openfaas"
+MODULE = ROOT / "workshop_assets/cloud-computing-soa/module5-openfaas"
 FLAG = "cloud_module5_delivery_enabled"
 PATTERN = (
     r"{% if cloud_module5_delivery_enabled \| default\(false\) \| bool %}"
@@ -113,7 +113,7 @@ class OpenFaaSDeliveryTests(unittest.TestCase):
             source = self.environment.from_string(settings["src"]).render(**context)
             destination = self.environment.from_string(settings["dest"]).render(**context)
             self.assertEqual(source, "/checkout/playbooks/../workshop_assets/"
-                             "cloud_computing_soa/module5_openfaas/" + relative)
+                             "cloud-computing-soa/module5-openfaas/" + relative)
             self.assertEqual(destination, staging + "/" + relative)
         command = render["ansible.builtin.command"]
         context = {"digitafrica_deployment": {"digitafrica_namespace": "test-namespace"}}

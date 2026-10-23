@@ -27,7 +27,7 @@ class ParticipantScriptTests(unittest.TestCase):
         """Load a fresh script namespace without executing its entry point."""
         self.script_path = (
             Path(__file__).resolve().parents[1]
-            / "workshop_assets/big_data/spark/01_spark_basics.py"
+            / "workshop_assets/big-data/spark/beginner/01_spark_basics.py"
         )
         self.source = self.script_path.read_text(encoding="utf-8")
         self.namespace = {

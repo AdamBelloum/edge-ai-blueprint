@@ -194,6 +194,18 @@ require_module1_source() {
   : "${INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE:?Workshop release record must define INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE.}"
   : "${INTRODUCTION_TO_AI_MODULE1_SOURCE_REF:?Workshop release record must define INTRODUCTION_TO_AI_MODULE1_SOURCE_REF.}"
 
+  # The notebook moved from the Ansible role to workshop_assets/. Accept release
+  # records that still name the old location inside the same repository clone.
+  local legacy_path="roles/k8s_apps/files/notebooks/introduction-to-ai/$NOTEBOOK_NAME"
+  local current_path="workshop_assets/introduction-to-ai/module1-symbolic-ai/$NOTEBOOK_NAME"
+  local clone_root="${INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE%"$legacy_path"}"
+  if [[ ! -f "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" &&
+        "$clone_root" != "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" &&
+        -f "$clone_root$current_path" ]]; then
+    warn "INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE names the old notebook location; using ${clone_root}${current_path}. Update workshop-release.env."
+    INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE="$clone_root$current_path"
+  fi
+
   [[ -f "$INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE" ]] ||
     die "Module 1 source notebook is not readable: $INTRODUCTION_TO_AI_MODULE1_SOURCE_FILE"
 

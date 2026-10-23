@@ -22,7 +22,7 @@ class Module3LifecycleTests(unittest.TestCase):
             "map": "fixture-map\n",
             "assets": {
                 track: {"asset": hashlib.sha256(b"fixture\n").hexdigest()}
-                for track in ("beginner", "advanced", "solutions", "tests")
+                for track in ("beginner", "intermediate", "advanced", "solutions", "tests")
             },
         }
         self.state = {
@@ -79,7 +79,7 @@ class Module3LifecycleTests(unittest.TestCase):
         return types.SimpleNamespace(returncode=0)
 
     def test_publication_updates_only_expected_state_and_clears_release(self):
-        for mode in ("beginner", "advanced"):
+        for mode in ("beginner", "intermediate", "advanced"):
             with self.subTest(mode=mode):
                 self.payload["mode"] = mode
                 self.patches.clear()
@@ -142,6 +142,29 @@ class Module3LifecycleTests(unittest.TestCase):
             "op": "add", "path": "/data/solutions_released", "value": "true"
         }])
 
+    def test_release_for_the_active_intermediate_or_advanced_track(self):
+        for mode in ("intermediate", "advanced"):
+            with self.subTest(mode=mode):
+                self.patches.clear()
+                self.state["mode"] = mode
+                self.payload.update(operation="release", mode=mode)
+                deployed.execute(self.payload, self.read, self.run_command)
+                self.assertEqual(self.patches[0][1:], [{
+                    "op": "add", "path": "/data/solutions_released", "value": "true"
+                }])
+
+    def test_release_rejects_a_track_that_is_not_active_or_beginner(self):
+        for active, requested in (
+            ("intermediate", "advanced"), ("advanced", "intermediate"),
+            ("beginner", "beginner"),
+        ):
+            with self.subTest(active=active, requested=requested):
+                self.state["mode"] = active
+                self.payload.update(operation="release", mode=requested)
+                with self.assertRaises(RuntimeError):
+                    deployed.execute(self.payload, self.read, self.run_command)
+                self.assertEqual(self.patches, [])
+
     def test_check_is_read_only(self):
         self.payload["operation"] = "check"
         deployed.execute(self.payload, self.read, self.run_command)
@@ -166,6 +189,22 @@ class Module3LifecycleTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("ROUTED", result.stdout)
+
+    def test_helm_reads_the_k3s_kubeconfig(self):
+        # The check runs in a remote shell without a kubeconfig, and helm,
+        # unlike k3s kubectl, does not find the k3s one by itself.
+        commands = []
+
+        def read(command):
+            commands.append(command)
+            return self.read(command)
+
+        self.payload["operation"] = "check"
+        deployed.execute(self.payload, read, self.run_command)
+        helm = [command for command in commands if command[0] == "helm"]
+        self.assertTrue(helm)
+        for command in helm:
+            self.assertEqual(command[1:3], ["--kubeconfig", "/etc/rancher/k3s/k3s.yaml"])
 
     def test_reconciliation_opt_in_and_help_parse_without_deployment_context(self):
         entry = ROOT / "scripts/workshops/reconcile-workshop-applications.sh"

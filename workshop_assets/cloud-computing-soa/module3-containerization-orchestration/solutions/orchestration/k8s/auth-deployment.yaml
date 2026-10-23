@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: websvc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+        - name: auth
+          image: YOUR_DOCKERHUB_USERNAME/auth-service:3.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5001
+          env:
+            # Returned in the X-Served-By header, to observe load balancing.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            tcpSocket:
+              port: 5001
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/data
+              subPath: auth
+            - name: auth-keys
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: websvc-shared-pvc
+        - name: auth-keys
+          secret:
+            secretName: auth-keys

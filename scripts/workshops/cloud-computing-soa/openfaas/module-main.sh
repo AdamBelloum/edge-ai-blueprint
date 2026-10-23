@@ -3,7 +3,7 @@
 
 CLOUD_MODULE5_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLOUD_MODULE5_ROOT="$(cd -- "$CLOUD_MODULE5_DIR/../../../.." && pwd)"
-CLOUD_MODULE5_ASSETS="$CLOUD_MODULE5_ROOT/workshop_assets/cloud_computing_soa/module5_openfaas"
+CLOUD_MODULE5_ASSETS="$CLOUD_MODULE5_ROOT/workshop_assets/cloud-computing-soa/module5-openfaas"
 
 cloud_module5_status() {
   printf '%s\n' \

@@ -131,7 +131,7 @@ class LocalPartitionHelperTests(unittest.TestCase):
         (legacy / "train.csv").write_bytes(self.original)
         unrelated = self.root / "data/keep-me.txt"
         unrelated.write_text("preserve")
-        app = self.root / "workshop_assets/federated_learning/client.py"
+        app = self.root / "workshop_assets/federated-learning/runtime/client/client.py"
         app.parent.mkdir(parents=True)
         app.write_text("preserve application")
         for attempt in range(2):

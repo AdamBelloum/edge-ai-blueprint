@@ -1,5 +1,5 @@
 {% if cloud_module3_delivery_enabled | default(false) | bool %}
-{% for track in ['beginner', 'advanced', 'solutions', 'tests'] %}
+{% for track in ['beginner', 'intermediate', 'advanced', 'solutions', 'tests'] %}
       - name: digitafrica-seed-cloud-computing-soa-module3-{{ track }}
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module3-{{ track }}

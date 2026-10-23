@@ -11,9 +11,9 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / (
-    "workshop_assets/cloud_computing_soa/module3_containerization_orchestration"
+    "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 )
-TRACKS = ("beginner", "advanced", "solutions", "tests")
+TRACKS = ("beginner", "intermediate", "advanced", "solutions", "tests")
 
 
 class Module3PreflightTests(unittest.TestCase):
@@ -65,7 +65,8 @@ class Module3PreflightTests(unittest.TestCase):
 
     def test_real_map_and_sources_pass_for_valid_selections(self):
         for mode, solutions in (
-            ("beginner", "false"), ("advanced", "false"), ("advanced", "true")
+            ("beginner", "false"), ("intermediate", "false"),
+            ("intermediate", "true"), ("advanced", "false"), ("advanced", "true")
         ):
             with self.subTest(mode=mode, solutions=solutions):
                 result = self.run_hook(mode=mode, solutions=solutions)
@@ -89,6 +90,7 @@ class Module3PreflightTests(unittest.TestCase):
                     path.write_bytes(content)
 
     def test_unselected_sources_are_not_required(self):
+        shutil.rmtree(self.seed / "intermediate")
         shutil.rmtree(self.seed / "advanced")
         shutil.rmtree(self.seed / "solutions")
         result = self.run_hook()

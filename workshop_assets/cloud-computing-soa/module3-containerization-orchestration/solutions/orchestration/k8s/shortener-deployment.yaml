@@ -1,0 +1,47 @@
+# Three replicas of the shortener. They share urls.json on the NFS volume:
+# the service reads the file for every request and locks it while it
+# changes it, so every replica gives the same answers.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortener
+  namespace: websvc
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shortener
+  template:
+    metadata:
+      labels:
+        app: shortener
+    spec:
+      containers:
+        - name: shortener
+          image: YOUR_DOCKERHUB_USERNAME/shortener-service:3.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            # Returned in the X-Served-By header, to observe load balancing.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            tcpSocket:
+              port: 5000
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/data
+              subPath: shortener
+            - name: shortener-public-key
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: websvc-shared-pvc
+        - name: shortener-public-key
+          configMap:
+            name: shortener-public-key

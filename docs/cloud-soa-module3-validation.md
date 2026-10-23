@@ -12,6 +12,11 @@ must not be interpreted as validation of a clean, committed release.
 Control shell: `fs2`.
 Compose rehearsal host: `ab-02.lab.uvalight.net` (x86_64).
 
+Track names are as recorded at that HEAD. The "advanced" TODO track described
+below has since been renamed `intermediate`, and a new `advanced` track (the
+assignment specification, the Module 2 services and near-empty configuration
+files) was added.
+
 ## Compose rehearsal
 
 Earlier session results recorded successful beginner/reference builds,

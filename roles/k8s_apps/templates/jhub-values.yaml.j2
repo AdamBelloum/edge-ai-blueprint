@@ -395,6 +395,9 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module1-beginner
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module1-beginner
+      - name: digitafrica-seed-cloud-computing-soa-module1-intermediate
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module1-intermediate
       - name: digitafrica-seed-cloud-computing-soa-module1-advanced
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module1-advanced
@@ -407,6 +410,9 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-beginner
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-beginner
+      - name: digitafrica-seed-cloud-computing-soa-module2-intermediate
+        configMap:
+          name: digitafrica-notebooks-cloud-computing-soa-module2-intermediate
       - name: digitafrica-seed-cloud-computing-soa-module2-advanced
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-advanced
@@ -627,22 +633,26 @@ singleuser:
           module3_advanced_workspace="$module3_workspace/advanced"
           module3_solutions_workspace="$module3_workspace/solutions"
           cloud_module1_beginner_source=/seed/cloud-computing-soa/module1/beginner
+          cloud_module1_intermediate_source=/seed/cloud-computing-soa/module1/intermediate
           cloud_module1_advanced_source=/seed/cloud-computing-soa/module1/advanced
           cloud_module1_solutions_source=/seed/cloud-computing-soa/module1/solutions
           cloud_module1_tests_source=/seed/cloud-computing-soa/module1/tests
           cloud_module1_parent=/home/jovyan/Cloud-Computing-SOA
           cloud_module1_workspace="$cloud_module1_parent/Module-1"
           cloud_module1_beginner_workspace="$cloud_module1_workspace/beginner"
+          cloud_module1_intermediate_workspace="$cloud_module1_workspace/intermediate"
           cloud_module1_advanced_workspace="$cloud_module1_workspace/advanced"
           cloud_module1_solutions_workspace="$cloud_module1_workspace/solutions"
           cloud_module1_tests_workspace="$cloud_module1_workspace/tests"
           cloud_module2_beginner_source=/seed/cloud-computing-soa/module2/beginner
+          cloud_module2_intermediate_source=/seed/cloud-computing-soa/module2/intermediate
           cloud_module2_advanced_source=/seed/cloud-computing-soa/module2/advanced
           cloud_module2_solutions_source=/seed/cloud-computing-soa/module2/solutions
           cloud_module2_tests_source=/seed/cloud-computing-soa/module2/tests
           cloud_module2_parent=/home/jovyan/Cloud-Computing-SOA
           cloud_module2_workspace="$cloud_module2_parent/Module-2"
           cloud_module2_beginner_workspace="$cloud_module2_workspace/beginner"
+          cloud_module2_intermediate_workspace="$cloud_module2_workspace/intermediate"
           cloud_module2_advanced_workspace="$cloud_module2_workspace/advanced"
           cloud_module2_solutions_workspace="$cloud_module2_workspace/solutions"
           cloud_module2_tests_workspace="$cloud_module2_workspace/tests"
@@ -732,9 +742,9 @@ singleuser:
 
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module1" ]; then
             case "$mode" in
-              beginner|advanced) ;;
+              beginner|intermediate|advanced) ;;
               *)
-                echo "[seed] ERROR: Cloud Module 1 requires mode=beginner or mode=advanced" >&2
+                echo "[seed] ERROR: Cloud Module 1 requires mode=beginner, mode=intermediate or mode=advanced" >&2
                 exit 1
                 ;;
             esac
@@ -750,9 +760,9 @@ singleuser:
 
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module2" ]; then
             case "$mode" in
-              beginner|advanced) ;;
+              beginner|intermediate|advanced) ;;
               *)
-                echo "[seed] ERROR: Cloud Module 2 requires mode=beginner or mode=advanced" >&2
+                echo "[seed] ERROR: Cloud Module 2 requires mode=beginner, mode=intermediate or mode=advanced" >&2
                 exit 1
                 ;;
             esac
@@ -1134,7 +1144,7 @@ singleuser:
 
           # Cloud Module 1: seed only the selected teaching track, preserve
           # participant changes, and release the reference implementation only
-          # for the advanced TODO track.
+          # for the intermediate (TODO) and advanced (specification) tracks.
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module1" ]; then
             mkdir -p "$cloud_module1_workspace"
             chown 1000:100 "$cloud_module1_parent" "$cloud_module1_workspace"
@@ -1142,38 +1152,42 @@ singleuser:
 
             case "$mode" in
               beginner)
-                mkdir -p "$cloud_module1_beginner_workspace"
-                chown 1000:100 "$cloud_module1_beginner_workspace"
-                chmod 0755 "$cloud_module1_beginner_workspace"
-
-                for filename in app.py upstream-participants-guide.md; do
-                  copy_seed_file \
-                    "$cloud_module1_beginner_source/$filename" \
-                    "$cloud_module1_beginner_workspace/$filename" \
-                    false
-                done
-
-                write_receipt_if_absent \
-                  "$cloud_module1_beginner_workspace/MODULE1_BEGINNER_SEED_RECEIPT.txt" \
-                  "app.py and upstream-participants-guide.md"
+                selected_source="$cloud_module1_beginner_source"
+                selected_workspace="$cloud_module1_beginner_workspace"
+                selected_files="app.py upstream-participants-guide.md"
+                receipt_name=MODULE1_BEGINNER_SEED_RECEIPT.txt
+                receipt_description="app.py and upstream-participants-guide.md"
+                ;;
+              intermediate)
+                selected_source="$cloud_module1_intermediate_source"
+                selected_workspace="$cloud_module1_intermediate_workspace"
+                selected_files="app.py upstream-participants-guide.md"
+                receipt_name=MODULE1_INTERMEDIATE_SEED_RECEIPT.txt
+                receipt_description="app.py and upstream-participants-guide.md"
                 ;;
               advanced)
-                mkdir -p "$cloud_module1_advanced_workspace"
-                chown 1000:100 "$cloud_module1_advanced_workspace"
-                chmod 0755 "$cloud_module1_advanced_workspace"
-
-                for filename in app.py upstream-participants-guide.md; do
-                  copy_seed_file \
-                    "$cloud_module1_advanced_source/$filename" \
-                    "$cloud_module1_advanced_workspace/$filename" \
-                    false
-                done
-
-                write_receipt_if_absent \
-                  "$cloud_module1_advanced_workspace/MODULE1_ADVANCED_SEED_RECEIPT.txt" \
-                  "app.py and upstream-participants-guide.md"
+                selected_source="$cloud_module1_advanced_source"
+                selected_workspace="$cloud_module1_advanced_workspace"
+                selected_files="README.md app.py"
+                receipt_name=MODULE1_ADVANCED_SEED_RECEIPT.txt
+                receipt_description="README.md and app.py"
                 ;;
             esac
+
+            mkdir -p "$selected_workspace"
+            chown 1000:100 "$selected_workspace"
+            chmod 0755 "$selected_workspace"
+
+            for filename in $selected_files; do
+              copy_seed_file \
+                "$selected_source/$filename" \
+                "$selected_workspace/$filename" \
+                false
+            done
+
+            write_receipt_if_absent \
+              "$selected_workspace/$receipt_name" \
+              "$receipt_description"
 
             mkdir -p "$cloud_module1_tests_workspace"
             chown 1000:100 "$cloud_module1_tests_workspace"
@@ -1191,10 +1205,13 @@ singleuser:
               "read_from.csv and test_api.py"
 
             if [ "$solutions_released" = "true" ]; then
-              if [ "$mode" != "advanced" ]; then
-                echo "[seed] ERROR: Cloud Module 1 solutions require mode=advanced" >&2
-                exit 1
-              fi
+              case "$mode" in
+                intermediate|advanced) ;;
+                *)
+                  echo "[seed] ERROR: Cloud Module 1 solutions require mode=intermediate or mode=advanced" >&2
+                  exit 1
+                  ;;
+              esac
 
               mkdir -p "$cloud_module1_solutions_workspace"
               chown 1000:100 "$cloud_module1_solutions_workspace"
@@ -1212,7 +1229,8 @@ singleuser:
           fi
 
           # Cloud Module 2: seed only the selected teaching track, preserve
-          # participant changes, and release reference code only for advanced mode.
+          # participant changes, and release reference code only for the
+          # intermediate (TODO) and advanced (specification) tracks.
           if [ "$workshop_type" = "cloud-computing-soa" ] && [ "$workshop_module" = "module2" ]; then
             mkdir -p "$cloud_module2_workspace"
             chown 1000:100 "$cloud_module2_parent" "$cloud_module2_workspace"
@@ -1225,13 +1243,39 @@ singleuser:
                 receipt_name=MODULE2_BEGINNER_SEED_RECEIPT.txt
                 receipt_description="Module 2 beginner microservices assets"
                 ;;
+              intermediate)
+                selected_source="$cloud_module2_intermediate_source"
+                selected_workspace="$cloud_module2_intermediate_workspace"
+                receipt_name=MODULE2_INTERMEDIATE_SEED_RECEIPT.txt
+                receipt_description="Module 2 intermediate microservices TODO assets"
+                ;;
               advanced)
                 selected_source="$cloud_module2_advanced_source"
                 selected_workspace="$cloud_module2_advanced_workspace"
                 receipt_name=MODULE2_ADVANCED_SEED_RECEIPT.txt
-                receipt_description="Module 2 advanced microservices TODO assets"
+                receipt_description="Module 2 advanced specification and starting files"
                 ;;
             esac
+
+            # Module-wide dependencies, instructions and Git exclusions live
+            # at Module-2 root; the selected track has its own folder. The
+            # advanced track gets only the dependencies: the module README
+            # and .gitignore describe the design of the other tracks.
+            # SOURCE.md is not mapped or copied by this block.
+            copy_seed_file \
+              "$selected_source/module2_requirements_lock" \
+              "$cloud_module2_workspace/requirements.lock" \
+              false
+            if [ "$mode" != "advanced" ]; then
+              copy_seed_file \
+                "$selected_source/module2_readme_md" \
+                "$cloud_module2_workspace/README.md" \
+                false
+              copy_seed_file \
+                "$selected_source/module2_gitignore" \
+                "$cloud_module2_workspace/.gitignore" \
+                false
+            fi
 
             mkdir -p \
               "$selected_workspace/auth_service" \
@@ -1244,26 +1288,6 @@ singleuser:
               "$selected_workspace" \
               "$selected_workspace/auth_service" \
               "$selected_workspace/shortener_service"
-
-            # Module-wide instructions, dependencies, and Git exclusions
-            # live at Module-2 root; service code lives in the selected track.
-            # SOURCE.md is not mapped or copied by this block.
-            copy_seed_file \
-              "$selected_source/module2_readme_md" \
-              "$cloud_module2_workspace/README.md" \
-              false
-            copy_seed_file \
-              "$selected_source/module2_requirements_lock" \
-              "$cloud_module2_workspace/requirements.lock" \
-              false
-            copy_seed_file \
-              "$selected_source/module2_gitignore" \
-              "$cloud_module2_workspace/.gitignore" \
-              false
-            copy_seed_file \
-              "$selected_source/setup_local_keys_sh" \
-              "$selected_workspace/setup_local_keys.sh" \
-              false
             copy_seed_file \
               "$selected_source/auth_service_auth_py" \
               "$selected_workspace/auth_service/auth.py" \
@@ -1272,10 +1296,23 @@ singleuser:
               "$selected_source/shortener_service_shortener_py" \
               "$selected_workspace/shortener_service/shortener.py" \
               false
-            copy_seed_file \
-              "$selected_source/upstream_participants_guide_md" \
-              "$selected_workspace/upstream-participants-guide.md" \
-              false
+            if [ "$mode" = "advanced" ]; then
+              # The advanced track: the specification, and service files
+              # that hold only a few comments.
+              copy_seed_file \
+                "$selected_source/advanced_readme_md" \
+                "$selected_workspace/README.md" \
+                false
+            else
+              copy_seed_file \
+                "$selected_source/setup_local_keys_sh" \
+                "$selected_workspace/setup_local_keys.sh" \
+                false
+              copy_seed_file \
+                "$selected_source/upstream_participants_guide_md" \
+                "$selected_workspace/upstream-participants-guide.md" \
+                false
+            fi
 
             # Record initial delivery; a receipt is not a service test
             # or proof that current workspace files match deployed assets.
@@ -1283,7 +1320,7 @@ singleuser:
               "$selected_workspace/$receipt_name" \
               "$receipt_description"
 
-            # Both teaching modes share the same HTTP tests and CSV inputs.
+            # All teaching tracks share the same grading script and CSV inputs.
             # Copying tests does not start either participant-local service.
             mkdir -p "$cloud_module2_tests_workspace"
             chown 1000:100 "$cloud_module2_tests_workspace"
@@ -1307,14 +1344,18 @@ singleuser:
               "Module 2 microservices test suite"
 
             # The enclosing condition selects Cloud SOA Module 2.
-            # Release additionally requires advanced mode; reference code
-            # goes into solutions/ without replacing the advanced exercise.
-            # These copy conditions do not revoke previously delivered files.
+            # Release additionally requires intermediate or advanced mode;
+            # reference code goes into solutions/ without replacing the
+            # participant's own work. These copy conditions do not revoke
+            # previously delivered files.
             if [ "$solutions_released" = "true" ]; then
-              if [ "$mode" != "advanced" ]; then
-                echo "[seed] ERROR: Cloud Module 2 solutions require mode=advanced" >&2
-                exit 1
-              fi
+              case "$mode" in
+                intermediate|advanced) ;;
+                *)
+                  echo "[seed] ERROR: Cloud Module 2 solutions require mode=intermediate or mode=advanced" >&2
+                  exit 1
+                  ;;
+              esac
 
               mkdir -p \
                 "$cloud_module2_solutions_workspace/auth_service" \
@@ -1433,6 +1474,9 @@ singleuser:
         - name: digitafrica-seed-cloud-computing-soa-module1-beginner
           mountPath: /seed/cloud-computing-soa/module1/beginner
           readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module1-intermediate
+          mountPath: /seed/cloud-computing-soa/module1/intermediate
+          readOnly: true
         - name: digitafrica-seed-cloud-computing-soa-module1-advanced
           mountPath: /seed/cloud-computing-soa/module1/advanced
           readOnly: true
@@ -1444,6 +1488,9 @@ singleuser:
           readOnly: true
         - name: digitafrica-seed-cloud-computing-soa-module2-beginner
           mountPath: /seed/cloud-computing-soa/module2/beginner
+          readOnly: true
+        - name: digitafrica-seed-cloud-computing-soa-module2-intermediate
+          mountPath: /seed/cloud-computing-soa/module2/intermediate
           readOnly: true
         - name: digitafrica-seed-cloud-computing-soa-module2-advanced
           mountPath: /seed/cloud-computing-soa/module2/advanced

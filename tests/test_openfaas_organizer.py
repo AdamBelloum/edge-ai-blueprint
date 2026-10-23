@@ -58,7 +58,7 @@ class OpenFaaSOrganizerTests(unittest.TestCase):
 
     def copy_assets(self):
         """Stage authoring assets in the disposable checkout only."""
-        relative = Path("workshop_assets/cloud_computing_soa/module5_openfaas")
+        relative = Path("workshop_assets/cloud-computing-soa/module5-openfaas")
         target = self.root / relative
         shutil.copytree(
             ROOT / relative, target,

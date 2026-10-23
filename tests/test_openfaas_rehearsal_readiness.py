@@ -31,8 +31,8 @@ cloud_module5_check_rehearsal_readiness
         cls.check = cls.remote.split("<<'CHECK'\n", 1)[1].split("\nCHECK\n", 1)[0]
 
     def setUp(self):
-        manifest = json.loads((ROOT / "workshop_assets/cloud_computing_soa/"
-                               "module5_openfaas/delivery-manifest.json").read_text())
+        manifest = json.loads((ROOT / "workshop_assets/cloud-computing-soa/"
+                               "module5-openfaas/delivery-manifest.json").read_text())
         self.assets = {"data": {
             item["key"]: "test asset" for item in manifest["files"]
         }}

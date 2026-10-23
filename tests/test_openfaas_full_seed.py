@@ -14,7 +14,7 @@ import unittest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / 'workshop_assets/cloud_computing_soa/module5_openfaas'
+MODULE = ROOT / 'workshop_assets/cloud-computing-soa/module5-openfaas'
 
 
 class FullSeedScriptTests(unittest.TestCase):

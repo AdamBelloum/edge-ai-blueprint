@@ -24,7 +24,7 @@ The [Tutorials learning hub](https://adambelloum.github.io/Tutorials/) provides 
 
 This platform provides the infrastructure and operational workflows used to deliver supported materials to participants. Availability in the tutorial collection does not, by itself, mean that a workshop is integrated or runtime-validated on this platform.
 
-Beginner and advanced modes, guided notebooks, and organiser-controlled solution release are available only where implemented. Consult the organiser menu and relevant module documentation for current support and limitations.
+Beginner and advanced modes (and, for Cloud Computing SOA Modules 1–3, an intermediate mode), guided notebooks, and organiser-controlled solution release are available only where implemented. [Workshop assets](workshop_assets/README.md) lists every workshop, module and track with its current status; the organiser menu and module documentation remain the reference for limitations.
 
 ## Who uses this repository?
 
@@ -189,6 +189,7 @@ Workshop reset, participant-account removal, and VM cleanup have different scope
 | [Workshop organiser](docs/workshop-organiser.md) | Cohort preparation, delivery, and reset |
 | [Operations and validation](docs/operations-and-validation.md) | Health checks, troubleshooting, and acceptance evidence |
 | [Architecture](docs/architecture.md) | Component boundaries and interactions |
+| [Workshop assets](workshop_assets/README.md) | Where each workshop's material lives and how it reaches participants |
 
 Module-specific requirements and validation documents are maintained under `docs/`. Historical material under `docs/archive/` is not the default operational procedure.
 
@@ -199,7 +200,7 @@ scripts/lib/           Shared script utilities
 inventories/           Inventories and deployment configuration
 playbooks/             Ansible deployment playbooks
 roles/                 Ansible implementation roles
-workshop_assets/       Workshop delivery assets
+workshop_assets/       Teaching material for every workshop (catalogue in workshop_assets/README.md)
 tests/                 Automated checks and validation support
 docs/                  Operational and module-specific documentation
 data/                  Local/generated runtime data where applicable

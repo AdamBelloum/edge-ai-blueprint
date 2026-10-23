@@ -5,6 +5,12 @@ import json
 import subprocess
 import sys
 
+MODES = ("beginner", "intermediate", "advanced")
+# Reference solutions are released only for the tracks that ask participants
+# to write code themselves.
+RELEASE_MODES = ("intermediate", "advanced")
+TRACKS = ("beginner", "intermediate", "advanced", "solutions", "tests")
+
 
 def require(condition, message):
     if not condition:
@@ -34,7 +40,7 @@ def execute(payload, read=load, run=subprocess.run):
     namespace = payload["namespace"]
     operation = payload["operation"]
     mode = payload["mode"]
-    require(mode in ("beginner", "advanced"), "Invalid Module 3 mode.")
+    require(mode in MODES, "Invalid Module 3 mode.")
     require(operation in ("check", "status", "publish", "release"),
             "Invalid Module 3 operation.")
     kubectl = ["k3s", "kubectl", "-n", namespace]
@@ -48,18 +54,19 @@ def execute(payload, read=load, run=subprocess.run):
         current = state()
         for key in ("workshop_type", "workshop_module", "mode", "solutions_released"):
             print(key + "=" + str(current.get(key, "unset")))
-        tracks = ("beginner", "advanced", "solutions", "tests")
+        tracks = TRACKS
     else:
         tracks = (mode, "tests")
         if operation == "release":
+            require(mode in RELEASE_MODES,
+                    "Solution release requires the intermediate or advanced track.")
             current = state()
             require(
                 (current.get("workshop_type"), current.get("workshop_module"),
                  current.get("mode")) ==
-                ("cloud-computing-soa", "module3", "advanced"),
-                "Solutions require active Cloud SOA Module 3 advanced mode."
+                ("cloud-computing-soa", "module3", mode),
+                "Solutions require active Cloud SOA Module 3 " + mode + " mode."
             )
-            require(mode == "advanced", "Solution release requires advanced mode.")
             tracks += ("solutions",)
 
     values = read([
@@ -78,9 +85,9 @@ def execute(payload, read=load, run=subprocess.run):
         "Deployed notebook seeder disables Module 3 delivery."
     )
 
-    # All four mounts are required by the configured init container, even when
+    # All mounts are required by the configured init container, even when
     # only one teaching track and shared tests will be copied.
-    for track in ("beginner", "advanced", "solutions", "tests"):
+    for track in TRACKS:
         name = "digitafrica-notebooks-cloud-computing-soa-module3-" + track
         manifest = read(kubectl + ["get", "configmap", name, "-o", "json"])
         require(manifest.get("metadata", {}).get("name") == name,
@@ -139,7 +146,7 @@ def execute(payload, read=load, run=subprocess.run):
             require(
                 (current.get("workshop_type"), current.get("workshop_module"),
                  current.get("mode")) ==
-                ("cloud-computing-soa", "module3", "advanced"),
+                ("cloud-computing-soa", "module3", mode),
                 "Active state changed; solution release blocked."
             )
             update = {"solutions_released": "true"}
@@ -161,7 +168,7 @@ def execute(payload, read=load, run=subprocess.run):
             require(
                 (current.get("workshop_type"), current.get("workshop_module"),
                  current.get("mode")) ==
-                ("cloud-computing-soa", "module3", "advanced"),
+                ("cloud-computing-soa", "module3", mode),
                 "Active state changed; solution release blocked."
             )
         version = snapshot.get("metadata", {}).get("resourceVersion")
