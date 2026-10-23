@@ -32,8 +32,16 @@ if [ -e "$prefix" ]; then
   test "$(cat "$marker")" = "$expected" ||
     fail "Environment definition changed; explicit environment migration is required."
 else
-  printf '[hpc-runtime] Creating the persistent HPC toolchain.\n'
-  "$conda_executable" env create \
+  # Use the image's fast solver; keep Conda for shell activation.
+  mamba_executable="$(command -v mamba || true)"
+  if [ -z "$mamba_executable" ] && [ -x /opt/conda/bin/mamba ]; then
+    mamba_executable=/opt/conda/bin/mamba
+  fi
+  test -n "$mamba_executable" ||
+    fail "Mamba is required for predictable HPC environment preparation."
+
+  printf '[hpc-runtime] Creating the persistent HPC toolchain with Mamba.\n'
+  "$mamba_executable" env create \
     --yes \
     --prefix "$prefix" \
     --file "$specification"
