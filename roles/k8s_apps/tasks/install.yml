@@ -392,6 +392,19 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+# The first task that writes to the cluster: on a new cluster the namespace
+# does not exist yet.
+- name: Ensure namespace exists
+  ansible.builtin.shell: |
+    set -e
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Create/update Cloud Computing SOA Module 2 asset ConfigMaps
   ansible.builtin.shell: |
     set -euo pipefail
@@ -677,16 +690,6 @@
     helm version
   args:
     executable: /bin/bash
-
-- name: Ensure namespace exists
-  ansible.builtin.shell: |
-    set -e
-    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    k3s kubectl get ns {{ digitafrica_deployment.digitafrica_namespace }} >/dev/null 2>&1 || k3s kubectl create ns {{ digitafrica_deployment.digitafrica_namespace }}
-  args:
-    executable: /bin/bash
-  tags:
-    - workshop_application_reconciliation
 
 - name: Reconcile Cloud Computing SOA Module 3 teaching assets
   ansible.builtin.include_tasks:

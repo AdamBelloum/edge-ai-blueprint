@@ -263,13 +263,16 @@ class Module3WiringTests(unittest.TestCase):
             == "cloud-soa-module3-assets.yml"
         ]
 
-    def test_single_include_immediately_after_namespace_creation(self):
+    def test_namespace_exists_before_any_configmap_is_written(self):
+        # On a new cluster the namespace is missing until this task runs.
         self.assertEqual(len(self.includes), 1)
-        index, _ = self.includes[0]
-        self.assertGreater(index, 0)
-        self.assertEqual(
-            self.tasks[index - 1].get("name"), "Ensure namespace exists"
-        )
+        names = [task.get("name") for task in self.tasks]
+        self.assertEqual(names.count("Ensure namespace exists"), 1)
+        writers = [
+            index for index, task in enumerate(self.tasks)
+            if "create configmap" in str(task.get("ansible.builtin.shell", ""))
+        ] + [self.includes[0][0]]
+        self.assertLess(names.index("Ensure namespace exists"), min(writers))
 
     def test_include_and_children_receive_reconciliation_tags(self):
         self.assertEqual(len(self.includes), 1)
