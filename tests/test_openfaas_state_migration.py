@@ -127,5 +127,48 @@ class WorkshopModuleMigrationTests(unittest.TestCase):
                 self.assert_read_only(calls)
 
 
+class WorkshopTypeMigrationTests(unittest.TestCase):
+    # Reuse the fake-k3s harness, but execute the workshop-type task.
+    run_migration = WorkshopModuleMigrationTests.run_migration
+
+    def setUp(self):
+        tasks = yaml.safe_load((ROOT / 'roles/k8s_apps/tasks/install.yml').read_text())
+        matches = [task for task in tasks if task.get('name') ==
+                   'Add neutral workshop type to existing workshop state when absent']
+        self.assertEqual(len(matches), 1)
+        self.shell = Environment(undefined=StrictUndefined).from_string(
+            matches[0]['ansible.builtin.shell']).render(
+                digitafrica_deployment={'digitafrica_namespace': 'test-namespace'})
+
+    def test_supported_types_including_hpc_are_preserved_without_patch(self):
+        for workshop in (
+            'none', 'introduction-to-ai', 'federated-learning',
+            'cloud-computing-soa', 'big-data', 'hpc',
+        ):
+            with self.subTest(workshop=workshop):
+                result, calls = self.run_migration(workshop)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), 'preserved')
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][3], 'get')
+
+    def test_absent_type_initialises_neutral_state(self):
+        result, calls = self.run_migration('')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('initialised', result.stdout)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[-1][3], 'patch')
+        self.assertEqual(
+            json.loads(calls[-1][-1]), {'data': {'workshop_type': 'none'}}
+        )
+
+    def test_unknown_type_is_rejected_without_patch(self):
+        result, calls = self.run_migration('unknown-workshop')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('Unsupported workshop_type', result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][3], 'get')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

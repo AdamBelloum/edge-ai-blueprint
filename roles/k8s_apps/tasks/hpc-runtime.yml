@@ -11,6 +11,7 @@
       create configmap digitafrica-runtime-hpc \
       --from-file=environment.yml={{ (hpc_runtime_host_path ~ '/environment.yml') | quote }} \
       --from-file=prepare-hpc-environment.sh={{ (hpc_runtime_host_path ~ '/prepare-hpc-environment.sh') | quote }} \
+      --from-file=hpc-notebook-launch.sh={{ (hpc_runtime_host_path ~ '/hpc-notebook-launch.sh') | quote }} \
       --dry-run=client -o yaml | k3s kubectl apply -f -
   args:
     executable: /bin/bash

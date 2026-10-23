@@ -786,7 +786,7 @@
           -p '{"data":{"workshop_type":"none"}}'
         echo "initialised"
         ;;
-      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data)
+      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data|hpc)
         echo "preserved"
         ;;
       *)

@@ -310,7 +310,10 @@ hub:
 
 singleuser:
   image:
-{% if workshop_notebook_runtime.enabled | default(false) | bool %}
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+    name: {{ hpc_notebook_image.name }}
+    tag: "{{ hpc_notebook_image.tag }}"
+{% elif workshop_notebook_runtime.enabled | default(false) | bool %}
     name: {{ workshop_notebook_runtime.image_name }}
     tag: "{{ workshop_notebook_runtime.image_tag }}"
 {% else %}
@@ -318,6 +321,12 @@ singleuser:
     tag: "python-3.11"
 {% endif %}
   defaultUrl: "/lab"
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+  cmd:
+    - /bin/bash
+    - /runtime/hpc/hpc-notebook-launch.sh
+    - jupyterhub-singleuser
+{% endif %}
 
   cpu:
     limit: 2
@@ -466,6 +475,11 @@ singleuser:
 {% endif %}
 
     extraVolumeMounts:
+{% if (hpc_runtime_enabled | default(false) | bool) and (hpc_workspace_enabled | default(false) | bool) %}
+      - name: digitafrica-runtime-hpc
+        mountPath: /runtime/hpc
+        readOnly: true
+{% endif %}
       - name: digitafrica-seed-beginner
         mountPath: /seed
         readOnly: true
@@ -501,11 +515,7 @@ singleuser:
 
     # Install only into the shared home PVC, never the worker host.
     - name: prepare-hpc-runtime
-{% if workshop_notebook_runtime.enabled | default(false) | bool %}
-      image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
-{% else %}
-      image: jupyter/minimal-notebook:python-3.11
-{% endif %}
+      image: {{ hpc_notebook_image.name }}:{{ hpc_notebook_image.tag }}
       securityContext:
         runAsUser: 1000
         runAsGroup: 100
