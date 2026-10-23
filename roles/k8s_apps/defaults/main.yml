@@ -23,6 +23,11 @@ workshop_notebook_runtime_profiles:
 # Opt-in HPC runtime staging and pod integration; preserves other workshops.
 hpc_runtime_enabled: false
 
+# Separate Conda-capable image for HPC; validate and digest-pin before release.
+hpc_notebook_image:
+  name: "jupyter/minimal-notebook"
+  tag: "python-3.11"
+
 # Module 5 asset delivery only; not OpenFaaS runtime or publication approval.
 # Keep disabled while licensing and reference-lab validation remain pending.
 cloud_module5_delivery_enabled: false

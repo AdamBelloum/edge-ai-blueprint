@@ -14,7 +14,7 @@ REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 # Executable helpers invoked directly by this organiser entry point.
 COHORT_HELPER="$SCRIPT_DIR/federated-learning/fl-workshop.sh"
 ACCOUNT_HELPER="$SCRIPT_DIR/identity/create-participant-accounts.sh"
-RESET_HELPER="$SCRIPT_DIR/federated-learning/reset-federated-learning-workshop.sh"
+RESET_HELPER="$SCRIPT_DIR/reset-workshops.sh"
 PARTICIPANT_RESET_HELPER="$SCRIPT_DIR/identity/reset-participant-environment.sh"
 APPLICATION_RECONCILIATION_HELPER="$SCRIPT_DIR/reconcile-workshop-applications.sh"
 # Shared libraries provide deployment context and common organiser safeguards.
@@ -93,7 +93,7 @@ Actions:
   hpc-status             Show workshop selection; not HPC execution readiness.
   reconcile-applications  Reconcile added or updated workshop applications and JupyterHub.
   fl-prepare              Prepare the selected Federated Learning workshop mode and start Flower.
-  reset                   Reset the active workshop cycle and participant cohort.
+  reset                   Reset workshop cycle; choose keep accounts (default) or delete.
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
   flower                  Open the Flower lifecycle manager.
@@ -198,8 +198,9 @@ ensure_admin_password_session() {
     if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
       ADMIN_PASSWORD_SESSION_VERIFIED=true
       return 0
+    else
+      status=$?
     fi
-    status=$?
     [[ "$status" -eq 10 ]] &&
       fail 'The supplied KEYCLOAK_ADMIN_PASSWORD_FILE was rejected by Keycloak.'
     fail 'Could not validate the supplied Keycloak administrator password file.'
@@ -210,8 +211,9 @@ ensure_admin_password_session() {
       if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" --status >/dev/null; then
         ADMIN_PASSWORD_SESSION_VERIFIED=true
         return 0
+      else
+        status=$?
       fi
-      status=$?
     else
       status=$?
     fi
@@ -237,9 +239,9 @@ run_account_helper() {
   ensure_admin_password_session
   if "$ACCOUNT_HELPER" "${ACCOUNT_ARGS[@]}" "$@"; then
     return 0
+  else
+    status=$?
   fi
-
-  status=$?
   if [[ "$status" -ne 10 ]] ||
     [[ "$ADMIN_PASSWORD_SESSION_FILE_OWNED" != true ]]; then
     return "$status"
@@ -578,11 +580,11 @@ run_main_menu() {
     workshop_ui_heading "DIGITAfrica / Workshop organiser"
     workshop_ui_section "PREPARATION"
     workshop_ui_option 1 "Manage participant cohort"
-    workshop_ui_option 3 "Reconcile workshop applications"
+    workshop_ui_option 2 "Reconcile workshop applications"
     workshop_ui_section "WORKSHOPS"
-    workshop_ui_option 4 "Open workshops"
+    workshop_ui_option 3 "Select workshops"
     workshop_ui_section "CLEANUP"
-    workshop_ui_option 2 "Reset workshop cycle"
+    workshop_ui_option 4 "Reset workshop cycle"
     printf '\n'
     workshop_ui_option 0 "Exit"
     workshop_ui_prompt
@@ -590,9 +592,9 @@ run_main_menu() {
 
     case "$choice" in
       1) run_initialisation_menu ;;
-      2) run_reset_menu ;;
-      3) run_application_reconciliation ;;
-      4) run_workshops_menu ;;
+      2) run_application_reconciliation ;;
+      3) run_workshops_menu ;;
+      4) run_reset_menu ;;
       0) exit 0 ;;
       *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
     esac

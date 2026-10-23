@@ -4,6 +4,8 @@ No Docker commands or filesystem mutations occur here.
 Legacy-network evidence must be persisted before container removal.
 """
 
+import re
+
 PROJECT = "digitafrica-spark"
 ROOT = "/opt/digitafrica/big-data/runtime/spark"
 NETWORK = PROJECT + "_spark-private"
@@ -45,6 +47,11 @@ def validate_snapshot(containers, networks, volumes, *,
 
     for container in containers:
         identifier = container["Id"]
+        require(
+            isinstance(identifier, str)
+            and re.fullmatch(r"[0-9a-f]{64}", identifier),
+            "Invalid full container ID; teardown refused.",
+        )
         require(identifier not in ids, "Duplicate container ID.")
         ids.add(identifier)
         labels = container["Config"].get("Labels") or {}
@@ -95,6 +102,11 @@ def validate_snapshot(containers, networks, volumes, *,
 
     legacy_ids = []
     for network in networks:
+        require(
+            isinstance(network["Id"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", network["Id"]),
+            "Invalid full network ID; teardown refused.",
+        )
         labels = network.get("Labels") or {}
         require(
             network["Name"] == NETWORK

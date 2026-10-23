@@ -22,3 +22,11 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Stage the HPC notebook launch wrapper without executing it
+  ansible.builtin.copy:
+    src: hpc-notebook-launch.sh
+    dest: "{{ hpc_runtime_host_path }}/hpc-notebook-launch.sh"
+    owner: root
+    group: root
+    mode: "0755"

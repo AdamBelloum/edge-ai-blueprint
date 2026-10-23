@@ -8,8 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RESET = ROOT / (
-    "scripts/workshops/federated-learning/"
-    "reset-federated-learning-workshop.sh"
+    "scripts/workshops/reset-workshops.sh"
 )
 SOURCE = RESET.read_text()
 
@@ -116,6 +115,50 @@ class ResetMarkerTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
 
+    def test_module3_records_delivery_scope(self):
+        result = build_marker({
+            "workshop_type": "cloud-computing-soa",
+            "workshop_module": "module3",
+            "cloud_module3_delivery_scope": "teaching-files-only",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["data"]["cleanup_cloud_module3_delivery_scope"],
+            "teaching-files-only",
+        )
+
+    def test_module3_legacy_scope_is_unknown(self):
+        result = build_marker({
+            "workshop_type": "cloud-computing-soa",
+            "workshop_module": "module3",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["data"]["cleanup_cloud_module3_delivery_scope"],
+            "unknown",
+        )
+
+    def test_module3_retry_preserves_saved_scope_not_active_scope(self):
+        for status in ("in_progress", "failed"):
+            for saved_scope in ("unknown", "teaching-files-only"):
+                with self.subTest(status=status, scope=saved_scope):
+                    result = build_marker({
+                        "workshop_type": "none",
+                        "workshop_module": "none",
+                        "cleanup_status": status,
+                        "cleanup_workshop_type": "cloud-computing-soa",
+                        "cleanup_workshop_module": "module3",
+                        "cleanup_cloud_module3_delivery_scope": saved_scope,
+                        "cloud_module3_delivery_scope": "different-active-scope",
+                    })
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        json.loads(result.stdout)["data"][
+                            "cleanup_cloud_module3_delivery_scope"
+                        ],
+                        saved_scope,
+                    )
+
     def test_marker_precedes_destructive_actions(self):
         marker_position = SOURCE.index(START)
         confirmation_position = SOURCE.index(
@@ -123,7 +166,7 @@ class ResetMarkerTests(unittest.TestCase):
         )
         self.assertLess(confirmation_position, marker_position)
         for action in (
-            '"$FLOWER_MANAGER" stop',
+            '"$FL_RESET_HELPER" --runtime-only',
             '\nstop_selected_participant_servers\n',
             '"$COHORT_HELPER" "${workspace_args[@]}"',
             '"$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"',

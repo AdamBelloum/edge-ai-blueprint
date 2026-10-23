@@ -35,20 +35,19 @@ cloud_module3_check() {
 run_cloud_module3_menu() {
   local choice mode
   while true; do
-    workshop_ui_heading "Cloud SOA / Module 3"
-    workshop_ui_note "Containerization and Orchestration - teaching-file delivery."
+    workshop_ui_heading "Cloud SOA / Module 3 - Containerization and Orchestration"
     workshop_ui_warning "Docker/Compose and Kubernetes runtime NOT VALIDATED."
-    workshop_ui_section "CHECK AND INSPECT"
-    workshop_ui_option 1 "Check local assets - all tracks"
+    workshop_ui_section "CHECKS"
+    workshop_ui_option 1 "Check local assets - all levels"
     workshop_ui_option 2 "Show integration status - offline"
-    workshop_ui_option 3 "Check deployed teaching-file readiness"
+    workshop_ui_option 3 "Check publication readiness"
     workshop_ui_option 4 "Show deployed delivery status"
-    workshop_ui_section "PUBLISH TEACHING FILES"
-    workshop_ui_option 5 "Beginner track"
-    workshop_ui_option 6 "Intermediate TODO track"
-    workshop_ui_option 7 "Advanced track - from the specification"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 5 "Publish Beginner workshop: teaching files only; runtime NOT VALIDATED"
+    workshop_ui_option 6 "Publish Intermediate workshop: learner TODO teaching files; runtime NOT VALIDATED"
+    workshop_ui_option 7 "Publish Advanced workshop: specification and Module 2 services; runtime NOT VALIDATED"
     workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 8 "Release reference solutions - intermediate or advanced track"
+    workshop_ui_option 8 "Release reference solutions: intermediate or advanced track"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -62,8 +61,6 @@ run_cloud_module3_menu() {
             printf 'Delivery readiness check failed.\n' >&2
         fi
         ;;
-      4) cloud_module3_show_deployment_status ||
-           printf 'Deployed status check failed.\n' >&2 ;;
       5) cloud_module3_activate_selected_mode beginner ||
            printf 'Beginner publication did not complete.\n' >&2 ;;
       6) cloud_module3_activate_selected_mode intermediate ||
@@ -72,6 +69,8 @@ run_cloud_module3_menu() {
            printf 'Advanced publication did not complete.\n' >&2 ;;
       8) cloud_module3_release_solutions ||
            printf 'Solution release did not complete.\n' >&2 ;;
+      4) cloud_module3_show_deployment_status ||
+           printf 'Deployed status check failed.\n' >&2 ;;
       0) return 0 ;;
       *) printf 'Choose 0 through 8.\n' >&2 ;;
     esac

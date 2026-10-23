@@ -95,6 +95,7 @@ class Module3LifecycleTests(unittest.TestCase):
                 self.assertEqual(updates, {
                     "/data/workshop_type": "cloud-computing-soa",
                     "/data/workshop_module": "module3", "/data/mode": mode,
+                    "/data/cloud_module3_delivery_scope": "teaching-files-only",
                     "/data/solutions_released": "false",
                 })
 

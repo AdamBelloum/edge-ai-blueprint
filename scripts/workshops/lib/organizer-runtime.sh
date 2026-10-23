@@ -6,7 +6,7 @@
 # run_deployment_remote.
 
 workshop_runtime_fail() {
-  printf 'ERROR: %s\n' "$*" >&2
+  printf '\n------ ERROR: %s ------\n\n' "$*" >&2
   return 2
 }
 

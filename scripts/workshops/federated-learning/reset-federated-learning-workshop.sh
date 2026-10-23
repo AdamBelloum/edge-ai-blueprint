@@ -1,252 +1,45 @@
 #!/usr/bin/env bash
-# Reset stable DIGITAfrica participant identities for a new workshop cohort.
-#
-# Order:
-#   1. After organiser confirmation, stop only selected participant Jupyter servers.
-#   2. Delete only their persistent JupyterHub workspaces.
-#   3. Delete only their inventory-derived Keycloak users and matching groups.
-#
-# The active workshop state is restored to neutral. Administrators, service accounts,
-# and unrelated realm records are preserved.
-
+# Workshop-owned FL reset entry point.
+# Currently delegates runtime stopping only; data cleanup remains pending.
 set -euo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
-IDENTITY_RESET_HELPER="$SCRIPT_DIR/../identity/reset-participant-environment.sh"
-COHORT_HELPER="$SCRIPT_DIR/fl-workshop.sh"
-FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
-COMMON="$REPOSITORY_ROOT/scripts/lib/common.sh"
-WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
-
-SERVER_URL=""
-REALM="digitafrica"
-ADMIN_REALM=""
-ADMIN_USER=""
-ADMIN_CLIENT_ID=""
-ADMIN_CLIENT_SECRET_FILE=""
 
 usage() {
-  cat <<'EOF'
-Usage:
-  reset-federated-learning-workshop.sh --server-url URL \
-    (--admin-user USER | --admin-client-id ID --admin-client-secret-file FILE) \
-    [--realm NAME] [--admin-realm NAME]
+  cat <<'USAGE'
+Usage: reset-workshop.sh --runtime-only
 
-Deletes the active workshop inventory's participant workspaces, Keycloak users,
-and same-named Keycloak groups. It does not change tutorial mode, release
-reference solutions, or recreate participant accounts.
+Stop and verify the installed Flower server using the existing manager.
+Preserves service definitions, application assets and dependencies.
 
-The Keycloak administrator password is read privately by
-create-participant-accounts.sh, or from KEYCLOAK_ADMIN_PASSWORD_FILE when set.
-EOF
+This stage does not clean generated partitions or results, delete participant
+workspaces/accounts, restore neutral JupyterHub, or verify full workshop reset.
+USAGE
 }
 
-fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-
-while (($#)); do
-  case "$1" in
-    --server-url) SERVER_URL="${2:-}"; shift 2 ;;
-    --realm) REALM="${2:-}"; shift 2 ;;
-    --admin-realm) ADMIN_REALM="${2:-}"; shift 2 ;;
-    --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
-    --admin-client-id) ADMIN_CLIENT_ID="${2:-}"; shift 2 ;;
-    --admin-client-secret-file) ADMIN_CLIENT_SECRET_FILE="${2:-}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) fail "Unknown argument: $1" ;;
-  esac
-done
-
-[[ "$SERVER_URL" =~ ^https:// ]] || fail '--server-url must be an HTTPS URL.'
-[[ -x "$IDENTITY_RESET_HELPER" ]] || fail "Missing executable participant-environment reset helper: $IDENTITY_RESET_HELPER"
-[[ -x "$COHORT_HELPER" ]] || fail "Missing executable cohort helper: $COHORT_HELPER"
-[[ -x "$FLOWER_MANAGER" ]] || fail "Missing executable Flower manager: $FLOWER_MANAGER"
-[[ -r "$COMMON" ]] || fail "Missing common helper: $COMMON"
-[[ -z "$ADMIN_USER" || -z "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]] || \
-  fail 'Choose either --admin-user or service-account authentication, not both.'
-if [[ -n "$ADMIN_CLIENT_ID$ADMIN_CLIENT_SECRET_FILE" ]]; then
-  [[ -n "$ADMIN_CLIENT_ID" && -n "$ADMIN_CLIENT_SECRET_FILE" ]] || \
-    fail 'Service-account authentication requires both client ID and secret-file options.'
-else
-  [[ -n "$ADMIN_USER" ]] || fail 'Supply --admin-user or service-account authentication.'
+if [[ $# -eq 1 && ( "$1" == --help || "$1" == -h ) ]]; then
+  usage
+  exit 0
 fi
 
-[[ -r "$WORKSHOP_CONTEXT" ]] ||
-  fail "Missing workshop context helper: $WORKSHOP_CONTEXT"
-# shellcheck source=workshop-context.sh
-source "$WORKSHOP_CONTEXT"
-load_workshop_context || exit 1
-
-# shellcheck source=/dev/null
-source "$COMMON"
-command -v ansible-inventory >/dev/null 2>&1 || fail 'Required command not found: ansible-inventory'
-
-deployment_worker_group >/dev/null || fail 'Could not determine the active workshop worker group.'
-WORKER_GROUP="$(deployment_worker_group)"
-INVENTORY_PATH="${DIGITAFRICA_INVENTORY}"
-
-mapfile -t GROUP_IDS < <(
-  ansible-inventory -i "$INVENTORY_PATH" --list | python3 -c '
-import json, sys
-inventory = json.load(sys.stdin)
-group = inventory.get(sys.argv[1], {})
-hosts = group.get("hosts", [])
-if not isinstance(hosts, list) or not hosts:
-    raise SystemExit("selected worker group has no ordered hosts")
-for index, host in enumerate(hosts, 1):
-    if not isinstance(host, str) or not host:
-        raise SystemExit("invalid worker name")
-    print(f"group_{index:02d}")
-' "$WORKER_GROUP"
-)
-((${#GROUP_IDS[@]} > 0)) || fail 'No participant identities were derived from the active workshop inventory.'
-GROUP_IDS_CSV="$(IFS=,; printf '%s' "${GROUP_IDS[*]}")"
-
-stop_selected_participant_servers() {
-  printf '%s\n' 'Stopping selected participant Jupyter servers and waiting for termination...'
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-namespace="${DIGITAFRICA_NAMESPACE}"
-IFS=, read -r -a groups <<< "${GROUP_IDS_CSV}"
-
-for group_id in "\${groups[@]}"; do
-  if ! pods="\$(k3s kubectl -n "\$namespace" get pods \
-    -l "hub.jupyter.org/username=\$group_id" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"; then
-    printf 'Could not list participant server pods for %s.\\n' "\$group_id" >&2
-    exit 1
-  fi
-
-  if [[ -n "\$pods" ]]; then
-    mapfile -t pod_names < <(printf '%s\\n' "\$pods")
-    printf 'Stopping participant server pod(s) for %s: %s\\n' \
-      "\$group_id" "\${pod_names[*]}"
-    k3s kubectl -n "\$namespace" delete pod "\${pod_names[@]}" \
-      --wait=true --timeout=180s
-    printf 'Participant server pod(s) terminated for %s.\\n' "\$group_id"
-  else
-    printf 'No running participant server pod exists for %s.\\n' "\$group_id"
-  fi
-done
-REMOTE
-)"
-}
-
-printf '%s\n' \
-  "Participant identities: ${GROUP_IDS[*]}" \
-  '' \
-  'This permanently deletes only the selected participant JupyterHub workspaces,
-   inventory-derived Keycloak users/groups, and matching local credential exports.' \
-  'Ensure participants have first had time to copy any needed data from their running servers.' \
-  'Workshop selection and tutorial state will be reset to neutral.' \
-  'Administrators, service accounts, and unrelated realm records are preserved.'
-printf 'Delete these participant workspaces, Keycloak identities, and local credential exports? [y/N]: '
-read -r answer
-case "$answer" in y|Y|yes|YES) ;; *) printf 'No change made.\n'; exit 0 ;; esac
-
-
-# Persist retry context before the first destructive operation.
-# Existing incomplete resets retain their original workshop and module,
-# even if a previous attempt already changed the selection to none.
-run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-namespace="${DIGITAFRICA_NAMESPACE}"
-
-state="\$(k3s kubectl -n "\$namespace" \
-  get configmap digitafrica-workshop-state -o json)"
-
-patch="\$(printf '%s' "\$state" | python3 -c '
-import json, sys
-
-state = json.load(sys.stdin)
-data = state.get("data", {})
-status = data.get("cleanup_status", "legacy")
-allowed = {
-    "none", "introduction-to-ai", "federated-learning",
-    "cloud-computing-soa", "big-data", "hpc",
-}
-
-if status in {"in_progress", "failed"}:
-    workshop = data.get("cleanup_workshop_type")
-    module = data.get("cleanup_workshop_module")
-elif status in {"legacy", "complete"}:
-    workshop = data.get("workshop_type")
-    module = data.get("workshop_module", "none")
-else:
-    raise SystemExit("Unknown cleanup status; reset refused.")
-
-if workshop not in allowed or not isinstance(module, str) or not module:
-    raise SystemExit("Missing or invalid cleanup retry context; reset refused.")
-
-print(json.dumps({
-    "metadata": {
-        "resourceVersion": state["metadata"]["resourceVersion"],
-    },
-    "data": {
-        "cleanup_status": "in_progress",
-        "cleanup_workshop_type": workshop,
-        "cleanup_workshop_module": module,
-    },
-}))
-')"
-
-k3s kubectl -n "\$namespace" \
-  patch configmap digitafrica-workshop-state \
-  --type merge -p "\$patch"
-REMOTE
-)"
-
-printf '%s\n' 'Stopping the organiser-controlled Flower server before participant reset...'
-"$FLOWER_MANAGER" stop
-
-stop_selected_participant_servers
-
-workspace_args=(delete-workspaces --yes)
-"$COHORT_HELPER" "${workspace_args[@]}"
-
-identity_reset_args=(
-  --server-url "$SERVER_URL"
-  --realm "$REALM"
-  --yes
-)
-[[ -n "$ADMIN_REALM" ]] && identity_reset_args+=(--admin-realm "$ADMIN_REALM")
-if [[ -n "$ADMIN_USER" ]]; then
-  identity_reset_args+=(--admin-user "$ADMIN_USER")
-else
-  identity_reset_args+=(--admin-client-id "$ADMIN_CLIENT_ID" --admin-client-secret-file "$ADMIN_CLIENT_SECRET_FILE")
+if [[ $# -ne 1 || "$1" != --runtime-only ]]; then
+  usage >&2
+  exit 2
 fi
 
-"$IDENTITY_RESET_HELPER" "${identity_reset_args[@]}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+manager="$SCRIPT_DIR/manage-flower-server.sh"
 
-run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  patch configmap digitafrica-workshop-state \
-  --type merge \
-  -p '{"data":{"workshop_type":"none","workshop_module":"none","mode":"beginner","solutions_released":"false"}}'
-REMOTE
-)"
+[[ -x "$manager" ]] || {
+  printf 'ERROR: Missing executable Flower manager: %s\n' "$manager" >&2
+  exit 2
+}
 
-cat <<'GUIDANCE'
-
-RESET INCOMPLETE — do not start a new workshop
-  Participant cleanup finished and workshop selection is neutral.
-  Full workshop cleanup has NOT been verified. Activation remains blocked
-  by cleanup_status=in_progress.
-
-What to do next:
-  1. Contact the administrator/maintainer to resolve runtime teardown and
-     neutral-JupyterHub verification; these steps are not yet implemented.
-  2. Do not manually mark cleanup complete or bypass activation safeguards.
-  3. Do not publish a new workshop or distribute new credentials until
-     full cleanup has been completed and verified.
-  4. After verified cleanup, follow the normal organiser workflow:
-     provision identities/groups, reconcile updated applications,
-     prepare/publish the workshop, check readiness, then issue/export
-     and securely distribute participant credentials.
-
-Neutral selection alone does not prove a successful full reset.
-GUIDANCE
-
-fail 'Participant reset finished and selection is neutral, but full workshop cleanup is NOT verified. Activation remains blocked by cleanup_status=in_progress. Runtime teardown and neutral-Hub verification are not yet implemented.'
+printf '%s\n' 'FL reset: stopping and verifying the installed Flower runtime.'
+if "$manager" stop; then
+  printf '%s\n' \
+    'FL runtime stop verified; installed assets preserved.' \
+    'FL data cleanup and full workshop reset are NOT verified.'
+else
+  status=$?
+  printf '%s\n' 'ERROR: FL runtime stop failed; cleanup remains unverified.' >&2
+  exit "$status"
+fi

@@ -1,0 +1,67 @@
+---
+- name: Remove generated FL worker data during workshop reset
+  hosts: "{{ fl_reset_worker_group }}"
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    fl_reset_root: "{{ fl_silo_runtime_root | default('/opt/digitafrica/fl-workshop') }}"
+
+  pre_tasks:
+    - name: Require a bounded absolute runtime path
+      ansible.builtin.assert:
+        that:
+          - fl_reset_root is string
+          - fl_reset_root is match('^/(opt|srv|home)/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$')
+          - "'/../' not in (fl_reset_root ~ '/')"
+          - "'/./' not in (fl_reset_root ~ '/')"
+        fail_msg: Unsafe FL runtime root; data cleanup refused.
+
+    - name: Resolve the runtime path without modifying it
+      ansible.builtin.command:
+        argv:
+          - realpath
+          - -m
+          - --
+          - "{{ fl_reset_root }}"
+      register: fl_reset_resolved
+      changed_when: false
+
+    - name: Reject symlinked or noncanonical runtime roots
+      ansible.builtin.assert:
+        that:
+          - fl_reset_resolved.stdout == fl_reset_root
+        fail_msg: FL runtime root is redirected; data cleanup refused.
+
+    - name: Inspect the dedicated data directory without following symlinks
+      ansible.builtin.stat:
+        path: "{{ fl_reset_root }}/data"
+        follow: false
+      register: fl_reset_data
+
+    - name: Reject unexpected data artifacts
+      ansible.builtin.assert:
+        that:
+          - >-
+            not fl_reset_data.stat.exists or
+            (fl_reset_data.stat.isdir | default(false) and
+             not fl_reset_data.stat.islnk | default(false))
+        fail_msg: FL data path is not an ordinary directory; cleanup refused.
+
+  tasks:
+    - name: Remove the dedicated generated FL data directory
+      ansible.builtin.file:
+        path: "{{ fl_reset_root }}/data"
+        state: absent
+
+    - name: Check that worker data is absent
+      ansible.builtin.stat:
+        path: "{{ fl_reset_root }}/data"
+        follow: false
+      register: fl_reset_data_after
+
+    - name: Verify worker data cleanup
+      ansible.builtin.assert:
+        that:
+          - not fl_reset_data_after.stat.exists
+        success_msg: Generated FL worker data is absent; installed assets preserved.

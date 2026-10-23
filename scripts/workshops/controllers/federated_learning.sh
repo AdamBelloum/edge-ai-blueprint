@@ -51,10 +51,9 @@ run_federated_learning_menu() {
 
   while true; do
     workshop_ui_heading "Workshops / Federated Learning"
-    workshop_ui_section "PREPARE AND START"
-    workshop_ui_option 1 "Beginner workshop"
-    workshop_ui_option 2 "Advanced workshop"
-    workshop_ui_note "Both preparation actions start Flower."
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 1 "Publish Beginner workshop: prepares Beginner and starts Flower"
+    workshop_ui_option 2 "Publish Advanced workshop: prepares Advanced and starts Flower"
     workshop_ui_section "AFTER THE WORKSHOP"
     workshop_ui_option 3 "Release advanced reference solutions"
     workshop_ui_section "RUNTIME"

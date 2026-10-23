@@ -31,3 +31,6 @@ scripts/workshops/*.bak
 
 # Local credentials and generated secrets; never commit.
 /secrets/
+
+# Local FL recovery evidence; never commit generated records.
+/data/fl-recovery/

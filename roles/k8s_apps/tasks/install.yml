@@ -1,3 +1,43 @@
+# Reset-specific preflight precedes application resource changes.
+# Ordinary reconciliation skips this block.
+- name: Validate neutral-reset state before application reconciliation
+  when: workshop_reset_neutral | default(false) | bool
+  tags:
+    - workshop_application_reconciliation
+  block:
+    - name: Read existing workshop state for neutral-reset preflight
+      ansible.builtin.command:
+        argv:
+          - k3s
+          - kubectl
+          - -n
+          - "{{ digitafrica_deployment.digitafrica_namespace }}"
+          - get
+          - configmap
+          - digitafrica-workshop-state
+          - -o
+          - json
+      register: workshop_neutral_reset_state
+      changed_when: false
+      check_mode: false
+
+    - name: Require neutral selection and an incomplete cleanup marker
+      ansible.builtin.assert:
+        that:
+          - (workshop_neutral_reset_state.stdout | from_json).get('data', {}).get('workshop_type') == 'none'
+          - (workshop_neutral_reset_state.stdout | from_json).get('data', {}).get('workshop_module') == 'none'
+          - (workshop_neutral_reset_state.stdout | from_json).get('data', {}).get('mode') == 'beginner'
+          - (workshop_neutral_reset_state.stdout | from_json).get('data', {}).get('solutions_released') == 'false'
+          - (workshop_neutral_reset_state.stdout | from_json).get('data', {}).get('cleanup_status') == 'in_progress'
+          - not (hpc_runtime_enabled | default(false) | bool)
+          - not (cloud_module3_delivery_enabled | default(false) | bool)
+          - not (cloud_module5_delivery_enabled | default(false) | bool)
+        fail_msg: >-
+          Neutral-reset reconciliation refused. Require neutral selection,
+          beginner mode, unreleased solutions, cleanup_status=in_progress,
+          and disabled optional runtime/delivery integrations.
+          This guard does not authorize cleanup completion.
+
 # - name: Ensure manifest dir exists
 #   ansible.builtin.file:
 #     path: /opt/digitafrica/k8s
@@ -820,7 +860,7 @@
           -p '{"data":{"workshop_type":"none"}}'
         echo "initialised"
         ;;
-      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data)
+      none|introduction-to-ai|federated-learning|cloud-computing-soa|big-data|hpc)
         echo "preserved"
         ;;
       *)
@@ -1221,6 +1261,21 @@
   args:
     executable: /bin/bash
   become: true
+  tags:
+    - workshop_application_reconciliation
+
+# Reset-specific verification cannot authorize cleanup completion.
+- name: Verify neutral JupyterHub release after rollout
+  ansible.builtin.script:
+    cmd: >-
+      {{ (role_path ~ '/files/verify-neutral-jupyterhub.py') | quote }}
+      {{ digitafrica_deployment.digitafrica_namespace | quote }}
+    executable: python3
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  become: true
+  changed_when: false
+  when: workshop_reset_neutral | default(false) | bool
   tags:
     - workshop_application_reconciliation
 

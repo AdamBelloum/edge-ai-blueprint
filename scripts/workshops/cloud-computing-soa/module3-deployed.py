@@ -69,7 +69,10 @@ def execute(payload, read=load, run=subprocess.run):
             )
             tracks += ("solutions",)
 
-    values = read(["helm", "-n", namespace, "get", "values", "jhub", "-o", "json"])
+    values = read([
+        "helm", "--kubeconfig", "/etc/rancher/k3s/k3s.yaml",
+        "-n", namespace, "get", "values", "jhub", "-o", "json"
+    ])
     singleuser = values.get("singleuser", {})
     seeders = [
         item for item in singleuser.get("initContainers", [])
@@ -151,6 +154,7 @@ def execute(payload, read=load, run=subprocess.run):
             update = {
                 "workshop_type": "cloud-computing-soa",
                 "workshop_module": "module3",
+                "cloud_module3_delivery_scope": "teaching-files-only",
                 "mode": mode,
                 "solutions_released": "false",
             }

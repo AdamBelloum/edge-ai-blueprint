@@ -14,8 +14,14 @@ set -Eeuo pipefail
 HPC_RUNTIME_ARGS=()
 OPENFAAS_REHEARSAL_ARGS=()
 CLOUD_MODULE3_DELIVERY_ARGS=()
+NEUTRAL_FOR_RESET=false
+NEUTRAL_RESET_ARGS=()
 while (($#)); do
   case "$1" in
+    --neutral-for-reset)
+      NEUTRAL_FOR_RESET=true
+      shift
+      ;;
     --enable-cloud-module3-delivery)
       CLOUD_MODULE3_DELIVERY_ARGS=(-e '{"cloud_module3_delivery_enabled":true}')
       shift
@@ -29,13 +35,16 @@ while (($#)); do
       shift
       ;;
     -h|--help)
-      printf 'Usage: %s [--enable-hpc-runtime] [--enable-openfaas-offline-rehearsal] [--enable-cloud-module3-delivery]\n' "${0##*/}"
+      printf 'Usage: %s [--enable-hpc-runtime] [--enable-openfaas-offline-rehearsal] [--enable-cloud-module3-delivery] [--neutral-for-reset]\n' "${0##*/}"
       printf 'The HPC option stages runtime definitions and enables pod integration.\n'
       printf 'It does not activate HPC or install packages on worker hosts.\n'
       printf 'The OpenFaaS option stages draft assets for a private test-cohort rehearsal.\n'
       printf 'It does not activate Module 5, install OpenFaaS, or enable live invocation.\n'
       printf 'This is not approval for real workshop publication.\n'
       printf 'The Module 3 option enables teaching-file delivery only; no activation or exercise runtime.\n'
+      printf 'Neutral reset mode disables optional HPC, Module 3 and Module 5 integration.\n'
+      printf 'It cannot be combined with runtime or delivery opt-ins.\n'
+      printf 'Reconciliation alone does not verify full workshop cleanup.\n'
       exit 0
       ;;
     *)
@@ -44,6 +53,19 @@ while (($#)); do
       ;;
   esac
 done
+
+# Reject conflicting modes before loading context or invoking Ansible.
+if [[ "$NEUTRAL_FOR_RESET" == true ]]; then
+  if ((${#HPC_RUNTIME_ARGS[@]} +
+       ${#OPENFAAS_REHEARSAL_ARGS[@]} +
+       ${#CLOUD_MODULE3_DELIVERY_ARGS[@]} > 0)); then
+    printf 'ERROR: --neutral-for-reset cannot be combined with opt-ins.\n' >&2
+    exit 2
+  fi
+  NEUTRAL_RESET_ARGS=(
+    -e '{"workshop_reset_neutral":true,"hpc_runtime_enabled":false,"cloud_module3_delivery_enabled":false,"cloud_module5_delivery_enabled":false}'
+  )
+fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="${SCRIPT_DIR}/lib/workshop-context.sh"
@@ -75,4 +97,5 @@ exec ansible-playbook \
   --tags workshop_application_reconciliation \
   "${HPC_RUNTIME_ARGS[@]}" \
   "${OPENFAAS_REHEARSAL_ARGS[@]}" \
-  "${CLOUD_MODULE3_DELIVERY_ARGS[@]}"
+  "${CLOUD_MODULE3_DELIVERY_ARGS[@]}" \
+  "${NEUTRAL_RESET_ARGS[@]}"
