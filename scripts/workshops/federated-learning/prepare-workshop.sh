@@ -264,6 +264,9 @@ recover_and_stage_fl_partitions() (
 
   evidence="$repository_root/data/fl-recovery-manifests/$expected.json"
   if [[ ! -f "$evidence" ]]; then
+    evidence="$repository_root/data/fl-recovery/$expected/partition-manifest.json"
+  fi
+  if [[ ! -f "$evidence" ]]; then
     evidence="$repository_root/data/partitions/partition-manifest.json"
   fi
   [[ -r "$evidence" ]] || {

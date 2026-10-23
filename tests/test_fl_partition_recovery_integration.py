@@ -216,6 +216,19 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any(event["type"] == "stage" for event in events))
 
+    def test_checksum_directory_recovery_layout_works(self):
+        recovered = (
+            self.root / "data/fl-recovery" / self.checksum
+            / "partition-manifest.json"
+        )
+        recovered.parent.mkdir(parents=True)
+        self.evidence.rename(recovered)
+        result, events = self.run_preparation()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any(event["type"] == "stage" for event in events))
+        self.assertTrue(any(event["type"] == "publish" for event in events))
+        self.assertFalse((self.root / "data/partitions").exists())
+
     def test_missing_evidence_blocks_staging_and_publication(self):
         self.evidence.unlink()
         result, events = self.run_preparation()
