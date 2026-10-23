@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,8 @@ def main():
     parser.add_argument("--groups", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--expected-manifest-sha256", required=True)
+    parser.add_argument("--export-root", type=Path,
+                        help="New temporary directory for verified partitions")
     args = parser.parse_args()
 
     if args.recovery_manifest is not None:
@@ -66,6 +69,18 @@ def main():
         parser.error("--groups must be at least 1")
     if not re.fullmatch(r"[0-9a-f]{64}", args.expected_manifest_sha256):
         parser.error("expected manifest checksum must be lowercase SHA-256")
+
+    if args.export_root is not None:
+        destination = args.export_root.resolve()
+        canonical = args.data_root.resolve()
+        if args.export_root.exists() or args.export_root.is_symlink():
+            parser.error("export destination must not already exist")
+        if (
+            destination == canonical
+            or canonical in destination.parents
+            or destination in canonical.parents
+        ):
+            parser.error("export destination must be outside canonical data")
 
     # Preserve the supplied source path spelling: it is part of the manifest.
     generator = Path(__file__).with_name("prepare_fl_partitions.py")
@@ -139,6 +154,11 @@ def main():
                     file=sys.stderr,
                 )
                 return 3
+
+        # Export only after every candidate validation has succeeded.
+        # copytree refuses an existing destination; canonical data is untouched.
+        if args.export_root is not None:
+            shutil.copytree(output, args.export_root)
 
         print(json.dumps({
             "recovery_verified": True,

@@ -23,7 +23,7 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.solutions_released}{"\n"}'
 REMOTE
-)"
+)" || return $?
 
   cat <<'EOF'
 
@@ -125,10 +125,10 @@ if [[ -n "\$mode" ]]; then
   printf 'Fresh cohort state applied: workshop_type=federated-learning, workshop_module=none, mode=%s, solutions_released=false\n' "\$mode"
 fi
 REMOTE
-)"
+)" || return $?
 
-  reconcile_current_cohort_mapping
-  show_tutorial_state
+  reconcile_current_cohort_mapping || return $?
+  show_tutorial_state || return $?
 }
 
 reconcile_current_cohort_mapping() {
@@ -136,5 +136,5 @@ reconcile_current_cohort_mapping() {
     die "Workshop cohort-mapping helper is missing or not executable: $COHORT_MAPPING_HELPER"
 
   print_heading "Preparing participant workshop access"
-  "$COHORT_MAPPING_HELPER"
+  "$COHORT_MAPPING_HELPER" || return $?
 }

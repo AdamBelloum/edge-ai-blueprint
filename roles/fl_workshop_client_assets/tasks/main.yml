@@ -12,6 +12,7 @@
     - "{{ fl_silo_runtime_root }}/data"
   tags:
     - workshop_assets
+    - fl_partition_data
 
 - name: Stage committed Flower client application assets
   ansible.builtin.copy:
@@ -33,6 +34,7 @@
     mode: "0644"
   tags:
     - workshop_assets
+    - fl_partition_data
 
 - name: Stage the partition manifest for worker-side integrity validation
   ansible.builtin.copy:
@@ -43,3 +45,4 @@
     mode: "0644"
   tags:
     - workshop_assets
+    - fl_partition_data

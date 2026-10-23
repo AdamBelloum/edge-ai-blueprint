@@ -1,0 +1,9 @@
+---
+- name: Stage verified FL partitions without replacing application assets
+  hosts: "{{ workshop_worker_group }}"
+  become: true
+  gather_facts: false
+  vars:
+    fl_workshop_client_group: "{{ workshop_worker_group }}"
+  roles:
+    - role: fl_workshop_client_assets
