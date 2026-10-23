@@ -738,6 +738,8 @@
       tags:
         - workshop_assets
         - workshop_application_reconciliation
+  # Neutral reset preserves reusable assets; delivery is disabled separately.
+  when: not (workshop_reset_neutral | default(false) | bool)
   tags:
     - workshop_assets
     - workshop_application_reconciliation
