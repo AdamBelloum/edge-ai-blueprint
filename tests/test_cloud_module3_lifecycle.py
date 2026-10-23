@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import types
 import unittest
 
@@ -188,6 +189,32 @@ class Module3LifecycleTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("ROUTED", result.stdout)
+
+    def test_remote_script_gives_helm_the_k3s_kubeconfig(self):
+        # The remote shell has no kubeconfig, and helm does not find the k3s
+        # one by itself. A fake python3 reports what the check would get.
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "python3"
+            fake.write_text('#!/bin/sh\nprintf "KUBECONFIG=%s\\n" "${KUBECONFIG:-}"\n')
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-c", r'''
+set -euo pipefail
+source "$1"
+FAKE="$2"
+cloud_module3_check() { :; }
+run_deployment_remote() { env -u KUBECONFIG PATH="$FAKE:$PATH" bash -c "$1"; }
+DIGITAFRICA_NAMESPACE=test
+cloud_module3_run_deployed check beginner
+''', "module3-test",
+                 str(ROOT / "scripts/workshops/cloud-computing-soa/module3-main.sh"),
+                 directory],
+                capture_output=True, text=True, timeout=30,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), ["KUBECONFIG=/etc/rancher/k3s/k3s.yaml"]
+        )
 
     def test_reconciliation_opt_in_and_help_parse_without_deployment_context(self):
         entry = ROOT / "scripts/workshops/reconcile-workshop-applications.sh"

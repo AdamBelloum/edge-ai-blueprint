@@ -219,7 +219,9 @@ payload = {
 }
 encoded = base64.b64encode(json.dumps(payload).encode()).decode()
 code = (directory / "module3-deployed.py").read_text()
-print("set -euo pipefail\npython3 - " + shlex.quote(encoded) + " <<'MODULE3_CHECK'")
+# helm, unlike k3s kubectl, needs the k3s kubeconfig: the remote shell has none.
+print("set -euo pipefail\nexport KUBECONFIG=/etc/rancher/k3s/k3s.yaml")
+print("python3 - " + shlex.quote(encoded) + " <<'MODULE3_CHECK'")
 print(code)
 print("MODULE3_CHECK")
 BUILD
