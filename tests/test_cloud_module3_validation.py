@@ -71,7 +71,7 @@ class Module3ValidationTests(unittest.TestCase):
             ({"enabled": True, "solutions": "invalid"},
              "invalid Cloud Module 3 solutions_released"),
             ({"enabled": True, "solutions": "true"},
-             "solutions require advanced mode"),
+             "solutions require intermediate or advanced mode"),
         ]
         for settings, expected in cases:
             with self.subTest(settings=settings):
@@ -82,7 +82,8 @@ class Module3ValidationTests(unittest.TestCase):
 
     def test_valid_states_pass_validation_only_without_writes(self):
         for mode, solutions in (
-            ("beginner", "false"), ("advanced", "false"), ("advanced", "true")
+            ("beginner", "false"), ("intermediate", "false"),
+            ("intermediate", "true"), ("advanced", "false"), ("advanced", "true")
         ):
             with self.subTest(mode=mode, solutions=solutions):
                 result = self.execute(

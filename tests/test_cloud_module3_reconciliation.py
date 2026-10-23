@@ -12,7 +12,7 @@ import yaml
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 TASK = REPOSITORY / "roles/k8s_apps/tasks/cloud-soa-module3-assets.yml"
-TRACKS = ("beginner", "advanced", "solutions", "tests")
+TRACKS = ("beginner", "intermediate", "advanced", "solutions", "tests")
 
 MOCK = r'''
 import json
@@ -238,7 +238,7 @@ class Module3ReconciliationTests(unittest.TestCase):
         self.assertEqual(
             self.calls(),
             ["render:" + track for track in TRACKS]
-            + ["apply:beginner", "apply:advanced"],
+            + ["apply:beginner", "apply:intermediate", "apply:advanced"],
         )
         self.log.unlink()
         retried = self.run_task()

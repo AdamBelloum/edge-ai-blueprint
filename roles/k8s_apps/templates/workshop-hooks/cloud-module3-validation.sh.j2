@@ -8,7 +8,7 @@ if [ "$workshop_type" = "cloud-computing-soa" ] && \
   fi
 
   case "$mode" in
-    beginner|advanced) ;;
+    beginner|intermediate|advanced) ;;
     *)
       echo "[seed] ERROR: invalid Cloud Module 3 mode: $mode" >&2
       exit 1
@@ -23,8 +23,8 @@ if [ "$workshop_type" = "cloud-computing-soa" ] && \
       ;;
   esac
 
-  if [ "$solutions_released" = "true" ] && [ "$mode" != "advanced" ]; then
-    echo "[seed] ERROR: Cloud Module 3 solutions require advanced mode." >&2
+  if [ "$solutions_released" = "true" ] && [ "$mode" = "beginner" ]; then
+    echo "[seed] ERROR: Cloud Module 3 solutions require intermediate or advanced mode." >&2
     exit 1
   fi
 fi

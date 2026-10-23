@@ -214,7 +214,7 @@ Replace JSON persistence with database operations, for example using PostgreSQL.
 4. Provide database connectivity and protected credentials.
 5. Remove the application shared-data PVC mounts once unused; retain authentication key mounts.
 6. Provide safe schema initialization/migrations for multiple replicas.
-7. Update dependencies, images, tests, and beginner/advanced instructions.
+7. Update dependencies, images, tests, and beginner, intermediate and advanced instructions.
 8. Test cross-worker placement, shared visibility, concurrent operations, and persistence separately.
 
 **Do not reuse or modify Keycloak's database.** Use a separately approved lab database or independent endpoint.

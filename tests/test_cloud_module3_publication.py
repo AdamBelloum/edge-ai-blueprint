@@ -24,7 +24,7 @@ ensure_workshop_activation_allowed() {
   step switch
 }
 cloud_module3_check_activation_readiness() {
-  [[ "$1" == beginner || "$1" == advanced ]] || return 2
+  [[ "$1" == beginner || "$1" == intermediate || "$1" == advanced ]] || return 2
   step readiness
 }
 confirm() {
@@ -39,8 +39,8 @@ cloud_module3_activate_selected_mode "$3"
             capture_output=True, text=True, timeout=10,
         )
 
-    def test_both_modes_require_all_guards_and_confirmation(self):
-        for mode in ("beginner", "advanced"):
+    def test_every_mode_requires_all_guards_and_confirmation(self):
+        for mode in ("beginner", "intermediate", "advanced"):
             with self.subTest(mode=mode):
                 result = self.run_publication(mode=mode)
                 self.assertEqual(result.returncode, 0, result.stderr)

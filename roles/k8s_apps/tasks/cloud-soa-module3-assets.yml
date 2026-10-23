@@ -27,6 +27,7 @@
           - "{{ item }}"
       loop:
         - beginner
+        - intermediate
         - advanced
         - solutions
       delegate_to: localhost
@@ -44,6 +45,7 @@
         mode: "0755"
       loop:
         - beginner
+        - intermediate
         - advanced
         - solutions
         - tests
@@ -62,6 +64,35 @@
         src: "{{ cloud_module3_local_root }}/asset-map.tsv"
         dest: "{{ cloud_module3_stage_root }}/asset-map.tsv"
         mode: "0644"
+
+    # Copying never deletes: remove staged files that the map no longer
+    # lists, for example after a track was renamed.
+    - name: Remove staged Module 3 files that are no longer mapped
+      ansible.builtin.shell: |
+        set -euo pipefail
+        python3 - {{ cloud_module3_stage_root | quote }} <<'PYTHON_PRUNE'
+        import csv
+        import sys
+        from pathlib import Path
+
+        root = Path(sys.argv[1])
+        with (root / "asset-map.tsv").open(newline="", encoding="utf-8") as stream:
+            keep = {(track, key) for track, key, _ in csv.reader(stream, delimiter="\t")}
+        for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+            for path in sorted(directory.iterdir()):
+                if (directory.name, path.name) not in keep:
+                    if path.is_dir():
+                        raise SystemExit(f"unexpected directory in Module 3 staging: {path}")
+                    path.unlink()
+                    print(f"removed {path}")
+            if not any(directory.iterdir()):
+                directory.rmdir()
+                print(f"removed {directory}")
+        PYTHON_PRUNE
+      args:
+        executable: /bin/bash
+      register: cloud_module3_staging_prune
+      changed_when: "'removed ' in cloud_module3_staging_prune.stdout"
   tags:
     - workshop_assets
     - workshop_application_reconciliation
@@ -77,7 +108,7 @@
     temporary="$(mktemp -d)"
     trap 'rm -rf -- "$temporary"' EXIT
 
-    for track in beginner advanced solutions tests; do
+    for track in beginner intermediate advanced solutions tests; do
       arguments=()
       while IFS="$tab" read -r mapped_track key relative; do
         [[ "$mapped_track" == "$track" ]] || continue
@@ -115,7 +146,7 @@
     budget = 200 * 1024
     annotation_key = "kubectl.kubernetes.io/last-applied-configuration"
 
-    for track in ("beginner", "advanced", "solutions", "tests"):
+    for track in ("beginner", "intermediate", "advanced", "solutions", "tests"):
         manifest = json.loads(
             (temporary / f"{track}.json").read_text(encoding="utf-8")
         )
@@ -183,7 +214,7 @@
     PY_PREFLIGHT
 
     # Separate API writes: rerun reconciliation after a partial apply failure.
-    for track in beginner advanced solutions tests; do
+    for track in beginner intermediate advanced solutions tests; do
       k3s kubectl -n "$namespace" apply -f "$temporary/$track.json"
     done
   args:

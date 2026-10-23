@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import unittest
 
@@ -99,13 +100,18 @@ class Module3DeliveryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_delivery({"beginner", "tests"})
 
-    def test_advanced_then_explicit_solution_release(self):
-        result = self.run_delivery(mode="advanced")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_delivery({"advanced", "tests"})
-        result = self.run_delivery(mode="advanced", released="true")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_delivery({"advanced", "tests", "solutions"})
+    def test_intermediate_and_advanced_then_explicit_solution_release(self):
+        for mode in ("intermediate", "advanced"):
+            with self.subTest(mode=mode):
+                # Start each track from an empty home.
+                shutil.rmtree(self.home, ignore_errors=True)
+                self.ownership_log.unlink(missing_ok=True)
+                result = self.run_delivery(mode=mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assert_delivery({mode, "tests"})
+                result = self.run_delivery(mode=mode, released="true")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assert_delivery({mode, "tests", "solutions"})
 
     def test_repeat_preserves_edits_permissions_receipts_and_local_files(self):
         result = self.run_delivery()

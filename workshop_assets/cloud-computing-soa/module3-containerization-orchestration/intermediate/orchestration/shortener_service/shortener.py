@@ -255,7 +255,12 @@ def create_root():
 
     short_id = generate_short_id(str(long_url))
 
-    while short_id in shared_dict and shared_dict[short_id]["url"] != str(long_url):
+    # Reuse an ID only when both the URL and its owner match.
+    # A different user must never overwrite an existing mapping's ownership.
+    while short_id in shared_dict and (
+        shared_dict[short_id]["url"] != str(long_url)
+        or shared_dict[short_id]["owner"] != username
+    ):
         short_id = hashlib.md5((str(long_url) + short_id).encode()).hexdigest()[:6]
 
     shared_dict[short_id] = {

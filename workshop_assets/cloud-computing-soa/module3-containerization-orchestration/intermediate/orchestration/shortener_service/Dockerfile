@@ -12,10 +12,10 @@
 # RUN pip install --no-cache-dir -r requirements.txt
 
 # TODO:
-# Copy application code, keys, and data folders.
+# Copy application code and initial data only.
+# Keys are supplied through runtime mounts; never copy them into the image.
 # NOTE: copy shortener.py (not auth.py).
 # COPY shortener.py .
-# COPY keys ./keys
 # COPY data ./data
 
 # TODO:

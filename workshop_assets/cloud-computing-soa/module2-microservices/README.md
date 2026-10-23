@@ -11,9 +11,14 @@ running local services:
 ## Tracks
 
 - `beginner/`: complete, explained service implementations and guided material.
-- `advanced/`: TODO-based implementations and an advanced assignment guide.
+- `intermediate/`: TODO-based implementations and an assignment guide.
+- `advanced/`: the specification (`advanced/README.md`) and two service files
+  that hold only a few comments; participants design and write both services
+  themselves. Until the solutions are released, this track does not receive
+  this README or `.gitignore`, which describe the design of the other tracks.
 - `solutions/`: reference implementation; not seeded until an organiser releases it.
-- `shared/tests/`: local verification assets used by both participant tracks.
+- `shared/tests/`: the Assignment 2 grading script and its input data, used by
+  all participant tracks.
 
 ## Runtime boundary
 
@@ -27,10 +32,11 @@ They are not exposed through a shared ingress or public Kubernetes Service.
 
 ## Local startup sequence
 
-From the selected `beginner/`, `advanced/`, or released `solutions/` directory:
+From the selected `beginner/`, `intermediate/`, or released `solutions/`
+directory (the advanced track has no code to start; see `advanced/README.md`):
 
 Before starting:
-- In the advanced track, implement `ensure_keys_exist()` in
+- In the intermediate track, implement `ensure_keys_exist()` in
   `auth_service/auth.py` before running the setup helper. Complete the remaining
   service TODOs before expecting the endpoint tests to pass.
 - Use separate JupyterHub terminals for the two services and the tests.
@@ -40,7 +46,7 @@ Before starting:
 2. In one terminal, run `cd auth_service && python auth.py`.
 3. In another terminal, run `cd shortener_service && python shortener.py`.
 4. From the selected-track directory, run
-   `cd ../tests && python -m unittest -v`.
+   `cd ../tests && python test_microservices.py`.
 
 The setup helper calls the authentication service's `ensure_keys_exist()`
 function. The complete implementation reuses the key files when both exist;
@@ -53,21 +59,39 @@ Both services store their application data in memory. Restarting the
 authentication service clears registered users; restarting the shortener
 clears URL mappings. Local JWT verification does not consult the current user
 dictionary, so restarting authentication or changing a password does not by
-itself invalidate an already issued token.
-
-The tests create accounts and mappings against the running services and attempt
-mapping cleanup. Use a disposable workshop session: the supplied implementation
-can reassign ownership when another user submits the same URL. The ownership
-test checks selected list/update/delete restrictions, not this same-URL case.
-Successful `DELETE /` returns `404` under this workshop's contract.
+itself invalidate an already issued token. (The reference solution keeps its
+data in JSON files instead when the `DATA_DIR` environment variable is set;
+Module 3 uses this.)
 
 This is an educational implementation, not a production authentication system.
-Unsalted SHA-256 password hashing and Flask's debug development server are not
-appropriate for production.
+The beginner and intermediate tracks hash passwords with unsalted SHA-256 and
+run Flask's debug development server; the reference solution uses salted
+PBKDF2 and no debug mode. None of them is meant for production.
 
 In the source repository, see `SOURCE.md` alongside this README for
 provenance and licence information. It is not currently copied into the
 JupyterHub participant workspace.
+
+## Grading script
+
+`test_microservices.py` (in `shared/tests/`; participants find it in `tests/`)
+sends HTTP requests to both services and prints the points for each line of the
+Assignment 2 rubric that can be tested this way: 11 of the 20 demo points (the
+authentication service, the shortener's methods with multi-user support, and
+the JWT). The remaining points need a TA and are listed in the output.
+`test_ownership_isolation.py` holds the multi-user checks and is run as part of
+it: a second user must not see, change or delete the first user's mappings,
+also after shortening the same URL. Add `--url` and `--auth-url` for services
+elsewhere; `python -m unittest -v` gives plain pass/fail output. Module 3 uses
+the same script for Assignment 3.
+
+The tests create accounts and mappings against the running services and delete
+their mappings afterwards; the accounts remain until the authentication service
+restarts. Use a disposable workshop session. Successful `DELETE /` returns
+`404` under this workshop's contract.
+
+The reference solution gets all 11 points. It is also the service code of the
+Module 3 solution: the same files, unchanged.
 
 ## Teaching and organiser guidelines
 
@@ -82,8 +106,10 @@ JupyterHub participant workspace.
    untested.
 
 Beginner participants use the completed code and its explanatory comments.
-Advanced participants implement the existing TODOs before testing.
-Use the selected track's `upstream-participants-guide.md` alongside this README.
+Intermediate participants implement the existing TODOs before testing.
+Advanced participants write both services from the specification in
+`advanced/README.md`. In the beginner and intermediate tracks, use the
+`upstream-participants-guide.md` alongside this README.
 Reference solutions support comparison after explicit organiser release; they
 are not a production-security baseline.
 
@@ -109,16 +135,13 @@ the repository's deployment and workspace checks; do not delete participant
 work merely to refresh documentation.
 
 Reference code is copied into a separate `solutions/` directory only when
-Module 2 is selected, mode is advanced, and the release flag is true. This
-copying rule is not an authentication boundary or a revocation mechanism for
-files already delivered.
+Module 2 is selected, mode is intermediate or advanced, and the release flag
+is true. This copying rule is not an authentication boundary or a revocation
+mechanism for files already delivered.
 
-Before using the Module 2 release action, verify that Module 2 is active.
-The current organiser action checks workshop type and advanced mode, but does
-not check `workshop_module`; its solution asset check covers only the reference
-authentication file. These are known follow-up defects, not fixed by this
-documentation update. Status text also still mentions `app.py`, although this
-module uses `auth_service/auth.py` and `shortener_service/shortener.py`.
+The organiser release action refuses unless Module 2 is the active module and
+its intermediate or advanced track is selected, and it checks that both
+reference service files are deployed.
 
 ### Documentation maintenance
 

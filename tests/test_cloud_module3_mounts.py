@@ -7,7 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "roles/k8s_apps/templates"
-TRACKS = ("beginner", "advanced", "solutions", "tests")
+TRACKS = ("beginner", "intermediate", "advanced", "solutions", "tests")
 
 
 class Module3MountTests(unittest.TestCase):
@@ -34,8 +34,8 @@ class Module3MountTests(unittest.TestCase):
         settings = {"cloud_module3_delivery_enabled": True}
         volumes = self.render("volumes", **settings)
         mounts = self.render("mounts", **settings)
-        self.assertEqual(len(volumes), 4)
-        self.assertEqual(len(mounts), 4)
+        self.assertEqual(len(volumes), len(TRACKS))
+        self.assertEqual(len(mounts), len(TRACKS))
         for track, volume, mount in zip(TRACKS, volumes, mounts):
             with self.subTest(track=track):
                 name = "digitafrica-seed-cloud-computing-soa-module3-" + track

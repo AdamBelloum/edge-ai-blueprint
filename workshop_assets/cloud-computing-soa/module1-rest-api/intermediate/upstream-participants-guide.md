@@ -5,9 +5,9 @@ Welcome! Today, you are moving beyond theoretical Web Services to build a functi
 ---
 
 ## Supplied Materials
-* **Advanced workspace:** This guide and the `app.py` TODO skeleton.
-* **Shared tests:** `../tests/test_api.py` and its input file, `../tests/read_from.csv`.
-* **Reference solution:** Released separately by the workshop organiser for the advanced track; it is not part of the initial teaching workspace.
+* **Intermediate workspace:** This guide and the `app.py` TODO skeleton.
+* **Shared tests:** the grading script `../tests/test_api.py` and its input file, `../tests/read_from.csv`.
+* **Reference solution:** Released separately by the workshop organiser for the intermediate and advanced tracks; it is not part of the initial teaching workspace.
 
 Implement your solution in `app.py`. Treat the shared tests and their input data
 as the supplied assessment contract; do not modify them to make a failing
@@ -24,10 +24,10 @@ Before we start, ensure your environment is ready.
 * **Starter Files:** Edit the supplied [TODO skeleton](./app.py) in your
   JupyterHub workspace. Do not create a separate `url_shortener` project.
 
-Open a JupyterHub terminal and work in the advanced track:
+Open a JupyterHub terminal and work in the intermediate track:
 
 ```bash
-cd /home/jovyan/Cloud-Computing-SOA/Module-1/advanced
+cd /home/jovyan/Cloud-Computing-SOA/Module-1/intermediate
 ```
 
 Complete the TODOs in `app.py`, including the development-server configuration.
@@ -69,8 +69,8 @@ tests cover only selected invalid inputs.
 
 For `GET /<id>`, the tests accept either a real redirect with a `Location`
 header or a JSON object containing the stored URL, both with status `301`.
-The reference implementation uses JSON. A real redirect is an optional design
-choice, not a requirement for passing these tests.
+The reference implementation sends both: a `Location` header, so that a
+browser follows the short link, and the URL in a JSON body.
 
 Returning `404` after successfully clearing all mappings is unusual HTTP API
 design, but is required by this assignment's tests.
@@ -91,7 +91,7 @@ When a user `POST`s a URL to `/`, you need to give them a short ID (e.g., `/aB3`
 * **The Problem:** How do you make IDs short but unique?
 * **Task:** Implement the ID-generation TODO in the supplied skeleton.
 * **Discussion:** Random IDs and truncated hashes can collide. Base62 is an encoding, not a uniqueness guarantee. Sequential IDs are predictable, but predictability and uniqueness are different concerns.
-* **Extension:** Consider how to detect an existing ID and avoid overwriting a different URL. Passing the supplied tests does not establish collision safety.
+* **Extension:** Make sure that a new URL never gets the ID of an existing mapping, also after a mapping was deleted. The grading script checks this.
 
 
 ### Step 3: Validation & Security (20 mins)
@@ -102,8 +102,8 @@ Don't trust the user! Before saving a URL, you must ensure it is valid.
 
 ### Step 4: URL Lookup and Optional Redirect (20 mins)
 Implement `GET /<id>` according to the specification.
-* **Task:** Return the stored URL in JSON with status `301`, matching the reference implementation; return `404` for a missing ID.
-* **Optional alternative:** Use Flask's `redirect()` with status `301` and a `Location` header. The supplied tests also accept this response style.
+* **Task:** Return status `301` with the stored URL; return `404` for a missing ID.
+* **Options:** Put the URL in a JSON body, in a `Location` header (Flask's `redirect()` does this), or both, as the reference implementation does. The supplied tests accept each of these.
 * **Discussion:** A JSON response with status `301` does not itself make a browser navigate to the stored URL.
 
 ---
@@ -126,22 +126,25 @@ Use `curl -i` to inspect status codes and headers, and send JSON with
 `-H "Content-Type: application/json"` and `-d '...'`.
 Do not use `curl -L` when inspecting the API's initial redirect response.
 
-Run the supplied integration tests from their directory:
+Run the supplied grading script:
 
 ```bash
 cd /home/jovyan/Cloud-Computing-SOA/Module-1/tests
-python -m unittest -v test_api
+python test_api.py
 ```
 
-The suite opens `read_from.csv` relative to the current directory and requires
-`requests`. The application requires Flask.
+It sends requests to your application and prints the points for each line of
+the Assignment 1 grading rubric that can be tested this way (the seven test
+functions, unique identifiers, URL validation), followed by the points that a
+TA assesses. `python -m unittest -v test_api` runs the same checks without the
+points. The script requires `requests`; the application requires Flask.
 
 **Warning:** Tests create mappings and clear all mappings during cleanup.
 Use disposable data and recreate any mapping needed for subsequent manual
 checks. Restarting the application also clears its in-memory store.
 
 Passing the supplied tests demonstrates the covered scenarios, not complete
-input validation, collision handling, security, or production readiness.
+input validation, security, or production readiness.
 
 ---
 

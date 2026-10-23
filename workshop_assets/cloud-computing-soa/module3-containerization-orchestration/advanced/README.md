@@ -1,61 +1,49 @@
-# Module 3 — Advanced workshop
+# Module 3 — Advanced track: containers and Kubernetes
 
-## How to use this workshop
+Run the two services of Module 2 in containers: first with Docker Compose,
+then on a Kubernetes cluster. This folder holds the Module 2 services as they
+were (`auth_service/`, `shortener_service/`, `setup_local_keys.sh` and
+`requirements.lock`); you may use your own Module 2 services instead.
 
-Complete the TODOs using the practical instructions and source comments. Execute and verify your own implementation before consulting any released solution. Follow Part 3.1 before Part 3.2.
+## Part 3.1: containers
 
-## Part 3.1 — Container virtualization
+- Containerize both services with Docker, and write a Docker Compose file
+  that manages the containers.
+- Make the services persistent: whatever stores the data writes it to a
+  file, and a Docker volume keeps that file. The data must survive restarting
+  the services, and `docker compose down`, which removes the containers.
+- Make the containers as efficient as possible.
+- The services must be reachable from outside your machine, not only from
+  within the containers.
 
-Open `containerization/`.
+## Part 3.2: Kubernetes
 
-1. Inspect both applications and their existing requirements files. Preserve the API from the previous practical.
-2. Follow the local key-preparation instructions. Use `auth_service/requirements.txt` rather than a guessed dependency list.
-3. Complete the Dockerfile TODOs for both services. Provide the runtime, dependencies, application files and startup command. Hint: dependency installation before copying frequently changed application code enables useful layer caching.
-4. Complete the Compose TODOs to build and run both services, publish their ports and preserve application data with volumes. Use the accompanying comments for the required runtime mounts and configuration.
-5. Build and deploy your implementation. Test representative authentication and URL-shortener operations and verify access from outside the Docker host.
-6. Create test data and demonstrate persistence across service restarts and `docker compose down` followed by container recreation. Do not use `down -v` for this check.
-7. Explain your persistence, image compactness and build-efficiency decisions in at most one page. Do not merely describe each Dockerfile line.
+- Set up a Kubernetes cluster on three VMs, one control plane and two
+  workers, with the supplied cluster-setup tutorial.
+- Create a Deployment for each service, and run at least one of the services
+  with three replicas.
+- Create Services that make your services reachable from outside the
+  cluster.
+- All replicas of a service must offer a consistent view of the stored data.
 
-## Part 3.2 — Container orchestration
+## Check your work
 
-Open `orchestration/`.
+The grading script `~/Cloud-Computing-SOA/Module-3/tests/test_microservices.py`
+checks both parts; `python3 test_microservices.py --help` shows how to run
+it. It needs Python 3 with `requests`.
 
-1. Follow the supplied Kubernetes cluster-setup tutorial: prepare one control-plane VM and two worker VMs.
-2. Complete the manifest TODOs and required environment-specific values using the instructions and comments.
-3. Create a Deployment for each service and run at least three replicas of one service.
-4. Create Kubernetes Services for external access. Explain why the selected Service type fits your deployment.
-5. Verify external access and a consistent view of stored data across the replicated service.
-6. Observe request distribution and support your load-balancing deductions with examples from actual requests and responses.
+## Questions
 
-Write at most half a page about Kubernetes experience and challenges, and at most half a page about load-balancing observations.
+- Based on observations only, deduce how Kubernetes distributes requests over
+  the replicas of a service. Give examples that support your conclusion.
+- What was your experience with Kubernetes, and what were the main
+  challenges?
 
-## Runtime prerequisites and safety
+## Safety
 
-- Run container exercises on the organiser-approved Docker host.
-  Receiving these files in JupyterHub does not imply Docker access.
-- For Kubernetes, use the organiser-approved isolated lab namespace.
-  Follow the cluster-setup tutorial only when provisioning dedicated lab
-  VMs; do not reinstall or reconfigure an existing shared cluster.
-- Before deploying Kubernetes manifests, verify the configured images
-  are available to all eligible nodes and the required NFS/RWX storage
-  is provisioned for this lab. Node-local RWO storage is not a substitute.
-- For external-access evidence, record the client host, endpoint, and
-  access method. Label SSH-tunnel results explicitly; they do not prove
-  direct reachability of the published host or cluster endpoint.
-- A consistent view during sequential requests is an observation, not
-  proof of safe concurrent storage. Shared JSON files can suffer lost
-  updates or corruption with concurrent writers. Keep replica experiments
-  controlled; this storage design is not suitable for production.
-- Stop Compose services using the same file and project name used at
-  startup. Preserve volumes during persistence tests. Delete lab data
-  only through an explicit, scoped reset.
-- Remove only your lab-owned Kubernetes resources. Do not delete shared
-  namespaces, storage, or other workshop resources.
-- Keep generated private keys and credentials outside Git and shared
-  bundles. Do not include them in reports or request evidence.
-
-## Completion
-
-Demonstrate both parts with your completed implementation. Document actual deployment commands and which files belong to each part. Keep optional extensions separate. Follow Assignment 3 for report, submission and source-attribution requirements.
-
-These entry guidelines summarize the assignment. They do not replace the detailed practical instructions or the separately supplied cluster-setup tutorial. Runtime validation by the TA is pending.
+- Run containers only on the organiser-approved Docker host, and Kubernetes
+  objects only on your own lab VMs or in the organiser-approved lab
+  namespace. Do not reconfigure a shared cluster.
+- Remove only the containers, volumes and Kubernetes objects that you
+  created.
+- Never commit or share private keys.

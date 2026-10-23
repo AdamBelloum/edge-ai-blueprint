@@ -23,7 +23,7 @@ cloud_module3_check() {
     return 1
   }
 
-  for track in beginner advanced solutions; do
+  for track in beginner intermediate advanced solutions; do
     printf '\n=== Module 3 local check: %s ===\n' "$track"
     bash "$CLOUD_MODULE3_LOCAL_HELPER" check "$track" || return $?
   done
@@ -42,12 +42,13 @@ run_cloud_module3_menu() {
     workshop_ui_option 1 "Check local assets - all tracks"
     workshop_ui_option 2 "Show integration status - offline"
     workshop_ui_option 3 "Check deployed teaching-file readiness"
-    workshop_ui_option 7 "Show deployed delivery status"
+    workshop_ui_option 4 "Show deployed delivery status"
     workshop_ui_section "PUBLISH TEACHING FILES"
-    workshop_ui_option 4 "Beginner track"
-    workshop_ui_option 5 "Advanced TODO track"
+    workshop_ui_option 5 "Beginner track"
+    workshop_ui_option 6 "Intermediate TODO track"
+    workshop_ui_option 7 "Advanced track - from the specification"
     workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 6 "Release advanced reference solutions"
+    workshop_ui_option 8 "Release reference solutions - intermediate or advanced track"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -61,16 +62,18 @@ run_cloud_module3_menu() {
             printf 'Delivery readiness check failed.\n' >&2
         fi
         ;;
-      4) cloud_module3_activate_selected_mode beginner ||
-           printf 'Beginner publication did not complete.\n' >&2 ;;
-      5) cloud_module3_activate_selected_mode advanced ||
-           printf 'Advanced publication did not complete.\n' >&2 ;;
-      6) cloud_module3_release_solutions ||
-           printf 'Solution release did not complete.\n' >&2 ;;
-      7) cloud_module3_show_deployment_status ||
+      4) cloud_module3_show_deployment_status ||
            printf 'Deployed status check failed.\n' >&2 ;;
+      5) cloud_module3_activate_selected_mode beginner ||
+           printf 'Beginner publication did not complete.\n' >&2 ;;
+      6) cloud_module3_activate_selected_mode intermediate ||
+           printf 'Intermediate publication did not complete.\n' >&2 ;;
+      7) cloud_module3_activate_selected_mode advanced ||
+           printf 'Advanced publication did not complete.\n' >&2 ;;
+      8) cloud_module3_release_solutions ||
+           printf 'Solution release did not complete.\n' >&2 ;;
       0) return 0 ;;
-      *) printf 'Choose 0 through 7.\n' >&2 ;;
+      *) printf 'Choose 0 through 8.\n' >&2 ;;
     esac
   done
 }
@@ -78,9 +81,9 @@ run_cloud_module3_menu() {
 # BEGIN MODULE 3 DELIVERY-ONLY PUBLICATION
 cloud_module3_validate_mode() {
   case "${1:-}" in
-    beginner|advanced) return 0 ;;
+    beginner|intermediate|advanced) return 0 ;;
     *)
-      printf 'Invalid Module 3 mode; expected beginner or advanced.\n' >&2
+      printf 'Invalid Module 3 mode; expected beginner, intermediate or advanced.\n' >&2
       return 2
       ;;
   esac
@@ -94,13 +97,40 @@ cloud_module3_select_mode() {
     return 0
   fi
   [[ -t 0 ]] || {
-    printf 'Set CLOUD_COMPUTING_SOA_MODE=beginner|advanced or use the interactive menu.\n' >&2
+    printf 'Set CLOUD_COMPUTING_SOA_MODE=beginner|intermediate|advanced or use the interactive menu.\n' >&2
     return 2
   }
-  printf 'Module 3 teaching track: 1) Beginner  2) Advanced TODO\nSelection: ' >&2
+  printf 'Module 3 teaching track: 1) Beginner  2) Intermediate TODO  3) Advanced\nSelection: ' >&2
   read -r choice || return 2
   case "$choice" in
     1) printf 'beginner\n' ;;
+    2) printf 'intermediate\n' ;;
+    3) printf 'advanced\n' ;;
+    *) printf 'Invalid Module 3 track selection.\n' >&2; return 2 ;;
+  esac
+}
+
+# Solutions are released for the active intermediate or advanced track; the
+# remote check refuses if that track is not the active one.
+cloud_module3_select_release_mode() {
+  local choice
+  if [[ -n "${CLOUD_COMPUTING_SOA_MODE:-}" ]]; then
+    case "$CLOUD_COMPUTING_SOA_MODE" in
+      intermediate|advanced) printf '%s\n' "$CLOUD_COMPUTING_SOA_MODE"; return 0 ;;
+      *)
+        printf 'Module 3 solutions are released only for the intermediate or advanced track.\n' >&2
+        return 2
+        ;;
+    esac
+  fi
+  [[ -t 0 ]] || {
+    printf 'Set CLOUD_COMPUTING_SOA_MODE=intermediate|advanced or use the interactive menu.\n' >&2
+    return 2
+  }
+  printf 'Active Module 3 track: 1) Intermediate TODO  2) Advanced\nSelection: ' >&2
+  read -r choice || return 2
+  case "$choice" in
+    1) printf 'intermediate\n' ;;
     2) printf 'advanced\n' ;;
     *) printf 'Invalid Module 3 track selection.\n' >&2; return 2 ;;
   esac
@@ -179,7 +209,7 @@ directory = Path(sys.argv[1])
 root = directory.parents[2]
 assets = root / "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 map_text = (assets / "asset-map.tsv").read_bytes().decode("utf-8")
-mapped = {track: {} for track in ("beginner", "advanced", "solutions", "tests")}
+mapped = {track: {} for track in ("beginner", "intermediate", "advanced", "solutions", "tests")}
 for track, key, relative in csv.reader(map_text.splitlines(), delimiter="\t"):
     source = assets / ("shared/tests" if track == "tests" else track) / relative
     mapped[track][key] = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -211,18 +241,19 @@ cloud_module3_show_deployment_status() {
 }
 
 cloud_module3_release_solutions() {
-  local DIGITAFRICA_ASSUME_YES=false ASSUME_YES=false
+  local DIGITAFRICA_ASSUME_YES=false ASSUME_YES=false mode
+  mode="$(cloud_module3_select_release_mode)" || return $?
   cloud_module2_require_complete_participant_cohort || return $?
   ensure_workshop_activation_allowed cloud-computing-soa || return $?
-  cloud_module3_run_deployed check advanced || return $?
+  cloud_module3_run_deployed check "$mode" || return $?
   printf '%s\n' \
-    'Release adds reference solutions only to subsequently spawned advanced servers.' \
+    "Release adds reference solutions only to subsequently spawned $mode servers." \
     'Exercise-runtime readiness remains NOT VALIDATED.' >&2
   declare -F confirm >/dev/null || return 2
-  confirm 'Explicitly release Cloud SOA Module 3 advanced reference solutions' || {
+  confirm "Explicitly release Cloud SOA Module 3 reference solutions for the $mode track" || {
     printf 'No Module 3 solution release was performed.\n' >&2
     return 1
   }
-  # The remote release checks module identity, advanced mode and all solutions.
-  cloud_module3_run_deployed release advanced
+  # The remote release checks module identity, the active mode and all solutions.
+  cloud_module3_run_deployed release "$mode"
 }

@@ -67,11 +67,11 @@ Actions:
   cloud-module1-publish   Activate Cloud Computing SOA Module 1 for new participant spawns.
   cloud-module1-check     Check Cloud Computing SOA Module 1 activation readiness.
   cloud-module1-release-solutions
-                          Release Cloud Computing SOA Module 1 advanced reference solution.
+                          Release Cloud Computing SOA Module 1 reference solution (intermediate or advanced track).
   cloud-module2-publish   Activate Cloud Computing SOA Module 2 for new participant spawns.
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
-                          Release Cloud Computing SOA Module 2 advanced reference solution.
+                          Release Cloud Computing SOA Module 2 reference solution (intermediate or advanced track).
   cloud-module3-check     Check local Module 3 assets for all tracks; no infrastructure access.
   cloud-module3-status    Show integration status, not deployed/runtime readiness.
   cloud-module3-readiness Check deployed teaching-file readiness; runtime unvalidated.
@@ -79,7 +79,7 @@ Actions:
                          Inspect deployed assets, delivery configuration and state.
   cloud-module3-publish   Publish teaching files after safeguards and explicit confirmation.
   cloud-module3-release-solutions
-                         Explicitly release solutions for active Module 3 advanced mode.
+                         Explicitly release solutions for the active Module 3 intermediate or advanced track.
   cloud-module5-check     Check local OpenFaaS assets; no infrastructure access.
   cloud-module5-status    Show authoring status, not live platform readiness.
   cloud-module5-publish   Blocked pending reference-lab validation.
@@ -116,6 +116,8 @@ Workflow:
   3. Issue/export shared participant credentials when they are ready to distribute.
   4. Distribute credentials to participants.
 
+Cloud Computing SOA Modules 1-3 mode selection:
+CLOUD_COMPUTING_SOA_MODE=beginner|intermediate|advanced.
 Spark mode selection: BIG_DATA_SPARK_MODE=beginner|advanced.
 Advanced Spark publication and solution release are currently unavailable.
 Spark publication does not start its runtime or prove participant execution readiness.

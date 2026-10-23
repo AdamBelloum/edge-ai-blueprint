@@ -25,13 +25,13 @@ cloud_module1_select_mode() {
 
   if [[ -n "${CLOUD_COMPUTING_SOA_MODE:-}" ]]; then
     case "$CLOUD_COMPUTING_SOA_MODE" in
-      beginner|advanced)
+      beginner|intermediate|advanced)
         printf '%s\n' "$CLOUD_COMPUTING_SOA_MODE"
         return 0
         ;;
       *)
         printf '%s\n' \
-          'CLOUD_COMPUTING_SOA_MODE must be either beginner or advanced.' >&2
+          'CLOUD_COMPUTING_SOA_MODE must be beginner, intermediate or advanced.' >&2
         return 2
         ;;
     esac
@@ -39,7 +39,7 @@ cloud_module1_select_mode() {
 
   [[ -t 0 ]] || {
     printf '%s\n' \
-      'Cloud Module 1 activation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|advanced.' >&2
+      'Cloud Module 1 activation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|intermediate|advanced.' >&2
     return 2
   }
 
@@ -47,14 +47,16 @@ cloud_module1_select_mode() {
     printf '\n%s\n\n' "$CLOUD_COMPUTING_SOA_MODULE1_NAME" >&2
     printf '%s\n' \
       '  1) Beginner — guided Flask REST API implementation' \
-      '  2) Advanced — TODO-based Flask REST API implementation' >&2
+      '  2) Intermediate — TODO-based Flask REST API implementation' \
+      '  3) Advanced — REST API from the specification, no skeleton' >&2
     printf 'Selection: ' >&2
     read -r choice
 
     case "$choice" in
       1) printf '%s\n' beginner; return 0 ;;
-      2) printf '%s\n' advanced; return 0 ;;
-      *) printf 'Choose 1 or 2.\n' >&2 ;;
+      2) printf '%s\n' intermediate; return 0 ;;
+      3) printf '%s\n' advanced; return 0 ;;
+      *) printf 'Choose 1, 2 or 3.\n' >&2 ;;
     esac
   done
 }
@@ -108,10 +110,15 @@ check_track beginner \
   app.py \
   upstream-participants-guide.md
 
-check_track advanced \
-  digitafrica-notebooks-cloud-computing-soa-module1-advanced \
+check_track intermediate \
+  digitafrica-notebooks-cloud-computing-soa-module1-intermediate \
   app.py \
   upstream-participants-guide.md
+
+check_track advanced \
+  digitafrica-notebooks-cloud-computing-soa-module1-advanced \
+  README.md \
+  app.py
 
 check_track solutions \
   digitafrica-notebooks-cloud-computing-soa-module1-solutions \
@@ -133,12 +140,13 @@ cloud_module1_show_status() {
   run_deployment_remote "$(cloud_module1_remote_status_script)"
   cat <<'STATUS_MESSAGE'
 
-Application reconciliation deploys beginner, advanced, protected-solution, and
-shared-test ConfigMaps. Activation copies only the selected teaching track and
-shared tests when a participant next spawns a JupyterHub server.
+Application reconciliation deploys beginner, intermediate, advanced,
+protected-solution, and shared-test ConfigMaps. Activation copies only the
+selected teaching track and shared tests when a participant next spawns a
+JupyterHub server.
 
 Reference solution app.py is copied only after an explicit organiser release,
-and only for the active advanced track.
+and only for the active intermediate or advanced track.
 STATUS_MESSAGE
 }
 
@@ -198,7 +206,7 @@ cloud_module1_release_solutions() {
   printf '%s\n' \
     'This is a one-way organiser action for subsequently spawned participant servers.' \
     'Existing participant servers and files are not modified.' \
-    'It is available only while Cloud Module 1 advanced mode is active.'
+    'It is available only while the Cloud Module 1 intermediate or advanced track is active.'
 
   if ! "${ASSUME_YES:-false}" &&
     ! confirm "Release Cloud Module 1 reference solution after the workshop"; then
@@ -212,14 +220,19 @@ set -euo pipefail
 workshop_type="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.workshop_type}')"
+workshop_module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_module}')"
 mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.mode}')"
 
-if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$mode" != "advanced" ]; then
+if [ "\$workshop_type" != "cloud-computing-soa" ] ||
+  [ "\$workshop_module" != "module1" ] ||
+  { [ "\$mode" != "intermediate" ] && [ "\$mode" != "advanced" ]; }; then
   printf '%s\n' \
-    'Cloud Module 1 solutions can be released only while advanced mode is active.' \
-    "Current state: workshop_type=\${workshop_type:-unset}, mode=\${mode:-unset}" >&2
+    'Cloud Module 1 solutions can be released only while its intermediate or advanced track is active.' \
+    "Current state: workshop_type=\${workshop_type:-unset}, workshop_module=\${workshop_module:-unset}, mode=\${mode:-unset}" >&2
   exit 1
 fi
 
@@ -262,20 +275,20 @@ cloud_module2_require_complete_participant_cohort() {
   "$CLOUD_COMPUTING_SOA_COHORT_WORKFLOW" require-complete
 }
 
-# Return beginner or advanced on stdout; prompts and errors use stderr.
+# Return beginner, intermediate or advanced on stdout; prompts and errors use stderr.
 # CLOUD_COMPUTING_SOA_MODE supports non-interactive mode selection.
 cloud_module2_select_mode() {
   local choice
 
   if [[ -n "${CLOUD_COMPUTING_SOA_MODE:-}" ]]; then
     case "$CLOUD_COMPUTING_SOA_MODE" in
-      beginner|advanced)
+      beginner|intermediate|advanced)
         printf '%s\n' "$CLOUD_COMPUTING_SOA_MODE"
         return 0
         ;;
       *)
         printf '%s\n' \
-          'CLOUD_COMPUTING_SOA_MODE must be either beginner or advanced.' >&2
+          'CLOUD_COMPUTING_SOA_MODE must be beginner, intermediate or advanced.' >&2
         return 2
         ;;
     esac
@@ -283,22 +296,24 @@ cloud_module2_select_mode() {
 
   [[ -t 0 ]] || {
     printf '%s\n' \
-      'Cloud Module 2 activation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|advanced.' >&2
+      'Cloud Module 2 activation requires an interactive terminal or CLOUD_COMPUTING_SOA_MODE=beginner|intermediate|advanced.' >&2
     return 2
   }
 
   while true; do
     printf '\n%s\n\n' "$CLOUD_COMPUTING_SOA_MODULE2_NAME" >&2
     printf '%s\n' \
-      '  1) Beginner — guided Flask REST API implementation' \
-      '  2) Advanced — TODO-based Flask REST API implementation' >&2
+      '  1) Beginner — complete, explained microservices' \
+      '  2) Intermediate — TODO-based microservices' \
+      '  3) Advanced — microservices from the specification, no skeleton' >&2
     printf 'Selection: ' >&2
     read -r choice
 
     case "$choice" in
       1) printf '%s\n' beginner; return 0 ;;
-      2) printf '%s\n' advanced; return 0 ;;
-      *) printf 'Choose 1 or 2.\n' >&2 ;;
+      2) printf '%s\n' intermediate; return 0 ;;
+      3) printf '%s\n' advanced; return 0 ;;
+      *) printf 'Choose 1, 2 or 3.\n' >&2 ;;
     esac
   done
 }
@@ -361,8 +376,8 @@ check_track beginner \
   shortener_service_shortener_py \
   upstream_participants_guide_md
 
-check_track advanced \
-  digitafrica-notebooks-cloud-computing-soa-module2-advanced \
+check_track intermediate \
+  digitafrica-notebooks-cloud-computing-soa-module2-intermediate \
   module2_readme_md \
   module2_requirements_lock \
   module2_gitignore \
@@ -370,6 +385,13 @@ check_track advanced \
   auth_service_auth_py \
   shortener_service_shortener_py \
   upstream_participants_guide_md
+
+check_track advanced \
+  digitafrica-notebooks-cloud-computing-soa-module2-advanced \
+  module2_requirements_lock \
+  advanced_readme_md \
+  auth_service_auth_py \
+  shortener_service_shortener_py
 
 check_track solutions \
   digitafrica-notebooks-cloud-computing-soa-module2-solutions \
@@ -393,18 +415,18 @@ REMOTE_STATUS
 }
 
 # Inspect deployed assets and shared workshop state without changing them.
-# The status text below still names app.py; Module 2 uses two service files.
 cloud_module2_show_status() {
   print_heading "$CLOUD_COMPUTING_SOA_MODULE2_NAME deployment status"
   run_deployment_remote "$(cloud_module2_remote_status_script)"
   cat <<'STATUS_MESSAGE'
 
-Application reconciliation deploys beginner, advanced, protected-solution, and
-shared-test ConfigMaps. Activation copies only the selected teaching track and
-shared tests when a participant next spawns a JupyterHub server.
+Application reconciliation deploys beginner, intermediate, advanced,
+protected-solution, and shared-test ConfigMaps. Activation copies only the
+selected teaching track and shared tests when a participant next spawns a
+JupyterHub server.
 
-Reference solution app.py is copied only after an explicit organiser release,
-and only for the active advanced track.
+The reference services are copied only after an explicit organiser release,
+and only for the active intermediate or advanced track.
 STATUS_MESSAGE
 }
 
@@ -469,15 +491,13 @@ cloud_module2_activate() {
 
 # After confirmation, set the shared release flag for subsequent spawns.
 # The seeder copies reference services into a separate solutions directory.
-# Known guard gap: this action checks workshop type and advanced mode,
-# but not workshop_module. Verify Module 2 is active before invoking it.
-# The asset check below verifies only the reference authentication file.
+# The remote check requires Module 2 with its intermediate or advanced track.
 cloud_module2_release_solutions() {
   print_heading "Release $CLOUD_COMPUTING_SOA_MODULE2_NAME solutions"
   printf '%s\n' \
     'This is a one-way organiser action for subsequently spawned participant servers.' \
     'Existing participant servers and files are not modified.' \
-    'It is available only while Cloud Module 2 advanced mode is active.'
+    'It is available only while the Cloud Module 2 intermediate or advanced track is active.'
 
   if ! "${ASSUME_YES:-false}" &&
     ! confirm "Release Cloud Module 2 reference solution after the workshop"; then
@@ -491,26 +511,33 @@ set -euo pipefail
 workshop_type="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.workshop_type}')"
+workshop_module="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+  get configmap digitafrica-workshop-state \
+  -o jsonpath='{.data.workshop_module}')"
 mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state \
   -o jsonpath='{.data.mode}')"
 
-if [ "\$workshop_type" != "cloud-computing-soa" ] || [ "\$mode" != "advanced" ]; then
+if [ "\$workshop_type" != "cloud-computing-soa" ] ||
+  [ "\$workshop_module" != "module2" ] ||
+  { [ "\$mode" != "intermediate" ] && [ "\$mode" != "advanced" ]; }; then
   printf '%s\n' \
-    'Cloud Module 2 solutions can be released only while advanced mode is active.' \
-    "Current state: workshop_type=\${workshop_type:-unset}, mode=\${mode:-unset}" >&2
+    'Cloud Module 2 solutions can be released only while its intermediate or advanced track is active.' \
+    "Current state: workshop_type=\${workshop_type:-unset}, workshop_module=\${workshop_module:-unset}, mode=\${mode:-unset}" >&2
   exit 1
 fi
 
-solution_app="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  get configmap digitafrica-notebooks-cloud-computing-soa-module2-solutions \
-  -o jsonpath='{.data.auth_service_auth_py}')"
-if [ -z "\$solution_app" ]; then
-  printf '%s\n' \
-    'Cloud Module 2 solutions ConfigMap does not contain auth_service_auth_py.' \
-    'Run reconcile-applications before releasing solutions.' >&2
-  exit 1
-fi
+for key in auth_service_auth_py shortener_service_shortener_py; do
+  solution_app="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
+    get configmap digitafrica-notebooks-cloud-computing-soa-module2-solutions \
+    -o jsonpath="{.data.\$key}")"
+  if [ -z "\$solution_app" ]; then
+    printf '%s\n' \
+      "Cloud Module 2 solutions ConfigMap does not contain \$key." \
+      'Run reconcile-applications before releasing solutions.' >&2
+    exit 1
+  fi
+done
 
 k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   patch configmap digitafrica-workshop-state \
@@ -547,11 +574,12 @@ run_cloud_computing_soa_module_menu() {
     workshop_ui_option 1 "Check activation readiness"
     workshop_ui_section "ACTIVATE"
     workshop_ui_option 2 "Beginner track"
-    workshop_ui_option 3 "Advanced TODO track"
+    workshop_ui_option 3 "Intermediate TODO track"
+    workshop_ui_option 4 "Advanced track - from the specification"
     workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 4 "Release advanced reference solution"
+    workshop_ui_option 5 "Release reference solution - intermediate or advanced track"
     workshop_ui_section "INSPECT"
-    workshop_ui_option 5 "Show deployment status"
+    workshop_ui_option 6 "Show deployment status"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -571,19 +599,23 @@ run_cloud_computing_soa_module_menu() {
           printf 'Module %s beginner activation did not complete.\n' "$module" >&2
         ;;
       3)
+        "${prefix}_activate_selected_mode" intermediate ||
+          printf 'Module %s intermediate activation did not complete.\n' "$module" >&2
+        ;;
+      4)
         "${prefix}_activate_selected_mode" advanced ||
           printf 'Module %s advanced activation did not complete.\n' "$module" >&2
         ;;
-      4)
+      5)
         "${prefix}_release_solutions" ||
           printf 'Module %s solution release did not complete.\n' "$module" >&2
         ;;
-      5)
+      6)
         "${prefix}_show_status" ||
           printf 'Module %s deployment status could not be retrieved.\n' "$module" >&2
         ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 6.\n' >&2 ;;
     esac
   done
 }

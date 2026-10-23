@@ -18,7 +18,7 @@ mkdir -p "$auth_dir/keys" "$shortener_dir/keys"
 
 # Importing auth does not start Flask: its main guard prevents startup.
 # Run from auth_service/ because its key paths are relative.
-# Advanced participants must first implement ensure_keys_exist().
+# Intermediate participants must first implement ensure_keys_exist().
 # The completed implementation reuses both existing files; if either
 # is missing, it replaces the pair. This does not check key-pair validity.
 (

@@ -28,9 +28,9 @@ parser = argparse.ArgumentParser(
 )
 commands = parser.add_subparsers(dest="action", required=True)
 check = commands.add_parser("check", help="Check the map and selected asset syntax")
-check.add_argument("mode", choices=("beginner", "advanced", "solutions"))
+check.add_argument("mode", choices=("beginner", "intermediate", "advanced", "solutions"))
 export = commands.add_parser("export", help="Create a new standalone .tar.gz bundle")
-export.add_argument("mode", choices=("beginner", "advanced", "solutions"))
+export.add_argument("mode", choices=("beginner", "intermediate", "advanced", "solutions"))
 export.add_argument("destination", help="New archive path ending in .tar.gz")
 export.add_argument("--confirm-solutions", action="store_true",
                     help="Explicitly authorise exporting reference solutions")
@@ -39,6 +39,7 @@ args = parser.parse_args(sys.argv[2:])
 root = repository / "workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
 tracks = {
     "beginner": root / "beginner",
+    "intermediate": root / "intermediate",
     "advanced": root / "advanced",
     "solutions": root / "solutions",
     "tests": root / "shared/tests",
@@ -178,6 +179,15 @@ def export_bundle(selected):
         fail("Destination already exists; refusing to overwrite")
 
     prefix = f"module3-{args.mode}"
+    assumptions = (
+        "- Compose defaults: auth port 5001, shortener port 5000.\n"
+        "- Kubernetes manifests require image registry and NFS configuration.\n"
+        "- Generate local keys separately; never distribute private signing keys.\n"
+        "- JSON persistence is not safe for concurrent replicas or production use.\n"
+    )
+    if args.mode == "advanced":
+        # The advanced track leaves these design choices to the participants.
+        assumptions = "- Never distribute private signing keys.\n"
     notice = (
         f"# Module 3 standalone assets — {args.mode}\n\n"
         "This archive contains the selected track and shared tests only.\n"
@@ -186,14 +196,11 @@ def export_bundle(selected):
         "The source map and selected Python/Bash syntax were checked at export time.\n"
         "Container builds, dependency installation, YAML semantics, service execution,\n"
         "and functional tests are NOT validated by this helper.\n\n"
-        "Beginner and advanced entry guidelines are mapped. This is an asset bundle,\n"
-        "not a verified ready-to-run workshop release.\n\n"
+        "Beginner, intermediate and advanced entry guidelines are mapped. This is an\n"
+        "asset bundle, not a verified ready-to-run workshop release.\n\n"
         "## Important lab assumptions\n\n"
-        "- Compose defaults: auth port 5001, shortener port 5000.\n"
-        "- Kubernetes manifests require image registry and NFS configuration.\n"
-        "- Generate local keys separately; never distribute private signing keys.\n"
-        "- JSON persistence is not safe for concurrent replicas or production use.\n"
-        "- Tests accept AUTH_BASE_URL and SHORTENER_BASE_URL.\n"
+        + assumptions
+        + "- Tests accept AUTH_BASE_URL and SHORTENER_BASE_URL.\n"
     ).encode("utf-8")
     created = False
     try:

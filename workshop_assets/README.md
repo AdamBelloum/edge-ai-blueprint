@@ -13,7 +13,8 @@ workshop_assets/
 └── <workshop-id>/                  workshop_type used by the organiser scripts
     ├── <module-id>[-<topic>]/      workshop_module, optionally followed by a topic
     │   ├── beginner/               guided track
-    │   ├── advanced/               exercise (TODO) track
+    │   ├── intermediate/           TODO track, where a module has three levels
+    │   ├── advanced/               exercise track: TODO, or the specification
     │   ├── solutions/              reference solutions, released after the workshop
     │   └── shared/                 files several tracks use, for example tests
     └── runtime/                    deployed to hosts by Ansible, not to participants
@@ -27,7 +28,11 @@ Rules:
   add a topic (`module2-microservices`); others use the identifier alone
   (`spark`, `openmp-01-basics`).
 - **A module only has the tracks it actually offers.** Track folders are named
-  `beginner`, `advanced` and `solutions`.
+  `beginner`, `intermediate`, `advanced` and `solutions`. Most modules have two
+  levels, `beginner` and `advanced` (TODO exercises). Cloud Computing SOA
+  Modules 1–3 have three: `beginner` (complete code), `intermediate` (TODO
+  exercises) and `advanced` (the assignment specification, with files that
+  hold only a few comments; Module 3 also gives the Module 2 services).
 - **The repository layout is not what participants see.** Ansible copies files
   to fixed staging paths on the central server, and JupyterHub copies them into
   fixed folders in each participant's home. Moving a file here only requires
@@ -38,21 +43,23 @@ Rules:
 
 ### Workshops, tracks and status
 
-| Workshop | Module | Beginner | Advanced | Solutions | Status |
-|---|---|:-:|:-:|:-:|---|
-| Introduction to AI | Module 1 – Symbolic AI | – | – | – | One notebook, no tracks |
-| | Module 2 – Foundations of ML | ✓ | ✓ | ✓ | Available |
-| | Module 3 – Deep learning (2 notebooks) | ✓ | ✓ | ✓ | Available |
-| Federated Learning | single module (Flower) | ✓ | ✓ | ✓ | Available; the organiser also starts the Flower server |
-| Cloud Computing SOA | Module 1 – REST API | ✓ | ✓ | ✓ | Available |
-| | Module 2 – Microservices and JWT | ✓ | ✓ | ✓ | Available |
-| | Module 3 – Containerization and orchestration | ✓ | ✓ | ✓ | Teaching files only; exercise runtime not validated |
-| | Module 4 | – | – | – | Does not exist |
-| | Module 5 – OpenFaaS | ✓ | – | – | Offline rehearsal only; live readiness not validated, publication blocked |
-| Big Data | Spark | ✓ | planned | planned | Beginner pilot; advanced and solutions reserved for a future sprint |
-| HPC | OpenMP basics | ✓ | – | – | Beginner only, no solution release; toolchain not yet version-locked |
+| Workshop | Module | Beginner | Intermediate | Advanced | Solutions | Status |
+|---|---|:-:|:-:|:-:|:-:|---|
+| Introduction to AI | Module 1 – Symbolic AI | – | – | – | – | One notebook, no tracks |
+| | Module 2 – Foundations of ML | ✓ | – | ✓ | ✓ | Available |
+| | Module 3 – Deep learning (2 notebooks) | ✓ | – | ✓ | ✓ | Available |
+| Federated Learning | single module (Flower) | ✓ | – | ✓ | ✓ | Available; the organiser also starts the Flower server |
+| Cloud Computing SOA | Module 1 – REST API | ✓ | ✓ | ✓ | ✓ | Available |
+| | Module 2 – Microservices and JWT | ✓ | ✓ | ✓ | ✓ | Available |
+| | Module 3 – Containerization and orchestration | ✓ | ✓ | ✓ | ✓ | Teaching files only; exercise runtime not validated |
+| | Module 4 | – | – | – | – | Does not exist |
+| | Module 5 – OpenFaaS | ✓ | – | – | – | Offline rehearsal only; live readiness not validated, publication blocked |
+| Big Data | Spark | ✓ | – | planned | planned | Beginner pilot; advanced and solutions reserved for a future sprint |
+| HPC | OpenMP basics | ✓ | – | – | – | Beginner only, no solution release; toolchain not yet version-locked |
 
-Solutions are released only for the advanced track, after the workshop. Status
+Solutions are released only after the workshop, and only for the tracks in
+which participants write the code themselves: advanced, and in Cloud Computing
+SOA Modules 1–3 also intermediate. Status
 follows the organiser menu and action descriptions (October 2026); update this
 table when a module changes. Spark and HPC run on x86_64 only.
 
@@ -104,13 +111,15 @@ Course-specific notes:
    `/opt/digitafrica/hpc` on the workers, which are mounted into participant
    servers.
 2. The organiser publishes a module and chooses the track. This sets
-   `workshop_type`, `workshop_module`, `mode` (`beginner` or `advanced`) and
+   `workshop_type`, `workshop_module`, `mode` (`beginner`, `intermediate` or
+   `advanced`, where the module offers it) and
    `solutions_released` in the `digitafrica-workshop-state` ConfigMap. Only one
    module is active at a time.
 3. When a participant server starts, JupyterHub copies the active track into
    the participant folder listed above.
-4. Solutions are released only for the advanced track, after the workshop,
-   with the module's `release-solutions` action. This sets
+4. Solutions are released only after the workshop, for the advanced track (in
+   Cloud Computing SOA Modules 1–3 also the intermediate track), with the
+   module's `release-solutions` action. This sets
    `solutions_released`; the next server start adds the solutions folder.
 
 ## Related code

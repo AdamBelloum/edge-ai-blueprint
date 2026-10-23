@@ -22,7 +22,7 @@ class Module3LifecycleTests(unittest.TestCase):
             "map": "fixture-map\n",
             "assets": {
                 track: {"asset": hashlib.sha256(b"fixture\n").hexdigest()}
-                for track in ("beginner", "advanced", "solutions", "tests")
+                for track in ("beginner", "intermediate", "advanced", "solutions", "tests")
             },
         }
         self.state = {
@@ -79,7 +79,7 @@ class Module3LifecycleTests(unittest.TestCase):
         return types.SimpleNamespace(returncode=0)
 
     def test_publication_updates_only_expected_state_and_clears_release(self):
-        for mode in ("beginner", "advanced"):
+        for mode in ("beginner", "intermediate", "advanced"):
             with self.subTest(mode=mode):
                 self.payload["mode"] = mode
                 self.patches.clear()
@@ -140,6 +140,29 @@ class Module3LifecycleTests(unittest.TestCase):
         self.assertEqual(self.patches[0][1:], [{
             "op": "add", "path": "/data/solutions_released", "value": "true"
         }])
+
+    def test_release_for_the_active_intermediate_or_advanced_track(self):
+        for mode in ("intermediate", "advanced"):
+            with self.subTest(mode=mode):
+                self.patches.clear()
+                self.state["mode"] = mode
+                self.payload.update(operation="release", mode=mode)
+                deployed.execute(self.payload, self.read, self.run_command)
+                self.assertEqual(self.patches[0][1:], [{
+                    "op": "add", "path": "/data/solutions_released", "value": "true"
+                }])
+
+    def test_release_rejects_a_track_that_is_not_active_or_beginner(self):
+        for active, requested in (
+            ("intermediate", "advanced"), ("advanced", "intermediate"),
+            ("beginner", "beginner"),
+        ):
+            with self.subTest(active=active, requested=requested):
+                self.state["mode"] = active
+                self.payload.update(operation="release", mode=requested)
+                with self.assertRaises(RuntimeError):
+                    deployed.execute(self.payload, self.read, self.run_command)
+                self.assertEqual(self.patches, [])
 
     def test_check_is_read_only(self):
         self.payload["operation"] = "check"

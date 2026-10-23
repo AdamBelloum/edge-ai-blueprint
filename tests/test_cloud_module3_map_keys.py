@@ -23,7 +23,7 @@ class Module3MapKeyTests(unittest.TestCase):
         shutil.copy2(REPOSITORY / HELPER, self.helper)
         self.assets = self.repository / ASSETS
         self.rows = []
-        for track in ("beginner", "advanced", "solutions", "tests"):
+        for track in ("beginner", "intermediate", "advanced", "solutions", "tests"):
             folder = "shared/tests" if track == "tests" else track
             directory = self.assets / folder
             directory.mkdir(parents=True)

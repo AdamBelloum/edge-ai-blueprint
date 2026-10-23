@@ -23,7 +23,7 @@ if [ "$workshop_type" = "cloud-computing-soa" ] &&
     {{ '{{' }}
       if (NF != 3) fail("expected three TSV fields")
       track = $1; key = $2; relative = $3
-      if (track !~ /^(beginner|advanced|solutions|tests)$/)
+      if (track !~ /^(beginner|intermediate|advanced|solutions|tests)$/)
         fail("unknown track")
       if (key !~ /^[A-Za-z0-9._-]+$/ || length(key) > 253 ||
           key == "asset_map_tsv")
@@ -50,8 +50,9 @@ if [ "$workshop_type" = "cloud-computing-soa" ] &&
     {{ '}}' }}
     END {{ '{{' }}
       if (!failed &&
-          (!counts["beginner"] || !counts["advanced"] ||
-           !counts["solutions"] || !counts["tests"])) {{ '{{' }}
+          (!counts["beginner"] || !counts["intermediate"] ||
+           !counts["advanced"] || !counts["solutions"] ||
+           !counts["tests"])) {{ '{{' }}
         print "[seed] ERROR: Module 3 map lacks a required track" > "/dev/stderr"
         exit 1
       {{ '}}' }}

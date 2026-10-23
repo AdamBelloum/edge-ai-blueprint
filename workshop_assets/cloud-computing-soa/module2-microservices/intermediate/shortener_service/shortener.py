@@ -1,0 +1,385 @@
+# Module 2 intermediate shortener exercise: complete the existing placeholders.
+# This skeleton is not yet a working URL-shortener service.
+# Prepare keys with ../setup_local_keys.sh; run from shortener_service/.
+# Direct execution uses localhost:5000 with workshop-only Flask debug mode.
+# Mappings are in memory and disappear on restart.
+# Management routes require authentication; GET /<id> resolves publicly.
+
+from flask import Flask, jsonify, request, redirect
+import re
+import json
+import base64
+import time
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.exceptions import InvalidSignature
+
+
+app = Flask(__name__)
+
+# original: shared_dict[id] = url
+# updated: shared_dict[id] = {"url": xxx, "owner": username}
+shared_dict = {}
+# Number of short IDs handed out so far; see generate_short_id().
+id_counter = 0
+
+PUBLIC_KEY_FILE = "keys/public_key.pem"
+
+
+# Assignment 1 asks for a regular expression for full points.
+def is_it_an_url(string):
+    """
+    TODO:
+    Check the URL with a regular expression.
+
+    Expected behavior:
+    - return True only if the input is a string
+    - and the whole string is an absolute http:// or https:// URL:
+      a host name with a top-level domain (for example www.uva.nl),
+      an optional port, and an optional path without spaces
+
+    Hints:
+    - re.fullmatch(pattern, string) matches the whole string
+    - try "uva.nl", "http://" and "https://www.uva .nl" as well
+    """
+    # return ...
+    pass
+
+
+ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+# A counter never gives two URLs the same ID, unlike a shortened hash.
+def generate_short_id():
+    """
+    TODO:
+    Return a new short identifier.
+
+    Write id_counter in base 62 with the characters of ALPHABET
+    (0 -> "0", 61 -> "Z", 62 -> "10"), then increase id_counter.
+    IDs are then as short as possible, and an ID is never reused,
+    even after its mapping was deleted.
+
+    Hints:
+    - global id_counter
+    - divmod(number, 62) gives the rest and the last digit
+    """
+    # global id_counter
+    # ...
+    pass
+
+
+def base64url_decode(data):
+    """
+    TODO:
+    Decode a base64url-encoded string.
+
+    Important:
+    - JWT parts may omit '=' padding
+    - add the missing padding back before decoding
+    """
+    # padding_needed = ...
+    # if ...:
+    #     data += ...
+    # return ...
+    pass
+
+
+# Load only the copied public key, never the authentication private key.
+# The key path is relative to the working directory.
+def load_public_key():
+    """
+    TODO:
+    Read and load the public key from PUBLIC_KEY_FILE.
+
+    Hint:
+    - Open in binary mode
+    - Use serialization.load_pem_public_key(...)
+    """
+    # with open(PUBLIC_KEY_FILE, "rb") as f:
+    #     return ...
+    pass
+
+
+def get_token_from_request():
+    """
+    TODO:
+    Extract a token from the incoming request.
+
+    Supported formats:
+    1. Authorization: Bearer <token>
+    2. x-access-token: <token>
+
+    Return:
+    - token string if found
+    - None otherwise
+    """
+    # auth_header = ...
+    # if ...:
+    #     return ...
+    #
+    # token = ...
+    # if ...:
+    #     return ...
+    #
+    # return None
+    pass
+
+
+# Verify locally rather than calling the authentication service per request.
+# The reference fixes verification to RSA PKCS#1 v1.5 with SHA-256.
+# It does not explicitly validate header, issuer, audience, or subject type.
+# This educational verifier has no live user lookup or revocation check.
+def verify_jwt(token):
+    """
+    TODO:
+    Verify a JWT locally using the public key.
+
+    Expected steps:
+    1. Split token into 3 parts
+    2. Rebuild signing input
+    3. Decode signature
+    4. Verify signature using the public key
+    5. Decode payload JSON
+    6. Check 'exp'
+    7. Check 'sub'
+    8. Return the username in 'sub' if valid
+    9. Return None on failure
+
+    Hints:
+    - public_key.verify(...)
+    - catch InvalidSignature and parsing errors
+    """
+    try:
+        # parts = ...
+        # if ...:
+        #     return None
+        #
+        # header_b64, payload_b64, signature_b64 = ...
+        # signing_input = ...
+        # signature = ...
+        #
+        # public_key = ...
+        # public_key.verify(...)
+        #
+        # payload = ...
+        #
+        # if ...:
+        #     return None
+        #
+        # if ...:
+        #     return None
+        #
+        # return ...
+        pass
+
+    except (InvalidSignature, ValueError, KeyError, json.JSONDecodeError):
+        return None
+    except Exception:
+        return None
+
+
+def get_current_user():
+    """
+    TODO:
+    Use the request token and verify it.
+
+    Return:
+    - username if the token is valid
+    - None otherwise
+    """
+    # token = ...
+    # if ...:
+    #     return None
+    # return ...
+    pass
+
+
+@app.route("/", methods=["GET"])
+def read_root():
+    """
+    TODO:
+    Return the keys that belong only to the current authenticated user.
+
+    Expected behavior:
+    - If token invalid/missing -> 403 forbidden
+    - Otherwise return a JSON object containing the current user's keys
+    """
+    username = get_current_user()
+
+    # TODO:
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # user_keys = ...
+    # return jsonify({"keys": user_keys}), 200
+    pass
+
+
+@app.route("/<id>", methods=["GET"])
+def read_item(id):
+    """
+    TODO:
+    Resolve a short ID to the original URL.
+
+    Expected behavior:
+    - If id exists -> return 301 redirect (or equivalent 301 behavior if you choose)
+    - If id does not exist -> 404
+
+    Note:
+    In this version, this endpoint is treated as the public resolution endpoint.
+    """
+    value = shared_dict.get(id)
+
+    # TODO:
+    # if ...:
+    #     return redirect(..., code=301)
+    # else:
+    #     return jsonify({"detail": ...}), 404
+    pass
+
+
+# Returning 404 after deletion follows the exercise contract, not normal REST semantics.
+@app.route("/", methods=["DELETE"])
+def delete_root():
+    """
+    TODO:
+    Delete only the URL mappings owned by the current authenticated user.
+
+    Expected behavior:
+    - Invalid/missing token -> 403
+    - Delete only this user's entries
+    - Return 404 after deletion, following the chosen assignment behavior
+    """
+    username = get_current_user()
+
+    # TODO:
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # ids_to_delete = ...
+    # for key in ids_to_delete:
+    #     del shared_dict[key]
+    #
+    # return jsonify({"detail": ...}), 404
+    pass
+
+
+@app.route("/<id>", methods=["DELETE"])
+def delete_item(id):
+    """
+    TODO:
+    Delete a single mapping, but only if it belongs to the current user.
+
+    Expected behavior:
+    - Invalid/missing token -> 403
+    - Non-existing id -> 404
+    - Existing but owned by someone else -> 403
+    - Success -> 204 with empty body
+    """
+    username = get_current_user()
+
+    # TODO:
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # if ...:
+    #     return jsonify({"detail": ...}), 404
+    #
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # del shared_dict[id]
+    # return "", 204
+    pass
+
+
+# Every POST creates a new mapping owned by the caller, so a mapping of the
+# same URL by another user is never touched.
+@app.route("/", methods=["POST"])
+def create_root():
+    """
+    TODO:
+    Create a new short URL for the authenticated user.
+
+    Expected behavior:
+    - Invalid/missing token -> 403
+    - Missing/invalid body -> 400
+    - Accept either "value" or "url" as the long URL field
+    - Validate the URL
+    - Generate a short id with generate_short_id()
+    - Store both url and owner
+    - Return 201 with the new id
+    """
+    username = get_current_user()
+
+    # TODO:
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # data = request.get_json(silent=True)
+    # if ...:
+    #     return jsonify({"detail": "error"}), 400
+    #
+    # long_url = ...
+    # if long_url is None:
+    #     long_url = ...
+    #
+    # if ...:
+    #     return jsonify({"detail": "error"}), 400
+    #
+    # if ...:
+    #     return jsonify({"detail": "error"}), 400
+    #
+    # short_id = ...
+    #
+    # shared_dict[short_id] = {
+    #     "url": ...,
+    #     "owner": ...
+    # }
+    #
+    # return jsonify({"id": short_id}), 201
+    pass
+
+
+# Updating the target URL retains the existing short ID.
+@app.route("/<id>", methods=["PUT"])
+def update_item(id):
+    """
+    TODO:
+    Update the long URL behind an existing short ID.
+
+    Expected behavior:
+    - Invalid/missing token -> 403
+    - Non-existing id -> 404
+    - Existing but owned by someone else -> 403
+    - Missing or invalid new url -> 400
+    - Success -> update and return 200
+    """
+    username = get_current_user()
+    data = request.get_json(force=True, silent=True)
+
+    # TODO:
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # if ...:
+    #     return jsonify({"detail": ...}), 404
+    #
+    # if ...:
+    #     return jsonify({"detail": "forbidden"}), 403
+    #
+    # if ...:
+    #     return jsonify({"detail": "error"}), 400
+    #
+    # if ...:
+    #     return jsonify({"detail": "error"}), 400
+    #
+    # shared_dict[id]["url"] = ...
+    # return jsonify({"message": ...}), 200
+    pass
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=True)

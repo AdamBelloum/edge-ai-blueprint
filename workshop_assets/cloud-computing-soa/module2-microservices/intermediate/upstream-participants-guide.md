@@ -102,12 +102,12 @@ You are expected to construct the final JWT yourself by:
 ## 4. Hands-on Build Plan
 
 This workshop builds on Module 1, but supplies both service skeletons in
-`advanced/auth_service/auth.py` and `advanced/shortener_service/shortener.py`.
+`intermediate/auth_service/auth.py` and `intermediate/shortener_service/shortener.py`.
 Complete their TODOs without replacing the exercise with the reference solution.
 
 ### Before Running the Services
 1. Implement `ensure_keys_exist()` in `auth_service/auth.py`.
-2. From the `advanced/` directory, run `bash setup_local_keys.sh`.
+2. From the `intermediate/` directory, run `bash setup_local_keys.sh`.
    The helper calls your function, protects the private key, and copies only
    the public key to the shortener. In a fresh workspace, it fails if the
    key-generation TODO is still unfinished.
