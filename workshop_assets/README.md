@@ -17,7 +17,8 @@ workshop_assets/
     │   ├── advanced/               exercise track: TODO, or the specification
     │   ├── solutions/              reference solutions, released after the workshop
     │   └── shared/                 files several tracks use, for example tests
-    └── runtime/                    deployed to hosts by Ansible, not to participants
+    ├── runtime/                    deployed to hosts by Ansible, not to participants
+    └── ta-audit/                   tools for teaching assistants, never deployed
 ```
 
 Rules:
@@ -91,6 +92,12 @@ Course-specific notes:
   workshop folder. `federated-learning/runtime/` holds the Flower server and
   client and their locked requirements; Ansible copies the whole folder to the
   central server and the workers.
+- **Cloud Computing SOA**: `cloud-computing-soa/ta-audit/` holds the TA audit
+  scripts for Assignments 1–3. They test a submission far more thoroughly than
+  the grading scripts in `shared/tests/`, report each problem with its evidence
+  and suggest oral-exam questions (see its `README.md`). The folder is not a
+  module and is never deployed: deployment code reads only the `module*`
+  folders, which `tests/test_cloud_soa_ta_audit.py` checks.
 - **Big Data**: `big-data/spark/docker-compose.yml` is a legacy file and is not
   delivered to participants.
 - **HPC**: the folder names under `hpc/openmp-01-basics/` are copied unchanged
