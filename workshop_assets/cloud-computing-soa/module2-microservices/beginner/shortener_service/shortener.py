@@ -196,9 +196,9 @@ def create_root():
     """Create a mapping from JSON value, falling back to url.
 
     Require authentication and return the generated ID with 201.
-    Collision handling distinguishes different URLs, not different owners:
-    submitting an existing URL can overwrite its owner. This known teaching
-    implementation limitation is documented here, not corrected."""
+    Collision handling rehashes until the ID is free, or already holds the
+    same URL for the same owner, so another user's mapping is never
+    overwritten."""
     username = get_current_user()
     if username is None:
         return jsonify({"detail": "forbidden"}), 403
@@ -220,8 +220,12 @@ def create_root():
 
     short_id = generate_short_id(str(long_url))
 
-    # To prevent direct overwriting in case of hash collisions
-    while short_id in shared_dict and shared_dict[short_id]["url"] != str(long_url):
+    # Reuse an ID only when both the URL and its owner match.
+    # A different user must never overwrite an existing mapping's ownership.
+    while short_id in shared_dict and (
+        shared_dict[short_id]["url"] != str(long_url)
+        or shared_dict[short_id]["owner"] != username
+    ):
         short_id = hashlib.md5((str(long_url) + short_id).encode()).hexdigest()[:6]
 
     shared_dict[short_id] = {

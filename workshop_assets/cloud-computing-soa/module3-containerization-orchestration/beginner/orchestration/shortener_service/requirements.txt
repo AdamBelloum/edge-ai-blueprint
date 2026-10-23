@@ -1,5 +1,4 @@
-# Module 03 service dependencies.
-# Selected from the Module 02 lock; container validation pending.
+# Module 3 service dependencies, pinned to the versions in the Module 2 lock.
 Flask==3.1.3
 blinker==1.9.0
 click==8.5.0

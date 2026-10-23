@@ -27,6 +27,7 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /app/data
+              subPath: auth
             - name: auth-keys
               mountPath: /app/keys
               readOnly: true

@@ -14,7 +14,10 @@ Open `containerization/`.
 4. Build and deploy both services with Docker Compose.
 5. Test representative authentication and URL-shortener operations using the API from the previous practical. Verify access from outside the Docker host.
 6. Create test data. Show that it survives service restarts and `docker compose down` followed by container recreation. Do not use `down -v` for this test, because it removes named volumes.
-7. Explain how Dockerfile command ordering and exclusion of unnecessary dependencies and files improve build efficiency and image compactness.
+7. Check your work with the grading script, on the Docker host, from `containerization/`:
+   `python3 ../../tests/test_microservices.py --assignment 3.1 --restart "docker compose down && docker compose up -d"`.
+   It tests both APIs in their containers, restarts the containers with the given command and checks that the data is still there. It needs Python 3 with `requests`; add `--url` and `--auth-url` if the services do not listen on ports 5000 and 5001 of this host.
+8. Explain how Dockerfile command ordering and exclusion of unnecessary dependencies and files improve build efficiency and image compactness.
 
 Record the working requests, persistence evidence and key implementation decisions. The assignment asks for a description of Part 3.1 of at most one page, not a line-by-line Dockerfile explanation.
 
@@ -27,7 +30,10 @@ Open `orchestration/`.
 3. Deploy both services and expose them through Kubernetes Services.
 4. Verify that at least one service has three running replicas.
 5. Test access from outside the cluster and demonstrate that the replicas offer a consistent view of stored data.
-6. Observe repeated requests and use your observations to reason about request distribution across replicas. Keep examples supporting your deductions.
+6. Check your work with the grading script. On the control-plane VM, from `orchestration/`:
+   `python3 ../../tests/test_microservices.py --assignment 3.2 --url http://NODE_IP:30080 --auth-url http://NODE_IP:30081 --namespace websvc`.
+   It checks the nodes, Deployments and Services with kubectl and sends requests through the Services; `sudo apt-get install -y python3-requests` provides `requests`. Run it once more from your own computer, without `--namespace`, to show that the services are reachable from outside the cluster.
+7. Observe repeated requests and use your observations to reason about request distribution across replicas. Keep examples supporting your deductions.
 
 Write at most half a page about your Kubernetes experience and challenges, and at most half a page about your load-balancing observations.
 

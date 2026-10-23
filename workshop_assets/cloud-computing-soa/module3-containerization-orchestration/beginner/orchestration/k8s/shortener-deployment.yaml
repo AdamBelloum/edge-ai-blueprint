@@ -30,6 +30,7 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /app/data
+              subPath: shortener
             - name: shortener-public-key
               mountPath: /app/keys
               readOnly: true

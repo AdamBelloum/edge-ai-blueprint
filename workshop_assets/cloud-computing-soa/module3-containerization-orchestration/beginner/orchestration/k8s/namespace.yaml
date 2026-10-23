@@ -1,3 +1,34 @@
+# Assignment 3.2: both services in the namespace websvc.
+#
+# 1. Images. On a computer with Docker, from the orchestration/ folder, build
+#    both images for the VMs' architecture and push them to Docker Hub (log in
+#    first with docker login). Replace YOUR_DOCKERHUB_USERNAME here and in
+#    both Deployments:
+#      docker buildx build --platform linux/amd64 --push -t YOUR_DOCKERHUB_USERNAME/auth-service:3.2 auth_service
+#      docker buildx build --platform linux/amd64 --push -t YOUR_DOCKERHUB_USERNAME/shortener-service:3.2 shortener_service
+# 2. Shared storage: export an NFS folder from the control-plane VM, as
+#    described in shared-pv.yaml.
+# 3. Keys. On the control-plane VM, from the orchestration/ folder, create the
+#    signing key pair (openssl is part of Debian) and store it in the cluster;
+#    the shortener gets only the public key:
+#      mkdir -p keys
+#      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out keys/private_key.pem
+#      openssl pkey -in keys/private_key.pem -pubout -out keys/public_key.pem
+#      kubectl apply -f k8s/namespace.yaml
+#      kubectl -n websvc create secret generic auth-keys \
+#        --from-file=keys/private_key.pem --from-file=keys/public_key.pem
+#      kubectl -n websvc create configmap shortener-public-key --from-file=keys/public_key.pem
+#      rm keys/private_key.pem
+# 4. Deploy: kubectl apply -f k8s/
+#    Check:  kubectl -n websvc get pods,services -o wide
+# 5. Test from your own computer, with the IP address of any node:
+#      python test_microservices.py --assignment 3.2 --url http://NODE_IP:30080 --auth-url http://NODE_IP:30081
+#    On the control-plane VM, add --namespace websvc for the cluster checks.
+#
+# To remove everything: kubectl delete -f k8s/ (the data stays in the NFS
+# folder). If you delete only the namespace, the PersistentVolume keeps a
+# reference to the old claim and a new deployment waits forever; release it with
+#   kubectl patch pv websvc-shared-pv --type json -p '[{"op":"remove","path":"/spec/claimRef"}]'
 apiVersion: v1
 kind: Namespace
 metadata:

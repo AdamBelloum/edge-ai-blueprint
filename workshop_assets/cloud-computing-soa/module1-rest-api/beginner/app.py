@@ -120,6 +120,10 @@ def create_root():
     if not data or not data.get("value"):
         return jsonify({"detail": "Content of body was empty"}), 400
 
+    # Reject values that are not HTTP(S) URLs, as PUT /<id> does.
+    if not is_it_an_url(data.get("value")):
+        return jsonify({"detail": "Invalid url"}), 400
+
     # Generate an id, store the supplied value, and report that a resource was
     # created. HTTP 201 is the standard status for successful creation.
     short_id = generate_short_id(data.get("value"))

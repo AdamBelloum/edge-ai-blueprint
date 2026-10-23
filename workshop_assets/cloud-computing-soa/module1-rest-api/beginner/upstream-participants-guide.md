@@ -227,7 +227,8 @@ def delete_item(id):
 
 ### Step 7: POST / — Create a New Short ID
 
-Create a new mapping from a submitted URL. Expected input:
+Create a new mapping from a submitted URL. A value that is not an HTTP(S)
+URL is rejected with `400`, using `is_it_an_url` from Step 2. Expected input:
 
 ```json
 { "value": "https://example.com" }
@@ -243,6 +244,10 @@ def create_root():
     # Check if the request body is empty
     if not data or not data.get("value"):
         return jsonify({"detail": "Content of body was empty"}), 400
+
+    # Reject values that are not HTTP(S) URLs, as PUT /<id> does.
+    if not is_it_an_url(data.get("value")):
+        return jsonify({"detail": "Invalid url"}), 400
 
     short_id = generate_short_id(data.get("value"))
     shared_dict[short_id] = data.get("value")
@@ -348,6 +353,10 @@ def create_root():
     if not data or not data.get("value"):
         return jsonify({"detail": "Content of body was empty"}), 400
 
+    # Reject values that are not HTTP(S) URLs, as PUT /<id> does.
+    if not is_it_an_url(data.get("value")):
+        return jsonify({"detail": "Invalid url"}), 400
+
     # Add the value from the request body to the shared dictionary with a numeric key
     short_id = generate_short_id(data.get("value"))
     shared_dict[short_id] = data.get("value")
@@ -396,16 +405,23 @@ Leave the server running on participant-local `127.0.0.1:5000`.
 Your laptop's localhost is different: use a second JupyterHub terminal for
 the curl examples and tests.
 
-In the second terminal, run the supplied API integration tests:
+In the second terminal, run the supplied grading script:
 
 ```bash
 cd /home/jovyan/Cloud-Computing-SOA/Module-1/tests
-python -m unittest -v test_api
+python test_api.py
 ```
 
-Run from `tests/` because the suite opens `read_from.csv` relative to the
-current directory. Flask is required by the application and `requests` by
-the test client.
+It sends requests to the application and prints the points for each line of
+the Assignment 1 grading rubric that can be tested this way, followed by the
+points that a TA assesses. `python -m unittest -v test_api` runs the same
+checks without the points. Flask is required by the application and
+`requests` by the script.
+
+The beginner implementation passes the seven test functions and the
+identifier checks. Its URL check only looks at the `http://` or `https://`
+prefix, so it does not get every URL-validation point: compare it with a
+regular expression that also requires a host name.
 
 **Warning:** The tests create mappings and clear all mappings during cleanup.
 Use disposable data. Restarting the application also clears its in-memory

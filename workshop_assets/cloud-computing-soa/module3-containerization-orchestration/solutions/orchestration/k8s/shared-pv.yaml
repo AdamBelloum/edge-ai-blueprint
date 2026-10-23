@@ -1,3 +1,17 @@
+# Storage that all replicas share: a folder on the control-plane VM, exported
+# over NFS. Each service mounts its own subfolder (auth/, shortener/), so the
+# shortener cannot read or change the accounts.
+#
+# Once, on the control-plane VM (YOUR_VM_SUBNET: the VMs' network, for
+# example 10.0.0.0/24):
+#   sudo apt-get install -y nfs-kernel-server
+#   sudo mkdir -p /srv/nfs/websvc
+#   sudo chown nobody:nogroup /srv/nfs/websvc
+#   echo '/srv/nfs/websvc YOUR_VM_SUBNET(rw,sync,no_subtree_check)' | sudo tee -a /etc/exports
+#   sudo exportfs -ra
+# On each worker VM:
+#   sudo apt-get install -y nfs-common
+# Then replace YOUR_NFS_SERVER_IP below with the control-plane VM's address.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

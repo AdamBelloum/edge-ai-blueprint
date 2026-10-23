@@ -1017,8 +1017,12 @@ def create_root():
 
     short_id = generate_short_id(str(long_url))
 
-    # To prevent direct overwriting in case of hash collisions
-    while short_id in shared_dict and shared_dict[short_id]["url"] != str(long_url):
+    # Reuse an ID only when both the URL and its owner match.
+    # A different user must never overwrite an existing mapping's ownership.
+    while short_id in shared_dict and (
+        shared_dict[short_id]["url"] != str(long_url)
+        or shared_dict[short_id]["owner"] != username
+    ):
         short_id = hashlib.md5((str(long_url) + short_id).encode()).hexdigest()[:6]
 
     shared_dict[short_id] = {
@@ -1045,7 +1049,7 @@ This endpoint creates a new short ID for a long URL.
 6. reject missing URL with `400`
 7. validate the URL
 8. generate a short ID
-9. avoid direct overwrite in case of collision
+9. avoid overwriting an existing mapping, including another user's mapping of the same URL
 10. store both:
     - the URL
     - the owner
@@ -1080,7 +1084,7 @@ Every mapping is now tied to the user who created it.
 
 ### How collisions are handled
 
-If two different URLs produce the same first 6 MD5 characters, the code rehashes with an adjusted input until the collision is avoided.
+If the ID is already taken, the code rehashes with an adjusted input until it finds a free ID. An ID is reused only when it already holds the same URL for the same user. When another user submits a URL that is already stored, they get a new ID: the first user's mapping, and its owner, stay unchanged.
 
 ---
 
@@ -1207,17 +1211,19 @@ In the third terminal, from the selected `beginner/` directory:
 
 ~~~bash
 cd ../tests
-python -m unittest -v
+python test_microservices.py
 ~~~
 
-Run from `tests/` because the main suite reads `read_from.csv` relative to
-the current directory. The tests require `requests` and create accounts and
-mappings against the running services. They attempt mapping cleanup, but test
-accounts remain until the authentication service restarts.
+This is the grading script of Assignment 2: it sends requests to both services
+and prints the points for each line of the grading rubric that can be tested
+this way, followed by the points that a TA assesses. `python -m unittest -v`
+runs the same checks without the points. The tests require `requests` and
+create accounts and mappings against the running services. They delete their
+mappings afterwards; the test accounts remain until the authentication service
+restarts.
 
 Passing tests demonstrates the covered scenarios, not comprehensive security.
-In particular, the ownership test does not check whether a second user can
-take ownership by submitting the same URL. Use a disposable workshop session.
+Use a disposable workshop session.
 
 ---
 
@@ -1331,10 +1337,6 @@ not by itself revoke an issued token.
 
 Successful `DELETE /` deliberately returns `404` under this assignment's
 contract; this is not conventional REST success semantics.
-
-The supplied implementation has a known ownership limitation: submitting the
-same URL as another user can reassign the existing mapping's owner. Its
-list/update/delete checks do not prevent that creation-path issue.
 
 This is an educational implementation, not a production authentication system.
 Unsalted SHA-256 password hashing and Flask's debug development servers require

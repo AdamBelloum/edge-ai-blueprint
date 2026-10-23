@@ -17,7 +17,7 @@ shortener_dir="$track_root/shortener_service"
 mkdir -p "$auth_dir/keys" "$shortener_dir/keys"
 
 # Importing auth does not start Flask: its main guard prevents startup.
-# Run from auth_service/ because its key paths are relative.
+# Run from auth_service/ so that Python imports this track's auth.py.
 # The completed implementation reuses both existing files; if either
 # is missing, it replaces the pair. This does not check key-pair validity.
 (

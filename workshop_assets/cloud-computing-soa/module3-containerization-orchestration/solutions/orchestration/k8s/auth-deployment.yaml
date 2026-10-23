@@ -20,13 +20,18 @@ spec:
           ports:
             - containerPort: 5001
           env:
+            # Returned in the X-Served-By header, to observe load balancing.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          readinessProbe:
+            tcpSocket:
+              port: 5001
           volumeMounts:
             - name: shared-data
               mountPath: /app/data
+              subPath: auth
             - name: auth-keys
               mountPath: /app/keys
               readOnly: true
