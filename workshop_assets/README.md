@@ -53,7 +53,7 @@ Rules:
 | Cloud Computing SOA | Module 1 – REST API | ✓ | ✓ | ✓ | ✓ | Available |
 | | Module 2 – Microservices and JWT | ✓ | ✓ | ✓ | ✓ | Available |
 | | Module 3 – Containerization and orchestration | ✓ | ✓ | ✓ | ✓ | Teaching files only; exercise runtime not validated |
-| | Module 4 | – | – | – | – | Does not exist |
+| | Module 4 – OpenStack | – | – | – | – | Not implemented; listed as TODO in the organiser menu |
 | | Module 5 – OpenFaaS | ✓ | – | – | – | Offline rehearsal only; live readiness not validated, publication blocked |
 | Big Data | Spark | ✓ | – | planned | planned | Beginner pilot; advanced and solutions reserved for a future sprint |
 | HPC | OpenMP basics | ✓ | – | – | – | Beginner only, no solution release; toolchain not yet version-locked |
