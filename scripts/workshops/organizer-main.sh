@@ -578,11 +578,11 @@ run_main_menu() {
     workshop_ui_heading "DIGITAfrica / Workshop organiser"
     workshop_ui_section "PREPARATION"
     workshop_ui_option 1 "Manage participant cohort"
-    workshop_ui_option 3 "Reconcile workshop applications"
+    workshop_ui_option 2 "Reconcile workshop applications"
     workshop_ui_section "WORKSHOPS"
-    workshop_ui_option 4 "Open workshops"
+    workshop_ui_option 3 "Select workshops"
     workshop_ui_section "CLEANUP"
-    workshop_ui_option 2 "Reset workshop cycle"
+    workshop_ui_option 4 "Reset workshop cycle"
     printf '\n'
     workshop_ui_option 0 "Exit"
     workshop_ui_prompt
@@ -590,9 +590,9 @@ run_main_menu() {
 
     case "$choice" in
       1) run_initialisation_menu ;;
-      2) run_reset_menu ;;
-      3) run_application_reconciliation ;;
-      4) run_workshops_menu ;;
+      2) run_application_reconciliation ;;
+      3) run_workshops_menu ;;
+      4) run_reset_menu ;;
       0) exit 0 ;;
       *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
     esac

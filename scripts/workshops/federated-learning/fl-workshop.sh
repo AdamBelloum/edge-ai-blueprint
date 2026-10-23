@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSHOP_CONTEXT="$SCRIPT_DIR/../lib/workshop-context.sh"
 ORGANIZER_RUNTIME="$SCRIPT_DIR/../lib/organizer-runtime.sh"
 COHORT_WORKFLOW="$SCRIPT_DIR/../identity/cohort-workshop.sh"
-ORGANIZER_WIZARD="$SCRIPT_DIR/organizer_wizard.sh"
+WORKSHOP_READINESS_CHECKER="$SCRIPT_DIR/check-workshop-readiness.sh"
 COHORT_MAPPING_HELPER="$SCRIPT_DIR/../identity/reconcile-cohort-mapping.sh"
 FLOWER_MANAGER="$SCRIPT_DIR/manage-flower-server.sh"
 
@@ -180,11 +180,11 @@ source "$ORGANIZER_RUNTIME"
 
 run_preflight() {
   print_heading "Workshop platform preflight"
-  [[ -x "$ORGANIZER_WIZARD" ]] ||
-    die "Workshop readiness wizard is missing or not executable: $ORGANIZER_WIZARD"
+  [[ -x "$WORKSHOP_READINESS_CHECKER" ]] ||
+    die "Workshop readiness checker is missing or not executable: $WORKSHOP_READINESS_CHECKER"
 
   log "Running organiser-owned workshop readiness checks."
-  bash "$ORGANIZER_WIZARD" --non-interactive
+  bash "$WORKSHOP_READINESS_CHECKER" --non-interactive
 
   cat <<'EOF'
 
@@ -198,43 +198,6 @@ Manual checks still required before participants arrive:
   7. Run the guided local-data notebook and the guided Flower-client notebook
      with a real participant account before the workshop starts.
 EOF
-}
-
-prepare_federated_learning_workshop() {
-  local mode="$1"
-
-  case "$mode" in
-    beginner|advanced) ;;
-    *) die "Invalid preparation mode: $mode" ;;
-  esac
-
-  [[ -x "$COHORT_WORKFLOW" ]] ||
-    die "Cohort workflow helper is missing or not executable: $COHORT_WORKFLOW"
-  [[ -x "$FLOWER_MANAGER" ]] ||
-    die "Flower server manager is missing or not executable: $FLOWER_MANAGER"
-  [[ -x "$ORGANIZER_WIZARD" ]] ||
-    die "Workshop readiness wizard is missing or not executable: $ORGANIZER_WIZARD"
-
-  print_heading "Prepare Federated Learning workshop"
-
-  "$COHORT_WORKFLOW" require-complete
-  ensure_workshop_activation_allowed federated-learning
-
-  printf '%s\n' "Stopping any existing organiser-controlled Flower server."
-  "$FLOWER_MANAGER" stop
-
-  printf '%s\n' "Checking readiness before cohort reconciliation."
-  bash "$ORGANIZER_WIZARD" --non-interactive --skip-participant-mapping
-
-  start_new_cohort "$mode"
-
-  printf '%s\n' "Checking complete readiness after cohort reconciliation."
-  bash "$ORGANIZER_WIZARD" --non-interactive
-
-  printf '%s\n' "Starting Flower with inventory-derived default parameters."
-  "$FLOWER_MANAGER" restart --defaults
-
-  printf '%s\n' "Federated Learning workshop preparation completed."
 }
 
 run_flower_manager_menu() {
@@ -279,14 +242,6 @@ run_flower_manager_menu() {
       *) warn "Choose a number from 0 to 6." ;;
     esac
   done
-}
-
-reconcile_current_cohort_mapping() {
-  [[ -x "$COHORT_MAPPING_HELPER" ]] ||
-    die "Workshop cohort-mapping helper is missing or not executable: $COHORT_MAPPING_HELPER"
-
-  print_heading "Reconcile current participant JupyterHub mapping"
-  "$COHORT_MAPPING_HELPER"
 }
 
 resolve_participant_workers() {
@@ -405,294 +360,6 @@ REMOTE
   done
 }
 
-
-show_tutorial_state() {
-  print_heading "Workshop tutorial state"
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-echo "Namespace: ${DIGITAFRICA_NAMESPACE}"
-echo "ConfigMap: digitafrica-workshop-state"
-echo
-echo "workshop_type:"
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  get configmap digitafrica-workshop-state \
-  -o jsonpath='{.data.workshop_type}{"\n"}'
-echo "mode:"
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  get configmap digitafrica-workshop-state \
-  -o jsonpath='{.data.mode}{"\n"}'
-echo "solutions_released:"
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  get configmap digitafrica-workshop-state \
-  -o jsonpath='{.data.solutions_released}{"\n"}'
-REMOTE
-)"
-
-  cat <<'EOF'
-
-The state applies when a participant server is next spawned. Existing running
-servers are unchanged because their init containers have already completed.
-EOF
-}
-
-set_tutorial_mode() {
-  local mode="$1"
-
-  case "$mode" in
-    beginner|advanced) ;;
-    *) die "Invalid tutorial mode: ${mode}" ;;
-  esac
-
-  print_heading "Set workshop tutorial mode"
-  printf 'Requested mode: %s\n' "$mode"
-  printf '%s\n' \
-    "This affects subsequently spawned participant servers only." \
-    "Existing user servers and files are not modified."
-
-  if ! confirm "Update the workshop tutorial mode"; then
-    log "No change made."
-    return 0
-  fi
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  patch configmap digitafrica-workshop-state \
-  --type merge \
-  -p '{"data":{"mode":"${mode}"}}'
-REMOTE
-)"
-
-  show_tutorial_state
-}
-
-release_reference_solutions() {
-  print_heading "Release reference solutions for advanced workshop"
-  printf '%s\n' \
-    "This is a one-way organiser action for subsequently spawned participant servers." \
-    "Existing user servers and files are not modified." \
-    "The release is performed only when the current tutorial mode is advanced."
-
-  if ! confirm "Release reference solutions for the advanced workshop"; then
-    log "No change made."
-    return 0
-  fi
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-mode="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  get configmap digitafrica-workshop-state \
-  -o jsonpath='{.data.mode}')"
-
-if [ "\$mode" != "advanced" ]; then
-  printf '%s\n' \
-    "Reference solutions can only be released for an advanced workshop." \
-    "Current tutorial mode: \${mode:-unset}" \
-    "No change was made."
-  exit 0
-fi
-
-k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
-  patch configmap digitafrica-workshop-state \
-  --type merge \
-  -p '{"data":{"solutions_released":"true"}}'
-
-printf '%s\n' "Reference solutions released for subsequently spawned advanced-workshop servers."
-REMOTE
-)"
-
-  show_tutorial_state
-}
-
-start_new_cohort() {
-  local mode="$1"
-  local group_ids_csv
-  local confirmation
-
-  case "$mode" in
-    ""|beginner|advanced) ;;
-    *) die "Invalid cohort mode: ${mode}" ;;
-  esac
-
-  resolve_participant_workers
-  group_ids_csv="$(IFS=,; printf '%s' "${WORKSHOP_GROUP_IDS[*]}")"
-
-  if [[ -n "$mode" ]]; then
-    print_heading "Start a fresh workshop cohort"
-    printf 'Selected mode: %s\n' "$mode"
-  else
-    print_heading "Delete participant workspaces"
-  fi
-  printf 'Participant identities: %s\n' "${WORKSHOP_GROUP_IDS[*]}"
-  cat <<'EOF'
-
-This action deletes only the persistent JupyterHub home workspaces of the
-inventory-derived participant identities. Active participant servers must not
-be running. When invoked through reset-federated-learning-workshop.sh, selected participant
-servers are stopped automatically after its first reset confirmation; when
-using this helper directly, stop them through JupyterHub first.
-
-Administrator, hub, PostgreSQL, Redis, and non-participant storage are excluded.
-EOF
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-
-namespace="${DIGITAFRICA_NAMESPACE}"
-groups_csv="${group_ids_csv}"
-IFS=, read -r -a groups <<< "\$groups_csv"
-
-k3s kubectl -n "\$namespace" get configmap digitafrica-workshop-state >/dev/null
-
-for group_id in "\${groups[@]}"; do
-  active_pods="\$(k3s kubectl -n "\$namespace" get pods \
-    -l "hub.jupyter.org/username=\$group_id" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
-
-  if [[ -n "\$active_pods" ]]; then
-    printf 'Refusing reset: participant server still running for %s: %s\n' \
-      "\$group_id" "\$active_pods" >&2
-    exit 1
-  fi
-
-  # This deployment configures KubeSpawner with pvc_name_template =
-  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
-  # Participant labels exist on server pods but not on their PVCs, so use the
-  # strict selected-identity claim prefix rather than a PVC label selector.
-  escaped_group_id="\${group_id//_/-}"
-  pvc_prefix="claim-\${escaped_group_id}---"
-
-  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
-    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
-      "\$group_id" >&2
-    exit 1
-  fi
-
-  pvc_names=()
-  while IFS= read -r pvc_name; do
-    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
-      pvc_names+=("\$pvc_name")
-  done <<< "\$all_pvc_names"
-
-  if (( \${#pvc_names[@]} > 1 )); then
-    printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
-      "\$group_id" "\${pvc_names[*]}" >&2
-    exit 1
-  fi
-
-  if (( \${#pvc_names[@]} == 1 )); then
-    printf 'Would delete participant PVC: %s (identity: %s)\n' \
-      "\${pvc_names[0]}" "\$group_id"
-  else
-    printf 'No participant PVC exists yet for: %s\n' "\$group_id"
-  fi
-done
-REMOTE
-)"
-
-  confirmation="Delete the listed participant workspaces"
-  [[ -n "$mode" ]] && confirmation+=" and initialise the new cohort"
-
-  if "$ASSUME_COHORT_RESET"; then
-    log "Proceeding with the explicitly confirmed participant-workspace reset."
-  elif ! confirm "$confirmation"; then
-    log "Cohort initialisation cancelled; no change made."
-    return 3
-  fi
-
-  run_deployment_remote "$(cat <<REMOTE
-set -euo pipefail
-
-namespace="${DIGITAFRICA_NAMESPACE}"
-mode="${mode}"
-groups_csv="${group_ids_csv}"
-IFS=, read -r -a groups <<< "\$groups_csv"
-
-k3s kubectl -n "\$namespace" get configmap digitafrica-workshop-state >/dev/null
-
-for group_id in "\${groups[@]}"; do
-  active_pods="\$(k3s kubectl -n "\$namespace" get pods \
-    -l "hub.jupyter.org/username=\$group_id" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
-
-  if [[ -n "\$active_pods" ]]; then
-    printf 'Refusing reset: participant server still running for %s: %s\n' \
-      "\$group_id" "\$active_pods" >&2
-    exit 1
-  fi
-
-  # This deployment configures KubeSpawner with pvc_name_template =
-  # "claim-{username}". KubeSpawner safely escapes group_01 as group-01---<hash>.
-  # Participant labels exist on server pods but not on their PVCs, so use the
-  # strict selected-identity claim prefix rather than a PVC label selector.
-  escaped_group_id="\${group_id//_/-}"
-  pvc_prefix="claim-\${escaped_group_id}---"
-
-  if ! all_pvc_names="\$(k3s kubectl -n "\$namespace" get pvc \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
-    printf 'Could not list PVCs while resolving the workspace for %s.\n' \
-      "\$group_id" >&2
-    exit 1
-  fi
-
-  pvc_names=()
-  while IFS= read -r pvc_name; do
-    [[ -n "\$pvc_name" && "\$pvc_name" == "\$pvc_prefix"* ]] &&
-      pvc_names+=("\$pvc_name")
-  done <<< "\$all_pvc_names"
-
-  if (( \${#pvc_names[@]} > 1 )); then
-    printf 'Refusing reset: expected at most one participant PVC for %s; found: %s\n' \
-      "\$group_id" "\${pvc_names[*]}" >&2
-    exit 1
-  fi
-
-  if (( \${#pvc_names[@]} == 1 )); then
-    k3s kubectl -n "\$namespace" delete pvc "\${pvc_names[0]}" \
-      --wait=true --timeout=180s
-    printf 'Deleted participant PVC: %s (identity: %s)\n' \
-      "\${pvc_names[0]}" "\$group_id"
-  fi
-
-  remaining_pods="\$(k3s kubectl -n "\$namespace" get pods \
-    -l "hub.jupyter.org/username=\$group_id" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"
-  [[ -z "\$remaining_pods" ]] || {
-    printf 'Workspace cleanup failed: participant pod remains for %s.\\n' \
-      "\$group_id" >&2
-    exit 1
-  }
-
-  remaining_pvcs="\$(k3s kubectl -n "\$namespace" get pvc \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}')"
-  while IFS= read -r remaining_pvc; do
-    if [[ -n "\$remaining_pvc" && "\$remaining_pvc" == "\$pvc_prefix"* ]]; then
-      printf 'Workspace cleanup failed: participant PVC remains for %s.\\n' \
-        "\$group_id" >&2
-      exit 1
-    fi
-  done <<< "\$remaining_pvcs"
-
-  printf 'Participant pod and PVC absence verified for %s.\\n' "\$group_id"
-done
-
-if [[ -n "\$mode" ]]; then
-  k3s kubectl -n "\$namespace" patch configmap digitafrica-workshop-state \
-    --type merge \
-    -p "{\"data\":{\"workshop_type\":\"federated-learning\",\"workshop_module\":\"none\",\"mode\":\"\$mode\",\"solutions_released\":\"false\"}}"
-
-  printf 'Fresh cohort state applied: workshop_type=federated-learning, workshop_module=none, mode=%s, solutions_released=false\n' "\$mode"
-fi
-REMOTE
-)"
-
-  if [[ -n "$mode" ]]; then
-    reconcile_current_cohort_mapping
-    show_tutorial_state
-  fi
-}
 
 print_checklist() {
   cat <<'EOF'
@@ -905,5 +572,11 @@ main() {
       ;;
   esac
 }
+
+# Lifecycle implementations share this dispatcher's loaded context.
+# shellcheck source=prepare-workshop.sh
+source "$SCRIPT_DIR/prepare-workshop.sh"
+# shellcheck source=publish-workshop.sh
+source "$SCRIPT_DIR/publish-workshop.sh"
 
 main "$SELECTED_ACTION"

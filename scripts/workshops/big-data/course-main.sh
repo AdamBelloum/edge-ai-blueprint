@@ -20,17 +20,20 @@ run_big_data_menu() {
   local choice
   while true; do
     workshop_ui_heading "Workshops / Big Data"
-    workshop_ui_section "SELECT A MODULE"
-    workshop_ui_option 1 "Spark"
-    workshop_ui_note "Beginner publication; Spark execution is not validated."
+    workshop_ui_section "SELECT A WORKSHOP LEVEL"
+    workshop_ui_option 1 "Spark Beginner: publication available; execution not validated"
+    workshop_ui_option 2 "Spark Advanced: TODO - not implemented"
     printf '\n'
     workshop_ui_option 0 "Back to workshops"
     workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
       1) run_big_data_spark_menu ;;
+      2)
+        printf '%s\n' 'TODO: Spark advanced workshop is not implemented. No changes made.'
+        ;;
       0) return 0 ;;
-      *) printf 'Choose 0 or 1.\n' >&2 ;;
+      *) printf 'Choose 0, 1, or 2.\n' >&2 ;;
     esac
   done
 }

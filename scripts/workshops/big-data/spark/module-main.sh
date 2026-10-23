@@ -34,8 +34,7 @@ big_data_spark_select_mode() {
     {
       workshop_ui_heading "Spark / Teaching mode"
       workshop_ui_option 1 "Beginner - guided notebook"
-      workshop_ui_option 2 "Advanced - unavailable"
-      workshop_ui_note "Advanced mode is reserved for a future sprint."
+      workshop_ui_option 2 "Advanced: TODO - not implemented; future sprint"
       workshop_ui_prompt
     } >&2
     read -r choice || return 2
@@ -130,18 +129,16 @@ big_data_spark_show_status() {
 run_big_data_spark_menu() {
   local choice
   while true; do
-    workshop_ui_heading "Big Data / Spark"
-    workshop_ui_section "PREPARE"
-    workshop_ui_option 1 "Stage participant assets"
-    workshop_ui_note "Assets only; no activation or runtime startup."
-    workshop_ui_option 2 "Publish beginner workspace"
-    workshop_ui_note "Reconciles JupyterHub; does not prove execution readiness."
-    workshop_ui_section "INSPECT"
-    workshop_ui_option 5 "Show workshop selection status"
-    workshop_ui_note "Does not validate asset delivery or distributed execution."
-    workshop_ui_section "UNAVAILABLE - FUTURE SPRINT"
-    workshop_ui_option 3 "Publish advanced TODO workspace"
-    workshop_ui_option 4 "Release advanced reference solution"
+    workshop_ui_heading "Big Data / Spark Beginner"
+    workshop_ui_section "PREPARATION"
+    workshop_ui_option 1 "Prepare teaching assets: no activation or runtime startup"
+    workshop_ui_section "CHECKS"
+    workshop_ui_option 2 "Show workshop selection status: not asset-delivery or execution validation"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 3 "Publish Beginner workshop: reconciles JupyterHub for new spawns; execution not validated"
+    workshop_ui_option 4 "Publish Advanced workshop: TODO - not implemented"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 5 "Release advanced reference solutions - TODO: not implemented"
     printf '\n'
     workshop_ui_option 0 "Back to Big Data"
     workshop_ui_prompt
@@ -149,13 +146,13 @@ run_big_data_spark_menu() {
     case "$choice" in
       1) big_data_spark_prepare_workspace ||
            printf 'Spark asset preparation did not complete.\n' >&2 ;;
-      2) big_data_spark_activate_selected_mode beginner ||
+      3) big_data_spark_activate_selected_mode beginner ||
            printf 'Spark beginner publication did not complete.\n' >&2 ;;
-      3) big_data_spark_activate_selected_mode advanced ||
+      4) big_data_spark_activate_selected_mode advanced ||
            printf 'Spark advanced publication was not performed.\n' >&2 ;;
-      4) big_data_spark_release_solutions ||
+      5) big_data_spark_release_solutions ||
            printf 'Spark solution release was not performed.\n' >&2 ;;
-      5) big_data_spark_show_status ||
+      2) big_data_spark_show_status ||
            printf 'Workshop selection status could not be retrieved.\n' >&2 ;;
       0) return 0 ;;
       *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
