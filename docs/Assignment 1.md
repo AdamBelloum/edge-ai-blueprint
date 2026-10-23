@@ -50,7 +50,7 @@ Your service must adhere to the following specification:
   </tr>
 </table>
 
-This specification is left ambiguous on purpose, and it is part of the assignment to find your own interpretation of it that adheres to REST- and CRUD principles (see the slides). In particular, pay attention to your application supporting all of the paths specified, and that it can return all of the given error codes in situations that make sense. You might notice, however, that the specification says nothing about the contents of the body of a request; this is left for you to decide.
+This specification is left ambiguous on purpose, and it is part of the assignment to find your own interpretation of it that adheres to REST- and CRUD principles (see the slides). In particular, pay attention to your application supporting all of the paths specified, and that it can return all of the given error codes in situations that make sense. You might notice, however, that the specification says nothing about the contents of the body of a request; the grading script (*test_api.py*) sends its requests in a fixed format, so read it to see what your service must accept.
 
 Implementing the specification will earn you a 8. For full points, also:
 

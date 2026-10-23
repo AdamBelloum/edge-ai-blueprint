@@ -1,6 +1,6 @@
 # Errata: Assignment 1–3 and the K8s setup tutorial
 
-Problems found in the original PDFs (`Assignment 1.pdf`, `Assignment 2.pdf`, `Assignment 3.pdf`). The Markdown conversions (`Assignment 1.md` … `Assignment 3.md`) deliberately keep the original text, so these issues are still present there. Links were checked on 2026-10-19. The K8s setup tutorial is covered in the last section.
+Problems found in the original PDFs (`Assignment 1.pdf`, `Assignment 2.pdf`, `Assignment 3.pdf`). The Markdown conversions (`Assignment 1.md` … `Assignment 3.md`) deliberately keep the original text, so these issues are still present there; the one sentence they change is listed under “Changed in the Markdown”. Links were checked on 2026-10-19. The K8s setup tutorial is covered in the last section.
 
 ## Assignments: content errors
 
@@ -18,6 +18,12 @@ Problems found in the original PDFs (`Assignment 1.pdf`, `Assignment 2.pdf`, `As
 | Assignment 2 | Report, item b.iv | “any of the **question** i - iii” | “questions”. |
 | Assignment 1–3 | Important Notes | “**detailled** explanation” | “detailed”. |
 | Assignment 3 | Submission, item 2 | “**A**lso explain …” | Only the letter “A” is bold (formatting slip). |
+
+## Changed in the Markdown
+
+| Document | Location | Original text | Markdown text | Reason |
+|---|---|---|---|---|
+| Assignment 1 | Assignment, after the specification table | “…the specification says nothing about the contents of the body of a request; this is left for you to decide.” | “…the specification says nothing about the contents of the body of a request; the grading script (*test_api.py*) sends its requests in a fixed format, so read it to see what your service must accept.” | The grading script sends `{"value": URL}` for `POST /` and `{"url": URL}` for `PUT /:id`. A service that expects other fields would lose points for a choice the original text allows. The workshop's advanced track says the same. |
 
 ## Assignments: links
 
