@@ -106,11 +106,9 @@ run_initialisation_menu() {
   while true; do
     workshop_ui_heading "Organiser / Participant cohort"
     workshop_ui_section "SETUP"
-    workshop_ui_option 1 "Provision identities and groups"
-    workshop_ui_note "Creates the cohort without issuing login passwords."
+    workshop_ui_option 1 "Provision identities and groups: creates cohort without login passwords"
     workshop_ui_section "ACCESS"
-    workshop_ui_option 2 "Issue and export credentials"
-    workshop_ui_note "Resets participant passwords; distribute the export securely."
+    workshop_ui_option 2 "Issue and export credentials: resets passwords; distribute export securely"
     workshop_ui_section "CHECK"
     workshop_ui_option 3 "Show participant-account status"
     printf '\n'
@@ -135,11 +133,9 @@ run_reset_menu() {
     workshop_ui_heading "Organiser / Reset workshop cycle"
     workshop_ui_warning "Destructive actions. Review the scope before confirming."
     workshop_ui_section "WORKSHOP CYCLE"
-    workshop_ui_option 1 "Reset active workshop (choose whether to keep accounts)"
-    workshop_ui_note "Activation stays blocked until full cleanup is verified."
+    workshop_ui_option 1 "Reset active workshop (choose whether to keep accounts): activation blocked until cleanup verified"
     workshop_ui_section "IDENTITIES ONLY"
-    workshop_ui_option 2 "Remove identities and credential exports"
-    workshop_ui_note "Preserves workspaces, servers, runtimes and workshop selection."
+    workshop_ui_option 2 "Remove identities and credential exports: preserves workspaces, servers, runtimes and selection"
     printf '\n'
     workshop_ui_option 0 "Back to main menu"
     workshop_ui_prompt
@@ -162,7 +158,7 @@ show_new_workshop_workflow() {
   workshop_ui_note "Cleanup incomplete? Stop; contact the administrator."
   workshop_ui_note "Never bypass cleanup markers or activation safeguards."
   workshop_ui_section "2. PREPARE"
-  workshop_ui_note "Main > 1: Provision identities/groups; Main > 3: Reconcile apps."
+  workshop_ui_note "Main > 1: Provision identities/groups; Main > 2: Reconcile apps."
   workshop_ui_note "Choose a course below; prepare/publish a supported mode."
   workshop_ui_section "3. VERIFY AND SHARE"
   workshop_ui_note "Check workshop readiness; publication is not execution readiness."

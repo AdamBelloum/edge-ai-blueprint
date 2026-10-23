@@ -72,21 +72,20 @@ run_introduction_to_ai_module_menu() {
 
   while true; do
     workshop_ui_heading "Introduction to AI / Module $module"
-    workshop_ui_section "PREPARE"
+    workshop_ui_section "CHECKS"
+    workshop_ui_option 1 "Check publication readiness"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 2 "Publish Beginner workshop: selects Beginner for new participant spawns"
     if [[ "$module" == "1" ]]; then
-      workshop_ui_option 1 "Beginner - publish and activate"
-      workshop_ui_note "Advanced - TODO: not implemented."
+      workshop_ui_option 3 "Publish Advanced workshop - TODO: not implemented"
     else
-      workshop_ui_option 1 "Beginner / Advanced - select level and activate"
+      workshop_ui_option 3 "Publish Advanced workshop: selects Advanced for new participant spawns"
     fi
-    workshop_ui_note "Applies to new participant spawns."
-    workshop_ui_section "VERIFY"
-    workshop_ui_option 2 "Check publication readiness"
     workshop_ui_section "AFTER THE WORKSHOP"
     if [[ "$module" == "1" ]]; then
-      workshop_ui_note "Release advanced reference solutions - TODO: not implemented."
+      workshop_ui_option 4 "Release advanced reference solutions - TODO: not implemented"
     else
-      workshop_ui_option 3 "Release advanced reference solutions"
+      workshop_ui_option 4 "Release advanced reference solutions"
     fi
     printf '\n'
     workshop_ui_option 0 "Back to Introduction to AI"
@@ -94,22 +93,21 @@ run_introduction_to_ai_module_menu() {
     read -r choice || return 0
 
     case "$module:$choice" in
-      1:1) run_introduction_to_ai_prepare ;;
-      1:2) run_introduction_to_ai_module1_check ;;
-      2:1) run_introduction_to_ai_module2_publish ;;
-      2:2) run_introduction_to_ai_module2_check ;;
-      2:3) run_introduction_to_ai_module2_release_solutions ;;
-      3:1) run_introduction_to_ai_module3_publish ;;
-      3:2) run_introduction_to_ai_module3_check ;;
-      3:3) run_introduction_to_ai_module3_release_solutions ;;
-      *:0) return 0 ;;
-      *)
-        if [[ "$module" == "1" ]]; then
-          printf 'Choose a number from 0 to 2.\n' >&2
-        else
-          printf 'Choose a number from 0 to 3.\n' >&2
-        fi
+      1:1) run_introduction_to_ai_module1_check ;;
+      1:2) run_introduction_to_ai_prepare ;;
+      1:3|1:4)
+        printf '%s\n' 'TODO: this Module 1 feature is not implemented. No changes made.'
         ;;
+      2:1) run_introduction_to_ai_module2_check ;;
+      2:2) run_introduction_to_ai_module "$INTRODUCTION_TO_AI_MODULE2_HELPER" activate --mode beginner ;;
+      2:3) run_introduction_to_ai_module "$INTRODUCTION_TO_AI_MODULE2_HELPER" activate --mode advanced ;;
+      2:4) run_introduction_to_ai_module2_release_solutions ;;
+      3:1) run_introduction_to_ai_module3_check ;;
+      3:2) run_introduction_to_ai_module "$INTRODUCTION_TO_AI_MODULE3_HELPER" activate --mode beginner ;;
+      3:3) run_introduction_to_ai_module "$INTRODUCTION_TO_AI_MODULE3_HELPER" activate --mode advanced ;;
+      3:4) run_introduction_to_ai_module3_release_solutions ;;
+      *:0) return 0 ;;
+      *) printf 'Choose a value from 0 through 4.\n' >&2 ;;
     esac
   done
 }

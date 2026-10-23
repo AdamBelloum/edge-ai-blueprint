@@ -229,17 +229,17 @@ run_cloud_module5_menu() {
   while true; do
     workshop_ui_heading "Cloud SOA / Module 5 - OpenFaaS"
     workshop_ui_warning "Offline rehearsal only; live readiness NOT VALIDATED."
-    workshop_ui_section "CHECK AND INSPECT"
+    workshop_ui_section "CHECKS"
     workshop_ui_option 1 "Check local pre-live assets"
     workshop_ui_option 2 "Show authoring status"
-    workshop_ui_section "WORKSHOP LEVELS"
-    workshop_ui_note "Beginner - TODO: workshop publication pending live validation."
-    workshop_ui_note "Advanced - TODO: workshop publication unavailable."
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 3 "Publish Beginner workshop - TODO: pending live validation"
+    workshop_ui_option 4 "Publish Advanced workshop - TODO: not implemented"
     workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_note "Release advanced reference solutions - TODO: unavailable."
+    workshop_ui_option 5 "Release advanced reference solutions - TODO: not implemented"
     workshop_ui_section "OFFLINE REHEARSAL"
-    workshop_ui_option 3 "Prepare assets - private test cohort"
-    workshop_ui_option 4 "Activate rehearsal - shared test cohort"
+    workshop_ui_option 6 "Prepare rehearsal assets - private test cohort"
+    workshop_ui_option 7 "Activate rehearsal - shared test cohort"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -247,10 +247,13 @@ run_cloud_module5_menu() {
     case "$choice" in
       1) cloud_module5_check || printf 'Pre-live checks did not pass.\n' >&2 ;;
       2) cloud_module5_status ;;
-      4) cloud_module5_activate_rehearsal || printf 'Rehearsal activation did not complete.\n' >&2 ;;
-      3) cloud_module5_prepare_rehearsal || printf 'Rehearsal preparation did not complete.\n' >&2 ;;
+      7) cloud_module5_activate_rehearsal || printf 'Rehearsal activation did not complete.\n' >&2 ;;
+      6) cloud_module5_prepare_rehearsal || printf 'Rehearsal preparation did not complete.\n' >&2 ;;
+      3|4|5)
+        printf '%s\n' 'TODO: this OpenFaaS workshop action is unavailable. No changes made.'
+        ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 7.\n' >&2 ;;
     esac
   done
 }

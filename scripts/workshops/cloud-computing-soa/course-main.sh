@@ -543,15 +543,14 @@ run_cloud_computing_soa_module_menu() {
 
   while true; do
     workshop_ui_heading "$title"
-    workshop_ui_section "VERIFY"
-    workshop_ui_option 1 "Check activation readiness"
-    workshop_ui_section "ACTIVATE"
-    workshop_ui_option 2 "Beginner track"
-    workshop_ui_option 3 "Advanced - learner TODO exercises"
+    workshop_ui_section "CHECKS"
+    workshop_ui_option 1 "Check publication readiness"
+    workshop_ui_option 2 "Show deployment status"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 3 "Publish Beginner workshop: selects Beginner for new participant spawns"
+    workshop_ui_option 4 "Publish Advanced workshop: learner TODO exercises; selects Advanced for new spawns"
     workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 4 "Release advanced reference solution"
-    workshop_ui_section "INSPECT"
-    workshop_ui_option 5 "Show deployment status"
+    workshop_ui_option 5 "Release advanced reference solutions"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -566,24 +565,47 @@ run_cloud_computing_soa_module_menu() {
           printf 'Module %s mode selection did not complete.\n' "$module" >&2
         fi
         ;;
-      2)
+      3)
         "${prefix}_activate_selected_mode" beginner ||
           printf 'Module %s beginner activation did not complete.\n' "$module" >&2
         ;;
-      3)
+      4)
         "${prefix}_activate_selected_mode" advanced ||
           printf 'Module %s advanced activation did not complete.\n' "$module" >&2
         ;;
-      4)
+      5)
         "${prefix}_release_solutions" ||
           printf 'Module %s solution release did not complete.\n' "$module" >&2
         ;;
-      5)
+      2)
         "${prefix}_show_status" ||
           printf 'Module %s deployment status could not be retrieved.\n' "$module" >&2
         ;;
       0) return 0 ;;
       *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
+    esac
+  done
+}
+
+run_cloud_module4_menu() {
+  local choice
+  while true; do
+    workshop_ui_heading "Cloud SOA / Module 4 - OpenStack"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 1 "Publish Beginner workshop - TODO: not implemented"
+    workshop_ui_option 2 "Publish Advanced workshop - TODO: not implemented"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 3 "Release advanced reference solutions - TODO: not implemented"
+    printf '\n'
+    workshop_ui_option 0 "Back to Cloud Computing SOA"
+    workshop_ui_prompt
+    read -r choice || return 0
+    case "$choice" in
+      1|2|3)
+        printf '%s\n' 'TODO: this OpenStack action is not implemented. No changes made.'
+        ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 3.\n' >&2 ;;
     esac
   done
 }
@@ -596,12 +618,9 @@ run_cloud_computing_soa_menu() {
     workshop_ui_section "SELECT A MODULE"
     workshop_ui_option 1 "Module 1 - REST API"
     workshop_ui_option 2 "Module 2 - Microservices and JWT Authentication"
-    workshop_ui_option 3 "Module 3 - Containerization and Orchestration"
-    workshop_ui_note "Teaching-file delivery; exercise runtime NOT VALIDATED."
-    workshop_ui_note "Module 4 - OpenStack - TODO: workshop menu integration."
-    workshop_ui_note "  Beginner / Advanced / post-workshop solutions: unavailable here."
-    workshop_ui_option 5 "Module 5 - OpenFaaS"
-    workshop_ui_note "Offline rehearsal only; live readiness NOT VALIDATED."
+    workshop_ui_option 3 "Module 3 - Containerization and Orchestration: teaching-file delivery; runtime NOT VALIDATED"
+    workshop_ui_option 4 "Module 4 - OpenStack - TODO"
+    workshop_ui_option 5 "Module 5 - OpenFaaS: offline rehearsal only; live readiness NOT VALIDATED"
     printf '\n'
     workshop_ui_option 0 "Back to workshops"
     workshop_ui_prompt
@@ -610,9 +629,10 @@ run_cloud_computing_soa_menu() {
     case "$choice" in
       1|2) run_cloud_computing_soa_module_menu "$choice" ;;
       3) run_cloud_module3_menu ;;
+      4) run_cloud_module4_menu ;;
       5) run_cloud_module5_menu ;;
       0) return 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 5.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
     esac
   done
 }
