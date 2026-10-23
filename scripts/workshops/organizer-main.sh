@@ -580,7 +580,7 @@ run_main_menu() {
     workshop_ui_option 1 "Manage participant cohort"
     workshop_ui_option 3 "Reconcile workshop applications"
     workshop_ui_section "WORKSHOPS"
-    workshop_ui_option 4 "Open workshops"
+    workshop_ui_option 4 "Select workshops"
     workshop_ui_section "CLEANUP"
     workshop_ui_option 2 "Reset workshop cycle"
     printf '\n'
