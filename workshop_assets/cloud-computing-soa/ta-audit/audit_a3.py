@@ -45,7 +45,7 @@ import requests
 from audit_a2 import A2Context
 from audit_common import (
     PEM_PRIVATE_KEY, ServiceUnreachable, gives_url, holds_private_key, print_report, registry, returned_id,
-    run_checks, shorten, wait_for, write_markdown,
+    run_checks, shorten, wait_for, write_json, write_markdown,
 )
 
 CHECKS_31, check_31 = registry()
@@ -1443,6 +1443,7 @@ def main():
     parser.add_argument("--token-header", metavar="'NAME: FORMAT'",
                         help="how to send the token, e.g. 'Authorization: Bearer {token}' (default: detected)")
     parser.add_argument("--report", metavar="FILE.md", help="also write the findings to a Markdown file")
+    parser.add_argument("--json", metavar="FILE.json", help="also write every result to a JSON file")
     parser.add_argument("--only", nargs="*", help="run only checks whose id starts with these, e.g. A3-IMAGE")
     parser.add_argument("-v", "--verbose", action="store_true", help="show each check while it runs")
     args = parser.parse_args()
@@ -1480,6 +1481,8 @@ def main():
     if args.report:
         write_markdown(args.report, title, target, results)
         print(f"Report written to {args.report}")
+    if args.json:
+        write_json(args.json, title, target, results)
     sys.exit(1 if any(result.status == "FAIL" for result in results) else 0)
 
 
