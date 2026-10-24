@@ -17,7 +17,8 @@ BLOCK = SOURCE.split(START, 1)[1].split(END, 1)[0]
 
 
 def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
-                 fl_cleanup_status=0, local_cleanup_status=None, answer=""):
+                 fl_cleanup_status=0, local_cleanup_status=None, answer="",
+                 consume_stdin=False):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         script_dir = directory
@@ -83,6 +84,7 @@ def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
             "MOCK_TEARDOWN_STATUS": str(teardown_status),
             "MOCK_REMOTE_STATUS": str(remote_status),
             "MOCK_DUPLICATE": "yes" if duplicate else "no",
+            "MOCK_CONSUME_STDIN": "yes" if consume_stdin else "no",
         })
 
         setup = r'''
@@ -91,6 +93,10 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 run_deployment_remote() {
   if [[ "$MOCK_REMOTE_STATUS" != 0 ]]; then
     return "$MOCK_REMOTE_STATUS"
+  fi
+  if [[ "$MOCK_CONSUME_STDIN" == yes ]]; then
+    local consumed=""
+    IFS= read -r -n 1 consumed || true
   fi
   bash -c "$1" || return "$?"
   if [[ "$MOCK_DUPLICATE" == yes ]]; then
@@ -272,6 +278,38 @@ class RuntimeDispatchTests(unittest.TestCase):
                 if module == "module3":
                     expected += " --confirm-no-external-module3-runtime"
                 self.assertEqual(calls, [expected])
+                self.assertNotIn("EVENT workspace-boundary", result.stdout)
+                self.assertIn("cleanup remains in_progress", result.stderr)
+
+    def test_backend_cannot_consume_module3_attestation(self):
+        data = {
+            "cleanup_status": "in_progress",
+            "cleanup_workshop_type": "cloud-computing-soa",
+            "cleanup_workshop_module": "module3",
+        }
+        result, calls = run_dispatch(
+            data, answer="y\n", consume_stdin=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [
+            "--runtime-only --module module3 "
+            "--confirm-no-external-module3-runtime"
+        ])
+        self.assertIn("EVENT workspace-boundary", result.stdout)
+
+    def test_backend_isolation_does_not_approve_decline_or_eof(self):
+        data = {
+            "cleanup_status": "in_progress",
+            "cleanup_workshop_type": "cloud-computing-soa",
+            "cleanup_workshop_module": "module3",
+        }
+        for answer in ("n\n", "\n", ""):
+            with self.subTest(answer=answer):
+                result, calls = run_dispatch(
+                    data, answer=answer, consume_stdin=True
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
                 self.assertNotIn("EVENT workspace-boundary", result.stdout)
                 self.assertIn("cleanup remains in_progress", result.stderr)
 

@@ -150,7 +150,7 @@ for group_id in "\${groups[@]}"; do
   fi
 done
 REMOTE
-)"
+)" </dev/null
 }
 
 printf '%s\n' \
@@ -267,10 +267,10 @@ k3s kubectl -n "\$namespace" \
   patch configmap digitafrica-workshop-state \
   --type merge -p "\$patch"
 REMOTE
-)"
+)" </dev/null
 
 printf '%s\n' 'Stopping the organiser-controlled Flower server before participant reset...'
-"$FL_RESET_HELPER" --runtime-only
+"$FL_RESET_HELPER" --runtime-only </dev/null
 
 
 stop_selected_participant_servers
@@ -310,7 +310,7 @@ if not isinstance(module, str) or module not in supported[workshop]:
 print("RESET_RUNTIME_ROUTE=" + workshop + ":" + module)
 '
 REMOTE
-)")"
+)" </dev/null)"
 
 mapfile -t runtime_routes < <(
   printf '%s\n' "$runtime_context_output" |
@@ -452,7 +452,7 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   --type merge \
   -p '{"data":{"workshop_type":"none","workshop_module":"none","mode":"beginner","solutions_released":"false"}}'
 REMOTE
-)"
+)" </dev/null
 
 "$RECONCILIATION_HELPER" --neutral-for-reset || {
   reconciliation_status=$?
@@ -476,7 +476,7 @@ k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
     {"op":"replace","path":"/data/cleanup_status","value":"complete"}
   ]'
 REMOTE
-)" || fail 'Could not record reset completion; inspect workshop state before activation.'
+)" </dev/null || fail 'Could not record reset completion; inspect workshop state before activation.'
 # END NEUTRAL RESET RECONCILIATION
 
 printf '%s\n' \
