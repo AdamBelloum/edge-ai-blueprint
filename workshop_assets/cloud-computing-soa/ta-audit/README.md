@@ -2,7 +2,10 @@
 
 For teaching assistants only. Nothing in this folder is delivered to
 participants: no Ansible task or JupyterHub seeder copies it, and
-`tests/test_cloud_soa_ta_audit.py` fails if one does.
+`tests/test_cloud_soa_ta_audit.py` fails if one does. For a workshop on the
+platform, the organiser menu runs `audit_a1.py` and `audit_a2.py` on every
+group's work in the cluster, in a container that the groups' code cannot read
+(`docs/cloud-soa-batch-grading.md`).
 
 The grading scripts in `module*/shared/tests/` give the rubric points that a
 script can test, and participants run them as well. The audit scripts here go
@@ -137,8 +140,9 @@ checks the deployment, the A2 audit the API.
 3. Use the WARN findings and their questions in the oral exam.
 4. Keep the Markdown report with the grade.
 
-`--only A2-JWT A2-MULTI` runs selected checks again, and `-v` shows each check
-while it runs.
+`--only A2-JWT A2-MULTI` runs selected checks again, `-v` shows each check
+while it runs, and `--json FILE` also writes every result, with its evidence,
+to a JSON file.
 
 ## What the audit does not check
 
