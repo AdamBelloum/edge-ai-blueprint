@@ -897,6 +897,11 @@ def src_shortener_private_key(ctx):
             ctx.problem(f"{path} contains a private key")
 
 
+# Names of locations (PRIVATE_KEY_FILE, KEYS_DIR) and of public keys, which both
+# services may share.
+NOT_SECRET = re.compile(r"public|(file|path|dir|folder|url|name)$", re.IGNORECASE)
+
+
 def secret_literals(folder):
     """String constants assigned to names that look like secrets or keys."""
     found = {}
@@ -909,7 +914,8 @@ def secret_literals(folder):
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
                     and isinstance(node.value.value, str) and len(node.value.value) >= 6:
                 for target in node.targets:
-                    if isinstance(target, ast.Name) and re.search("secret|key|signing", target.id, re.IGNORECASE):
+                    if isinstance(target, ast.Name) and re.search("secret|key|signing", target.id, re.IGNORECASE) \
+                            and not NOT_SECRET.search(target.id):
                         found.setdefault(node.value.value, f"{path}:{node.lineno} {target.id}")
     return found
 

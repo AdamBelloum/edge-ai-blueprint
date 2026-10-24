@@ -9,6 +9,7 @@ generated from the scripts by `python audit_common.py`.
 import importlib
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -67,6 +68,32 @@ class CatalogueTests(unittest.TestCase):
                 unexplained = [check.id for check in checks
                                if check.severity in ("FAIL", "WARN") and not (check.why and check.ask)]
                 self.assertEqual([], unexplained)
+
+    def test_shared_secret_check_ignores_key_files_and_public_keys(self):
+        audit_common, _, audit_a2, _ = audit_modules()
+        [check] = [check for check in audit_a2.CHECKS if check.id == "SRC-04"]
+        module2 = ROOT / COURSE / "module2-microservices"
+
+        def status(auth, shortener):
+            context = audit_common.Context()
+            context.auth_source, context.shortener_source = str(auth), str(shortener)
+            return audit_common.run_checks([check], context, "A2")[0].status
+
+        # The delivered services name the same key files.
+        for track in ("beginner", "intermediate"):
+            with self.subTest(track=track):
+                self.assertEqual(status(module2 / track / "auth_service", module2 / track / "shortener_service"),
+                                 "PASS")
+        with tempfile.TemporaryDirectory() as folder:
+            auth, shortener = Path(folder, "auth"), Path(folder, "shortener")
+            auth.mkdir()
+            shortener.mkdir()
+            (auth / "auth.py").write_text('JWT_SECRET = "correct horse battery"\nPUBLIC_KEY = "-----BEGIN"\n')
+            (shortener / "shortener.py").write_text('SECRET = "correct horse battery"\nPUBLIC_KEY = "-----BEGIN"\n')
+            self.assertEqual(status(auth, shortener), "WARN")
+            (shortener / "shortener.py").write_text('PUBLIC_KEY = "-----BEGIN"\nKEY_FILE = "keys/a.pem"\n')
+            (auth / "auth.py").write_text('PUBLIC_KEY = "-----BEGIN"\nPRIVATE_KEY_FILE = "keys/a.pem"\n')
+            self.assertEqual(status(auth, shortener), "PASS")
 
     def test_checks_md_is_up_to_date(self):
         audit_common = audit_modules()[0]
