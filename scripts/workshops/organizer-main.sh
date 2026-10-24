@@ -72,6 +72,10 @@ Actions:
   cloud-module2-check     Check Cloud Computing SOA Module 2 activation readiness.
   cloud-module2-release-solutions
                           Release Cloud Computing SOA Module 2 reference solution (intermediate or advanced track).
+  cloud-module1-grade     Run the Assignment 1 grading script against every group's Module 1 work.
+  cloud-module1-audit     Run the Assignment 1 TA audit against every group's Module 1 work.
+  cloud-module2-grade     Run the Assignment 2 grading script against every group's Module 2 work.
+  cloud-module2-audit     Run the Assignment 2 TA audit against every group's Module 2 work.
   cloud-module3-check     Check local Module 3 assets for all tracks; no infrastructure access.
   cloud-module3-status    Show integration status, not deployed/runtime readiness.
   cloud-module3-readiness Check deployed teaching-file readiness; runtime unvalidated.
@@ -118,6 +122,9 @@ Workflow:
 
 Cloud Computing SOA Modules 1-3 mode selection:
 CLOUD_COMPUTING_SOA_MODE=beginner|intermediate|advanced.
+Cloud Computing SOA grading uses the active track of the module unless
+CLOUD_COMPUTING_SOA_MODE names another; CLOUD_SOA_GRADING_GROUPS=group_01,group_02
+limits the groups. Results are written under secrets/workshops/grading/.
 Spark mode selection: BIG_DATA_SPARK_MODE=beginner|advanced.
 Advanced Spark publication and solution release are currently unavailable.
 Spark publication does not start its runtime or prove participant execution readiness.
@@ -363,7 +370,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module3-readiness|cloud-module3-deployment-status|cloud-module3-publish|cloud-module3-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module1-grade|cloud-module1-audit|cloud-module2-grade|cloud-module2-audit|cloud-module3-check|cloud-module3-status|cloud-module3-readiness|cloud-module3-deployment-status|cloud-module3-publish|cloud-module3-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -653,6 +660,10 @@ case "$ACTION" in
     cloud_module2_check_activation_readiness "$(cloud_module2_select_mode)"
     ;;
   cloud-module2-release-solutions) cloud_module2_release_solutions ;;
+  cloud-module1-grade) cloud_soa_grade_groups 1 tests ;;
+  cloud-module1-audit) cloud_soa_grade_groups 1 audit ;;
+  cloud-module2-grade) cloud_soa_grade_groups 2 tests ;;
+  cloud-module2-audit) cloud_soa_grade_groups 2 audit ;;
   cloud-module3-readiness)
     cloud_mode="$(cloud_module3_select_mode)" || exit $?
     cloud_module3_check_activation_readiness "$cloud_mode"
