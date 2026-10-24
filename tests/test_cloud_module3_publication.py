@@ -14,16 +14,23 @@ class Module3PublicationTests(unittest.TestCase):
 set -euo pipefail
 source "$1"
 FAILURE="$2"
+DELIVERY_ENABLED=false
 step() {
   printf 'STEP:%s\n' "$1"
-  [[ "$FAILURE" != "$1" ]]
+  [[ "$FAILURE" != "$1" ]] || return 37
 }
 cloud_module2_require_complete_participant_cohort() { step cohort; }
 ensure_workshop_activation_allowed() {
   [[ "$1" == cloud-computing-soa ]] || return 2
   step switch
 }
+cloud_module3_check() { step local; }
+cloud_module3_reconcile_delivery() {
+  step reconciliation || return $?
+  DELIVERY_ENABLED=true
+}
 cloud_module3_check_activation_readiness() {
+  [[ "$DELIVERY_ENABLED" == true ]] || return 38
   [[ "$1" == beginner || "$1" == intermediate || "$1" == advanced ]] || return 2
   step readiness
 }
@@ -34,7 +41,9 @@ confirm() {
 }
 cloud_module3_set_workshop_state() { printf 'PATCH:%s\n' "$1"; }
 ASSUME_YES=true
-cloud_module3_activate_selected_mode "$3"
+status=0
+cloud_module3_activate_selected_mode "$3" || status=$?
+exit "$status"
 ''', "module3-publication-test", str(CONTROLLER), failure, mode],
             capture_output=True, text=True, timeout=10,
         )
@@ -45,23 +54,74 @@ cloud_module3_activate_selected_mode "$3"
                 result = self.run_publication(mode=mode)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), [
-                    "STEP:cohort", "STEP:switch", "STEP:readiness",
-                    "STEP:confirmation", f"PATCH:{mode}",
+                    "STEP:cohort", "STEP:switch", "STEP:local",
+                    "STEP:confirmation", "STEP:reconciliation",
+                    "STEP:readiness", f"PATCH:{mode}",
                 ])
                 self.assertIn("NOT runtime-validated", result.stderr)
                 self.assertIn("does not provide Docker access", result.stderr)
 
     def test_each_failed_guard_prevents_state_update(self):
-        order = ["cohort", "switch", "readiness", "confirmation"]
+        order = [
+            "cohort", "switch", "local", "confirmation",
+            "reconciliation", "readiness",
+        ]
         for index, failure in enumerate(order):
             with self.subTest(failure=failure):
                 result = self.run_publication(failure=failure)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(
+                    result.returncode, 1 if failure == "confirmation" else 37,
+                    result.stderr,
+                )
                 self.assertEqual(
                     result.stdout.splitlines(),
                     [f"STEP:{name}" for name in order[:index + 1]],
                 )
                 self.assertNotIn("PATCH:", result.stdout)
+
+    def test_real_reconciliation_helper_uses_scoped_opt_in_and_preserves_failure(self):
+        for expected_status in (0, 37):
+            with self.subTest(status=expected_status):
+                result = subprocess.run(
+                    ["bash", "-c", r"""
+set -euo pipefail
+source "$1"
+EXPECTED_STATUS="$2"
+bash() {
+  [[ "$#" == 2 ]] || return 90
+  [[ "$1" == "$CLOUD_MODULE3_DIR/../reconcile-workshop-applications.sh" ]] || return 91
+  [[ "$2" == --enable-cloud-module3-delivery ]] || return 92
+  printf 'SCOPED_RECONCILIATION\n'
+  return "$EXPECTED_STATUS"
+}
+status=0
+cloud_module3_reconcile_delivery || status=$?
+exit "$status"
+""", "module3-reconciliation-test", str(CONTROLLER), str(expected_status)],
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, expected_status, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), ["SCOPED_RECONCILIATION"])
+
+    def test_readiness_and_status_do_not_reconcile(self):
+        result = subprocess.run(
+            ["bash", "-c", r"""
+set -euo pipefail
+source "$1"
+cloud_module3_reconcile_delivery() {
+  printf 'UNEXPECTED_RECONCILIATION\n'
+  return 99
+}
+cloud_module3_run_deployed() { printf 'READ:%s:%s\n' "$1" "$2"; }
+cloud_module3_check_activation_readiness intermediate
+cloud_module3_show_deployment_status
+""", "module3-read-only-test", str(CONTROLLER)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "READ:check:intermediate", "READ:status:beginner",
+        ])
 
     def test_invalid_mode_rejects_before_any_guard(self):
         for mode in ("", "solutions", "invalid"):

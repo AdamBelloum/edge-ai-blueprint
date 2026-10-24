@@ -142,6 +142,7 @@ cloud_module3_confirm_delivery_only() {
     'WARNING: Module 3 publication delivers teaching files only.' \
     'Container, Compose and Kubernetes exercises are NOT runtime-validated.' \
     'JupyterHub delivery does not provide Docker access or an exercise runtime.' \
+    'Publication reconciles teaching assets and JupyterHub configuration.' \
     'Existing participant servers, files and credentials are not modified.' >&2
 
   # Deliberately do not treat ASSUME_YES as runtime-boundary acknowledgement.
@@ -152,6 +153,15 @@ cloud_module3_confirm_delivery_only() {
   confirm 'Publish Module 3 teaching files only, acknowledging runtime validation is pending'
 }
 
+cloud_module3_reconcile_delivery() {
+  local helper="$CLOUD_MODULE3_DIR/../reconcile-workshop-applications.sh"
+  [[ -r "$helper" ]] || {
+    printf 'ERROR: Missing application reconciliation helper: %s\n' "$helper" >&2
+    return 2
+  }
+  bash "$helper" --enable-cloud-module3-delivery || return $?
+}
+
 cloud_module3_activate_selected_mode() {
   local mode="${1:-}" dependency
   cloud_module3_validate_mode "$mode" || return $?
@@ -160,6 +170,8 @@ cloud_module3_activate_selected_mode() {
   for dependency in \
     cloud_module2_require_complete_participant_cohort \
     ensure_workshop_activation_allowed \
+    cloud_module3_check \
+    cloud_module3_reconcile_delivery \
     cloud_module3_check_activation_readiness \
     cloud_module3_set_workshop_state; do
     if ! declare -F "$dependency" >/dev/null; then
@@ -170,11 +182,13 @@ cloud_module3_activate_selected_mode() {
 
   cloud_module2_require_complete_participant_cohort || return $?
   ensure_workshop_activation_allowed cloud-computing-soa || return $?
-  cloud_module3_check_activation_readiness "$mode" || return $?
+  cloud_module3_check || return $?
   if ! cloud_module3_confirm_delivery_only; then
     printf 'No Module 3 publication was performed.\n' >&2
     return 1
   fi
+  cloud_module3_reconcile_delivery || return $?
+  cloud_module3_check_activation_readiness "$mode" || return $?
   cloud_module3_set_workshop_state "$mode"
 }
 

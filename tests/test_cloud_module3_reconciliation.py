@@ -128,7 +128,7 @@ class Module3ReconciliationTests(unittest.TestCase):
         mock_command.chmod(0o755)
 
         shell = yaml.safe_load(TASK.read_text())[-1]["ansible.builtin.shell"]
-        old_root = "root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source"
+        old_root = "root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/mapped-v1"
         old_namespace = (
             "namespace={{ digitafrica_deployment.digitafrica_namespace | quote }}"
         )
@@ -287,7 +287,22 @@ class Module3WiringTests(unittest.TestCase):
     def test_asset_reconciliation_has_no_publication_condition(self):
         self.assertEqual(len(self.includes), 1)
         _, task = self.includes[0]
-        self.assertNotIn("when", task)
+        # Neutral reset must not republish optional teaching assets.
+        # Ordinary reconciliation remains independent of publication state.
+        condition = "not (workshop_reset_neutral | default(false) | bool)"
+        self.assertEqual(task.get("when"), condition)
+
+        from ansible.plugins.filter.core import FilterModule
+        from jinja2 import Environment, StrictUndefined
+
+        environment = Environment(undefined=StrictUndefined)
+        environment.filters["bool"] = FilterModule().filters()["bool"]
+        allowed = environment.compile_expression(condition)
+        self.assertTrue(allowed())
+        self.assertTrue(allowed(workshop_reset_neutral=False))
+        self.assertFalse(allowed(workshop_reset_neutral=True))
+        self.assertTrue(allowed(workshop_reset_neutral="false"))
+        self.assertFalse(allowed(workshop_reset_neutral="true"))
         self.assertEqual(
             set(task["ansible.builtin.include_tasks"]),
             {"file", "apply"},

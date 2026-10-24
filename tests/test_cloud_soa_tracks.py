@@ -241,6 +241,50 @@ class StagingPruneTests(unittest.TestCase):
         remaining = sorted(path.relative_to(stage).as_posix() for path in stage.rglob("*"))
         self.assertEqual(remaining, ["README.md", "WORKSHOP_VERSION.json"])
 
+    def test_module3_flat_staging_preserves_separate_nested_source_tree(self):
+        task_path = ROOT / "roles/k8s_apps/tasks/cloud-soa-module3-assets.yml"
+        tasks = yaml.safe_load(task_path.read_text(encoding="utf-8"))
+        deployed_root = (
+            "/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/mapped-v1"
+        )
+        self.assertEqual(tasks[0]["ansible.builtin.file"]["path"], deployed_root)
+        self.assertEqual(
+            tasks[1]["vars"]["cloud_module3_stage_root"], deployed_root
+        )
+        self.assertIn(
+            "root=" + deployed_root + "\n",
+            tasks[-1]["ansible.builtin.shell"],
+        )
+
+        legacy = self.root / "source/advanced/containerization/auth.py"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("preserve existing nested content\n")
+
+        stage = self.root / "mapped-v1"
+        (stage / "advanced").mkdir(parents=True)
+        (stage / "advanced/kept").write_text("mapped asset\n")
+        (stage / "advanced/stale").write_text("obsolete flat asset\n")
+        (stage / "asset-map.tsv").write_text("advanced\tkept\tREADME.md\n")
+
+        code = self.python_of(
+            task_path, "Remove staged Module 3 files that are no longer mapped"
+        )
+        for attempt in range(2):
+            result = subprocess.run(
+                ["python3", "-", str(stage)], input=code,
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                legacy.read_text(), "preserve existing nested content\n"
+            )
+            self.assertEqual(
+                (stage / "advanced/kept").read_text(), "mapped asset\n"
+            )
+            self.assertFalse((stage / "advanced/stale").exists())
+            if attempt == 1:
+                self.assertEqual(result.stdout, "")
+
     def test_module3_prune_keeps_only_mapped_keys(self):
         code = self.python_of(
             ROOT / "roles/k8s_apps/tasks/cloud-soa-module3-assets.yml",

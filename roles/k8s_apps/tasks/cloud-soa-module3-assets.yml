@@ -2,10 +2,12 @@
 # Cloud SOA Module 3 asset deployment.
 # Asset staging and ConfigMap creation belong to application reconciliation;
 # participant activation remains an organiser action.
+# Flat ConfigMap-key staging is isolated from the older source tree.
+# Preserve source/; this task does not migrate or delete its contents.
 
 - name: Create Cloud Computing SOA Module 3 source staging directory
   ansible.builtin.file:
-    path: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    path: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/mapped-v1
     state: directory
     mode: "0755"
   tags:
@@ -15,7 +17,7 @@
 - name: Validate and stage mapped Cloud Computing SOA Module 3 assets
   vars:
     cloud_module3_local_root: "{{ playbook_dir }}/../workshop_assets/cloud-computing-soa/module3-containerization-orchestration"
-    cloud_module3_stage_root: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    cloud_module3_stage_root: /opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/mapped-v1
     cloud_module3_map_rows: "{{ lookup('ansible.builtin.file', cloud_module3_local_root ~ '/asset-map.tsv').splitlines() | map('split', '\t') | list }}"
   block:
     - name: Validate Module 3 map and all track syntax on the control host
@@ -100,7 +102,7 @@
 - name: Create/update Cloud Computing SOA Module 3 asset ConfigMaps
   ansible.builtin.shell: |
     set -euo pipefail
-    root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/source
+    root=/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module3/mapped-v1
     namespace={{ digitafrica_deployment.digitafrica_namespace | quote }}
     tab="$(printf '\t')"
 
