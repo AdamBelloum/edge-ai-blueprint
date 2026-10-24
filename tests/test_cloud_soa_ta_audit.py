@@ -2,9 +2,12 @@
 
 workshop_assets/cloud-computing-soa/ta-audit/ holds the scripts that teaching
 assistants run against students' submissions to Assignments 1-3. Deployment
-code may only read the module folders next to it, so the audit never reaches
-the central server or a participant. CHECKS.md lists every check and is
-generated from the scripts by `python audit_common.py`.
+code may only read the module folders next to it, so the audit never reaches a
+participant. The one exception is the organiser's grading helper: for the audit
+entry of the Module 1 and 2 menus it sends the audit to grading pods, where
+only the grader container mounts it, never a container that runs a group's
+code (tests/test_cloud_soa_grading_remote.py). CHECKS.md lists every check and
+is generated from the scripts by `python audit_common.py`.
 """
 import importlib
 import re
@@ -17,13 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 COURSE = "workshop_assets/cloud-computing-soa"
 AUDIT = ROOT / COURSE / "ta-audit"
 COURSE_PATH = re.compile(re.escape(COURSE) + r"(?:/[^\s'\"]*)?")
+# Sends the audit to the grader container of grading pods (see above).
+GRADING_HELPER = ROOT / "scripts/workshops/cloud-computing-soa/grading-local.py"
 
 
 def delivery_files():
     """Files that decide what reaches the central server and the participants."""
     for pattern in ("roles/**/*.yml", "roles/**/*.j2", "roles/**/*.sh", "playbooks/**/*.yml",
                     "scripts/**/*.sh", "scripts/**/*.py", "workshop_assets/**/asset-map.tsv"):
-        yield from ROOT.glob(pattern)
+        yield from (path for path in ROOT.glob(pattern) if path != GRADING_HELPER)
 
 
 def audit_modules():
