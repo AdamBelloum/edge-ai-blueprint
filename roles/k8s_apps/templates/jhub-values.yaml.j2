@@ -552,7 +552,7 @@ singleuser:
 {% endif %}
 {% if workshop_notebook_runtime.enabled | default(false) | bool %}
     # Select and cache the pinned runtime profile for the active workshop.
-    # Workshops without a profile are dependency-free and require no install.
+    # Missing profiles skip installation; this does not establish runtime readiness.
     - name: prepare-workshop-runtime
       image: {{ workshop_notebook_runtime.image_name }}:{{ workshop_notebook_runtime.image_tag }}
       command: ["bash", "-lc"]

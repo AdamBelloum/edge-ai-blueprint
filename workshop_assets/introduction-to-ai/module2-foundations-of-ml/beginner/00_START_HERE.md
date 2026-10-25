@@ -7,7 +7,7 @@ Welcome. This folder contains your workshop material.
 
 Open and run the notebook in order:
 
-1. `01_foundations_of_ml_beginner.ipynb` — the complete beginner tutorial
+1. `02_foundations_of_ml_beginner.ipynb` — the complete beginner tutorial
 
 All code is completed for you. Read each cell, run it with **Shift+Enter**, and read the explanation that follows.
 
