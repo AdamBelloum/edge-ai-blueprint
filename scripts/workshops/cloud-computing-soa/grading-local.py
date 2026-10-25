@@ -46,6 +46,10 @@ MODULES = {
 AUDIT = REPO / "workshop_assets/cloud-computing-soa/ta-audit"
 TRACKS = ("beginner", "intermediate", "advanced")
 TIMEOUTS = {"tests": 600, "audit": 2400}  # seconds for the grading script or the audit in a pod
+NETWORK = {  # what the groups' code can reach, per egress setting
+    "none": "none: the groups' code could not reach the internet or the cluster",
+    "participant": "the internet, as from participant servers, but not the nodes or the Kubernetes API",
+}
 WAIT = 150                                # seconds a pod waits for the group's services
 SCRIPT_LIMIT = 95000  # Ansible passes the script, base64-encoded, as one 128 KiB argument
 ANSWER_BEGIN, ANSWER_END = "===== GRADING ANSWER BEGIN =====", "===== GRADING ANSWER END ====="
@@ -297,7 +301,8 @@ def summary(args):
         csv.writer(stream).writerows([header] + rows)
     lines = [f"# Cloud Computing SOA, {spec['title']}: {what}", "",
              f"Run {run['run']}, started {run.get('started') or run['created']}, track {run['track']}, "
-             f"{len(rows)} groups, image {run.get('image')}.", ""]
+             f"{len(rows)} groups, image {run.get('image')}.", "",
+             f"Network: {NETWORK.get(run.get('egress'), 'not recorded')}.", ""]
     if kind == "tests":
         lines += [f"Points cover only what the grading script tests; the {spec['assignment']} rubric lines that "
                   "need a TA are listed in each group's tests.txt.", ""]
@@ -330,7 +335,7 @@ def main():
     build.add_argument("--kind", choices=sorted(TIMEOUTS))
     build.add_argument("--groups", default="")
     build.add_argument("--parallel", type=int, default=4)
-    build.add_argument("--egress", choices=("participant", "none"), default="participant")
+    build.add_argument("--egress", choices=sorted(NETWORK), default="none")
     build.add_argument("--image", default="")
     build.add_argument("--audit-dir", default="")
     read = commands.add_parser("receive")

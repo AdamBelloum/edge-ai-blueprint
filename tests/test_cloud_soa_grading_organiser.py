@@ -267,12 +267,27 @@ cloud_soa_grade_groups "$2" "$3"
         record = json.loads((run_dir / "run.json").read_text())
         self.assertEqual((record["track"], record["groups"]), ("intermediate", ["group_01", "group_02", "group_03"]))
         self.assertEqual(record["image"], "quay.io/jupyterhub/k8s-singleuser-sample:4.4.2")
+        self.assertEqual((record["egress"], record["unreachable"]), ("none", []))  # no network by default
+        self.assertIn("Network: none: the groups' code cannot reach the internet or the cluster.", result.stdout)
         for group in record["groups"]:
             self.assertTrue((run_dir / group / "tests.json").is_file(), group)
         self.assertIn("group_03  changed  12/12 points  graded", result.stdout)
-        self.assertTrue((run_dir / "summary.md").is_file())
+        self.assertIn("Network: none: the groups' code could not reach the internet", (run_dir / "summary.md").read_text())
         self.assertEqual(self.run_objects(), [])  # nothing of the run is left in the cluster
         self.assertIn("Removed 1 pods, 1 network policy and 2 ConfigMaps", result.stderr)
+
+    def test_the_network_setting_is_checked_and_recorded(self):
+        result = self.grade(CLOUD_SOA_GRADING_EGRESS="internet")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("CLOUD_SOA_GRADING_EGRESS must be none or participant, not internet.", result.stderr)
+        self.assertEqual((self.run_dirs(), self.run_objects()), ([], []))
+        result = self.grade(CLOUD_SOA_GRADING_EGRESS="participant")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Network: the internet, as from participant servers, but not the nodes", result.stdout)
+        [run_dir] = self.run_dirs()
+        record = json.loads((run_dir / "run.json").read_text())
+        self.assertEqual((record["egress"], record["unreachable"]), ("participant", ["203.0.113.10/32",
+                                                                                    "203.0.113.11/32"]))
 
     def test_the_track_comes_from_the_active_module_or_the_organiser(self):
         result = self.grade(module="2")  # Module 1 is active, and there is no terminal to ask

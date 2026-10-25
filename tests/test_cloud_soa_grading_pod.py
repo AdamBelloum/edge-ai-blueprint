@@ -122,9 +122,11 @@ class Pod:
                 "--manifest", str(self.root / "bundle/manifest.json"), "--bundle", str(self.root / "bundle"),
                 "--results", str(self.root / "results"), *extra]
 
-    def prepare(self):
-        result = subprocess.run(self.command("prepare"), capture_output=True, text=True, timeout=60)
+    def prepare(self, *extra, environment=None):
+        result = subprocess.run(self.command("prepare", *extra), capture_output=True, text=True, timeout=60,
+                                env=dict(os.environ, **(environment or {})))
         self.test.assertEqual(result.returncode, 0, result.stderr)
+        self.prepare_log = result.stdout
         return json.loads((self.root / "source/prepare.json").read_text())
 
     def serve(self):
@@ -222,6 +224,51 @@ class PrepareTests(unittest.TestCase):
         source = sorted(path.relative_to(pod.root / "source/track").as_posix()
                         for path in (pod.root / "source/track").rglob("*") if path.is_file())
         self.assertEqual(source, ["app.py", "data/urls.json"])
+
+    def test_the_code_is_copied_only_once_the_network_rules_are_in_force(self):
+        # Listening sockets stand in for the Kubernetes API and the kubelet on the pod's node,
+        # which answer until the pod's rules block them.
+        kubelet, api = socket.socket(), socket.socket()
+        self.addCleanup(kubelet.close)
+        self.addCleanup(api.close)
+        try:
+            kubelet.bind(("127.0.0.1", pod_module.KUBELET))
+        except OSError:
+            self.skipTest(f"127.0.0.1:{pod_module.KUBELET} is in use")
+        api.bind(("127.0.0.1", 0))
+        for listener in (kubelet, api):
+            listener.listen(50)
+        address = {"KUBERNETES_SERVICE_HOST": "127.0.0.1", "KUBERNETES_SERVICE_PORT": str(api.getsockname()[1]),
+                   "HOST_IP": "127.0.0.1"}
+
+        def prepare(environment=address):
+            pod = Pod(self, "1", "intermediate")
+            pod.deliver(solution=True)
+            return pod, pod.prepare("--policy-wait", "2", environment=environment)
+
+        pod, record = prepare()
+        self.assertEqual((record["work"], record["network_rules"]), ("error", "not in force"))
+        self.assertIn("network rules were not in force after 2 s, so the group's code was not run", record["reason"])
+        self.assertFalse((pod.root / "home/Cloud-Computing-SOA").exists())
+        self.assertEqual(pod.grade()["outcome"], "not graded")
+        # The API is down, but the kubelet still answers: the rules are not in force.
+        api.close()
+        _, record = prepare()
+        self.assertEqual((record["work"], record["network_rules"]), ("error", "not in force"))
+        # Neither answers, as for blocked connections: the copy is made.
+        kubelet.close()
+        pod, record = prepare()
+        self.assertEqual(record["work"], "solution")
+        self.assertRegex(record["network_rules"], r"^in force after \d+\.\d s$")
+        self.assertIn("[runner] network rules in force after", pod.prepare_log)
+        self.assertTrue((pod.root / "home/Cloud-Computing-SOA/Module-1/intermediate/app.py").is_file())
+        # Without these addresses, nothing can be checked, and nothing runs.
+        for name in address:
+            with self.subTest(missing=name):
+                pod, record = prepare(dict(address, **{name: ""}))
+                self.assertEqual(record["work"], "error")
+                self.assertIn("cannot check the network rules", record["reason"])
+                self.assertFalse((pod.root / "home/Cloud-Computing-SOA").exists())
 
     def test_the_copy_never_writes_through_a_link(self):
         # The group's server may swap a folder for a link while prepare copies.

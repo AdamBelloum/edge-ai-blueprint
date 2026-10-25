@@ -57,7 +57,7 @@ cloud_soa_grading_run() {
       --module "$module" --track "$track" --kind "$kind" \
       --groups "${CLOUD_SOA_GRADING_GROUPS:-}" \
       --parallel "${CLOUD_SOA_GRADING_PARALLEL:-4}" \
-      --egress "${CLOUD_SOA_GRADING_EGRESS:-participant}" \
+      --egress "${CLOUD_SOA_GRADING_EGRESS:-none}" \
       --image "${CLOUD_SOA_GRADING_IMAGE:-}" \
       --audit-dir "${CLOUD_SOA_TA_AUDIT_DIR:-}")" || exit $?
     # Each pod has a deadline; this limits the whole run, should a pod never be collected.
@@ -88,12 +88,20 @@ cloud_soa_grading_run() {
 # assignment's grading script, "audit" the TA audit.
 cloud_soa_grade_groups() {
   local module="$1" kind="$2"
-  local state lock_run idle track active_module mode host run run_dir what groups
+  local state lock_run idle track active_module mode host run run_dir what groups network
 
   case "$module:$kind" in
     1:tests|2:tests) what="the Assignment $module grading script" ;;
     1:audit|2:audit) what="the Assignment $module TA audit" ;;
     *) printf 'Unknown grading request: Module %s, %s.\n' "$module" "$kind" >&2; return 2 ;;
+  esac
+  case "${CLOUD_SOA_GRADING_EGRESS:-none}" in
+    none) network="none: the groups' code cannot reach the internet or the cluster" ;;
+    participant) network="the internet, as from participant servers, but not the nodes or the Kubernetes API" ;;
+    *)
+      printf 'CLOUD_SOA_GRADING_EGRESS must be none or participant, not %s.\n' "$CLOUD_SOA_GRADING_EGRESS" >&2
+      return 2
+      ;;
   esac
   command -v python3 >/dev/null 2>&1 || {
     printf 'Grading needs python3 on this machine.\n' >&2
@@ -170,6 +178,7 @@ cloud_soa_grade_groups() {
   printf '%s\n' \
     "Track: $track. Groups: ${CLOUD_SOA_GRADING_GROUPS:-all $groups}." \
     "One pod per group, ${CLOUD_SOA_GRADING_PARALLEL:-4} at a time, each with a copy of the group's workspace." \
+    "Network: $network." \
     "Participant servers and files are not changed. Results: $run_dir"
   confirm "Start grading" || {
     printf 'No grading run was started.\n'

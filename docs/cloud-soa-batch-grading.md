@@ -27,7 +27,7 @@ graded and ask for confirmation before they start.
 | `CLOUD_COMPUTING_SOA_MODE` | the active track | `beginner`, `intermediate` or `advanced`: the track to grade |
 | `CLOUD_SOA_GRADING_GROUPS` | all groups | for example `group_03,group_07` |
 | `CLOUD_SOA_GRADING_PARALLEL` | `4` | pods that run at the same time (1 to 20) |
-| `CLOUD_SOA_GRADING_EGRESS` | `participant` | `none` gives the pods no network access at all (see Network) |
+| `CLOUD_SOA_GRADING_EGRESS` | `none` | `none`: no network for the groups' code; `participant`: the internet, as from participant servers (see Network) |
 | `CLOUD_SOA_GRADING_IMAGE` | the JupyterHub notebook image | another image for the pods |
 | `CLOUD_SOA_TA_AUDIT_DIR` | `workshop_assets/cloud-computing-soa/ta-audit` | another copy of the TA audit |
 | `CLOUD_SOA_GRADING_RESULTS` | `secrets/workshops/grading` in the checkout | where the results are written |
@@ -86,7 +86,7 @@ final.
 
 ```text
 Pod grading-<run>-group-07
-├── prepare  init container  copies the group's Module folder from its volume (read-only) into an empty home
+├── prepare  init container  waits for the pod's network rules, copies the group's Module folder from its volume (read-only) into an empty home
 ├── service  sidecar         starts the group's services in that copy
 └── grader   main container  waits for the services, runs the grading script or the audit, prints the results
 ```
@@ -94,7 +94,8 @@ Pod grading-<run>-group-07
 All three containers run as the participant (uid 1000) with the notebook image
 of the JupyterHub deployment:
 
-- **prepare** copies `Cloud-Computing-SOA/Module-N` to the same path in an
+- **prepare** waits until the pod's network rules are in force (see Network),
+  then copies `Cloud-Computing-SOA/Module-N` to the same path in an
   empty home, records checksums, and compares the track's code with the files
   the track delivers and with the reference solution. It also keeps a copy of
   the track's source files for the audit.
@@ -125,7 +126,7 @@ the Outcome column says so; its output is in tests.txt or audit.txt.
 | Group code | runs only in the service container, which mounts neither the grading script, the audit, the results nor the source copy; prepare never writes through a link that the group's files contain |
 | Containers | uid 1000, no privilege escalation, all capabilities dropped, the default seccomp profile; CPU and memory limits (for the services those of a participant server); size limits on the temporary volumes and on what is returned |
 | Kubernetes access | no service-account token, no environment variables for the namespace's services |
-| Network | no connections in; out as for participant servers, but not to the nodes or the Kubernetes API (see Network) |
+| Network | no connections in; none out, unless the organiser asks for the internet (see Network) |
 | Participant servers | not touched; a pod can run while the group's server runs, on the same node |
 | Cleanup | every object of a run carries the label `digitafrica.io/grading-run=<run>` and belongs to the lock ConfigMap `digitafrica-grading-run`; the run removes them at its end, also after an error or Ctrl-C, and the next run offers to remove a run that was cut off |
 | TA audit | sent from the organiser's checkout in a ConfigMap that only the grader mounts, and deleted with the run |
@@ -135,26 +136,80 @@ code; only `grading-local.py` may name the audit folder.
 
 ## Network
 
-Kubernetes NetworkPolicies are firewall rules for pods. k3s enforces them with
-its built-in network-policy controller, unless it was installed with
-`--disable-network-policy`; this repository's k3s installation does not
-disable it. The JupyterHub chart gives participant servers a policy that
-allows DNS and connections to the internet, but not to private address ranges
-or the cloud metadata server. That keeps them away from the other pods, but
-from the nodes only while the nodes have private addresses; the production
-inventory lists public ones.
+By default the groups' code has no network: it cannot reach the internet or
+anything in the cluster, with the exceptions under Limits. The grader still
+reaches the services, over 127.0.0.1 inside the pod.
 
-The grading pods get DNS and the internet as participant servers do, but none
-of: private ranges, shared address space (`100.64.0.0/10`), link-local
-addresses (`169.254.0.0/16`, the cloud metadata server among them), and the
-addresses of the nodes and of the Kubernetes API, which the run reads from the
-cluster and records in run.json (`unreachable`). Nor do they get the
-connections to JupyterHub's own hub and proxy that a participant server needs
-for its login. A group's code then behaves as in its own server, for example a
-URL check that contacts the URL. The grader talks to the services over
-127.0.0.1 inside the pod, which the rules do not affect.
-With `CLOUD_SOA_GRADING_EGRESS=none` the pods get no network at all; services
-that need the internet then fail their checks.
+Neither assignment needs the network. Assignment 1 asks for a regular
+expression to check URLs, and Assignment 2 allows keeping users and mappings in
+memory. The grading scripts and the audit talk only to the services and never
+follow a redirect, and the services find their packages in the group's
+workspace. The reference solutions and the delivered beginner code get the
+same points with and without network, and the reference solutions the same
+audit findings. Without network, a group's result depends on its code only,
+not on how other websites answer at the time of grading, and grading leaves no
+trace outside the pod, such as test accounts in a database that a group runs
+elsewhere.
+
+How the pods are kept offline:
+
+- The run's NetworkPolicy `grading-<run>` allows no connections in or out.
+  Kubernetes NetworkPolicies are firewall rules for pods; k3s enforces them with
+  its built-in network-policy controller, unless it was installed with
+  `--disable-network-policy`, which this repository's installation does not do.
+- A new pod is without its rules for a moment. prepare therefore waits until
+  they are in force, that is until neither the Kubernetes API nor the kubelet
+  on the pod's node answers any more, before it copies the group's code. If
+  they are still not in force after a minute, the group is not graded and its
+  code never runs; on a cluster that does not enforce NetworkPolicies, no group
+  is graded.
+- Name lookups go to 127.0.0.1, where nothing answers, so they fail at once.
+  At the cluster DNS, blocked lookups can take up to 5 seconds each, and a
+  service that looks up names could run out of time.
+
+Code that contacts other hosts fails its checks without network. A URL check
+that looks the host up, for example, rejects every URL, also the ones that the
+grading script expects to be accepted. Such a group gets in its own server the
+points that it does not get here.
+
+### Grading with network
+
+`CLOUD_SOA_GRADING_EGRESS=participant` gives the pods DNS and the internet, as
+participant servers have them, for example to grade one group again whose code
+needs it:
+
+```bash
+CLOUD_SOA_GRADING_EGRESS=participant CLOUD_SOA_GRADING_GROUPS=group_07 \
+  scripts/workshops/organizer-main.sh cloud-module1-grade
+```
+
+JupyterHub's policy for participant servers blocks private address ranges and
+the cloud metadata server. That keeps the servers away from the other pods,
+but from the nodes only while the nodes have private addresses; the production
+inventory lists public ones. The grading pods therefore block more: private
+ranges, shared address space (`100.64.0.0/10`), link-local addresses
+(`169.254.0.0/16`, the cloud metadata server among them), and the addresses of
+the nodes and of the Kubernetes API, which the run reads from the cluster and
+records in run.json (`unreachable`). Nor do they get the connections to
+JupyterHub's hub and proxy that a participant server needs for its login.
+Other machines on the internet, including those near the nodes, stay reachable,
+as they are from participant servers. So do addresses that the cluster does
+not show, such as a public address that is translated to a node's private one,
+or a load balancer in front of the Kubernetes API: check `unreachable` in
+run.json after the first run with network.
+
+### Limits
+
+Without network, two kinds of connection still get through, for participant
+servers too; they need fixes on the nodes, not in the grading:
+
+- NetworkPolicies on this single-stack cluster filter IPv4. Where pods have
+  IPv6 link-local addresses (`fe80::`, see `/proc/net/if_inet6` in a pod), a
+  pod can reach the other pods on its node and the node itself over IPv6;
+  ip6tables rules that drop IPv6 from the pod bridge would stop that.
+- k3s's network-policy controller lets pods reach their own node on ports
+  30000 to 32767 (the NodePort range), so a program that listens on such a port
+  of the node stays reachable.
 
 ## Module 3
 

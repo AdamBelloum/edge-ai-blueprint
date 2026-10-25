@@ -212,6 +212,9 @@ def pod(run, group, claim, owned_by):
     def mount(name, path, read_only=False):
         return {"name": name, "mountPath": path, "readOnly": read_only}
 
+    # Without network, name lookups go to 127.0.0.1, where nothing answers: they
+    # fail at once, instead of after a 5-second timeout each at the cluster DNS.
+    dns = {"dnsPolicy": "None", "dnsConfig": {"nameservers": ["127.0.0.1"]}} if run["egress"] == "none" else {}
     return {
         "apiVersion": "v1", "kind": "Pod",
         "metadata": {
@@ -225,6 +228,7 @@ def pod(run, group, claim, owned_by):
             "terminationGracePeriodSeconds": 5,
             "automountServiceAccountToken": False,
             "enableServiceLinks": False,
+            **dns,
             "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"}},
             # The tolerations of the chart's participant servers, so that the pod runs where they do.
             "tolerations": [{"key": key, "operator": "Equal", "value": "user", "effect": "NoSchedule"}
@@ -241,7 +245,9 @@ def pod(run, group, claim, owned_by):
             ],
             "initContainers": [
                 {"name": "prepare", "image": image, "imagePullPolicy": "IfNotPresent",
-                 "command": command("prepare", "/runner"), "securityContext": secure,
+                 "command": command("prepare", "/runner", "--policy-wait", "60"), "securityContext": secure,
+                 # The node's address, for the check that the pod's network rules are in force.
+                 "env": [{"name": "HOST_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}],
                  "resources": resources("100m", "128Mi"),
                  "volumeMounts": [mount("workspace", "/workspace", True), mount("home", "/home/jovyan"),
                                   mount("source", "/source"), mount("runner", "/runner", True)]},

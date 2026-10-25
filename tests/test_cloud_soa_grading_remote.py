@@ -49,7 +49,7 @@ class GradingRemoteTests(unittest.TestCase):
 
     def start(self, **fields):
         payload = {"run": RUN, "module": "1", "track": "intermediate", "kind": "tests", "parallel": 2,
-                   "egress": "participant", "wait": 120, "timeout": 600, "groups": [], "image": "",
+                   "egress": "none", "wait": 120, "timeout": 600, "groups": [], "image": "",
                    "bundle": pack(FILES)}
         payload.update(fields)
         return self.execute("start", **payload)
@@ -168,6 +168,28 @@ class GradingRemoteTests(unittest.TestCase):
         self.assertNotIn("restartPolicy", spec["initContainers"][0])
         self.assertEqual(spec["containers"][0]["command"][-8:], [
             "--track", "intermediate", "--kind", "tests", "--wait", "120", "--timeout", "600"])
+
+    def test_pods_copy_the_group_s_code_only_once_their_network_rules_are_in_force(self):
+        for egress in ("none", "participant"):
+            with self.subTest(egress=egress):
+                self.cluster = FakeCluster()
+                self.start(egress=egress)
+                prepare = self.pod("group_01")["spec"]["initContainers"][0]
+                self.assertEqual(prepare["name"], "prepare")
+                self.assertEqual(prepare["command"][-2:], ["--policy-wait", "60"])
+                # The check also asks the kubelet on the pod's node, which answers while the API is down.
+                self.assertEqual(prepare["env"], [
+                    {"name": "HOST_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}])
+
+    def test_pods_without_network_resolve_no_names(self):
+        self.start(egress="none")
+        spec = self.pod("group_01")["spec"]
+        self.assertEqual((spec["dnsPolicy"], spec["dnsConfig"]), ("None", {"nameservers": ["127.0.0.1"]}))
+        self.cluster = FakeCluster()
+        self.start(egress="participant")
+        spec = self.pod("group_01")["spec"]
+        self.assertNotIn("dnsPolicy", spec)  # the cluster DNS, as in participant servers
+        self.assertNotIn("dnsConfig", spec)
 
     def test_only_the_grader_sees_the_grading_files_and_the_results(self):
         self.start(kind="audit", bundle=pack(dict(FILES, **{"audit_a1.py": "print('audit')\n"})))

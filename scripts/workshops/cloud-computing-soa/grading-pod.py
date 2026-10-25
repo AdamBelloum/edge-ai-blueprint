@@ -4,10 +4,11 @@ The organiser's grading entries (grading-main.sh) start one pod per group with
 the participants' notebook image. This script runs in its three containers,
 as the participant (uid 1000):
 
-    prepare  (init container) copies Cloud-Computing-SOA/Module-N from the
-             group's volume, which is mounted read-only, into an empty home at
-             the same path as in JupyterHub, and compares the track's code with
-             the files the group received and with the reference solution.
+    prepare  (init container) waits until the pod's network rules are in
+             force, copies Cloud-Computing-SOA/Module-N from the group's
+             volume, which is mounted read-only, into an empty home at the same
+             path as in JupyterHub, and compares the track's code with the
+             files the group received and with the reference solution.
     serve    (sidecar) starts the group's services in that copy as the
              participant instructions do, with the group's ~/.local packages,
              and logs their output. A service that stops is not restarted.
@@ -63,6 +64,7 @@ SOURCE_LIMIT = 20 * 2**20  # bytes of the track's source kept for the audit
 NOT_SOURCE = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "site-packages",
               ".ipynb_checkpoints"}
 FILE_LIMIT = 2 * 2**20     # bytes of one result file returned to the organiser
+KUBELET = 10250            # the kubelet's port on every node
 BEGIN = "===== GRADING RESULTS BEGIN ====="
 END = "===== GRADING RESULTS END ====="
 
@@ -186,6 +188,37 @@ def keep_source(track, destination):
             kept += info.st_size
 
 
+def rules_in_force(seconds):
+    """Seconds until the pod's NetworkPolicy is in force, or None if it is not after `seconds`.
+
+    A new pod has no network rules for a moment. They are in force once neither
+    the Kubernetes API nor the kubelet on the pod's node answers, which both
+    egress settings block: twice in a row, so that one lost connection attempt
+    does not count. The kubelet answers whenever the pod runs, also while the API
+    is down.
+    """
+    targets = [(os.environ.get("KUBERNETES_SERVICE_HOST"), os.environ.get("KUBERNETES_SERVICE_PORT", "")),
+               (os.environ.get("HOST_IP"), str(KUBELET))]
+    if not all(host and port.isdigit() for host, port in targets):
+        raise RuntimeError("cannot check the network rules: KUBERNETES_SERVICE_HOST, _PORT or HOST_IP is not set")
+
+    def answers(host, port):
+        try:
+            with socket.create_connection((host, int(port)), timeout=2):
+                return True
+        except OSError:
+            return False
+
+    started, blocked = time.monotonic(), 0
+    while True:
+        blocked = 0 if any(answers(host, port) for host, port in targets) else blocked + 1
+        if blocked == 2:
+            return round(time.monotonic() - started, 1)
+        if time.monotonic() - started > seconds:
+            return None
+        time.sleep(0.5)
+
+
 def prepare(args):
     module = MODULES[args.module]
     found = Path(args.workspace, "Cloud-Computing-SOA", module["folder"])
@@ -194,6 +227,15 @@ def prepare(args):
     try:
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
         record.update(examine(found, args.track, module, manifest))
+        if record["work"] in ("unchanged", "solution", "changed") and args.policy_wait:
+            # The group's code starts only from the copy, so the rules must be in force before it is made.
+            waited = rules_in_force(args.policy_wait)
+            record["network_rules"] = "not in force" if waited is None else f"in force after {waited} s"
+            say(f"network rules {record['network_rules']}")
+            if waited is None:
+                record["work"], record["reason"] = "error", (
+                    f"the pod's network rules were not in force after {args.policy_wait} s, so the group's code "
+                    "was not run; does the cluster enforce NetworkPolicies?")
         if record["work"] in ("unchanged", "solution", "changed"):
             keep_source(found / args.track, Path(args.source, "track"))
             copy = Path(args.home, "Cloud-Computing-SOA", module["folder"])
@@ -403,6 +445,8 @@ def main():
     parser.add_argument("--manifest", default="/runner/manifest.json")
     parser.add_argument("--bundle", default="/grading", help="the grading script or the audit")
     parser.add_argument("--results", default="/results")
+    parser.add_argument("--policy-wait", type=int, default=0,
+                        help="seconds prepare waits for the pod's network rules (0: no check, outside Kubernetes)")
     parser.add_argument("--wait", type=int, default=150, help="seconds to wait for the services")
     parser.add_argument("--timeout", type=int, default=600, help="seconds for the grading script or audit")
     args = parser.parse_args()
