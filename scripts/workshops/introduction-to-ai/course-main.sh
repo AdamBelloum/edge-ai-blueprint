@@ -47,7 +47,46 @@ run_introduction_to_ai_module2_publish() {
 }
 
 run_introduction_to_ai_module2_check() {
-  run_introduction_to_ai_module     "$INTRODUCTION_TO_AI_MODULE2_HELPER"     check
+  local mode="${INTRODUCTION_TO_AI_MODE:-}"
+  local choice
+
+  if [[ -z "$mode" ]]; then
+    if [[ ! -t 0 ]]; then
+      printf '%s\n' \
+        'Module 2 readiness check requires INTRODUCTION_TO_AI_MODE=beginner|advanced in a non-interactive shell.' >&2
+      return 2
+    fi
+
+    while true; do
+      printf '\n%s\n' \
+        'Module 2 / Check publication readiness' \
+        'Select the teaching track to check. This does not publish or change workshop state.' \
+        '  1) Beginner' \
+        '  2) Advanced' \
+        '  0) Back' >&2
+      printf 'Select an option: ' >&2
+      read -r choice || return 0
+
+      case "$choice" in
+        1) mode=beginner; break ;;
+        2) mode=advanced; break ;;
+        0) return 0 ;;
+        *) printf '%s\n' 'Choose 0, 1, or 2.' >&2 ;;
+      esac
+    done
+  fi
+
+  case "$mode" in
+    beginner|advanced) ;;
+    *)
+      printf '%s\n' \
+        'INTRODUCTION_TO_AI_MODE must be beginner or advanced; no check started.' >&2
+      return 2
+      ;;
+  esac
+
+  run_introduction_to_ai_module \
+    "$INTRODUCTION_TO_AI_MODULE2_HELPER" check --mode "$mode"
 }
 
 run_introduction_to_ai_module2_release_solutions() {
