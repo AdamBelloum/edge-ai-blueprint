@@ -143,8 +143,9 @@ class GradingRemoteTests(unittest.TestCase):
         self.assertEqual(spec["activeDeadlineSeconds"], 1020)
         self.assertIs(spec["automountServiceAccountToken"], False)
         self.assertIs(spec["enableServiceLinks"], False)
-        self.assertEqual(spec["securityContext"], {"runAsNonRoot": True, "runAsUser": 1000,
-                                                   "seccompProfile": {"type": "RuntimeDefault"}})
+        self.assertEqual(spec["securityContext"], {
+            "runAsNonRoot": True, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"},
+            "sysctls": [{"name": "net.ipv4.ip_unprivileged_port_start", "value": "53"}]})
         self.assertNotIn("fsGroup", json.dumps(spec))  # would change the ownership of the group's files
         self.assertNotIn("hostPath", json.dumps(spec))
         self.assertNotIn("serviceAccountName", spec)
@@ -152,7 +153,7 @@ class GradingRemoteTests(unittest.TestCase):
         self.assertEqual(volumes["workspace"]["persistentVolumeClaim"],
                          {"claimName": "claim-group-02---77aa01bb", "readOnly": True})
         containers = spec["initContainers"] + spec["containers"]
-        self.assertEqual([container["name"] for container in containers], ["prepare", "service", "grader"])
+        self.assertEqual([container["name"] for container in containers], ["prepare", "dns", "service", "grader"])
         for container in containers:
             with self.subTest(container=container["name"]):
                 self.assertEqual(container["securityContext"], {
@@ -162,9 +163,10 @@ class GradingRemoteTests(unittest.TestCase):
                 for mount in container["volumeMounts"]:
                     if mount["name"] in ("workspace", "runner", "grading"):
                         self.assertTrue(mount["readOnly"], mount)
-        self.assertEqual(spec["initContainers"][1].get("restartPolicy"), "Always")  # a sidecar
+        service = spec["initContainers"][2]
+        self.assertEqual((service["name"], service.get("restartPolicy")), ("service", "Always"))  # a sidecar
         # The group's services get the limits of a participant server.
-        self.assertEqual(spec["initContainers"][1]["resources"]["limits"], {"cpu": "2", "memory": "2G"})
+        self.assertEqual(service["resources"]["limits"], {"cpu": "2", "memory": "2G"})
         self.assertNotIn("restartPolicy", spec["initContainers"][0])
         self.assertEqual(spec["containers"][0]["command"][-8:], [
             "--track", "intermediate", "--kind", "tests", "--wait", "120", "--timeout", "600"])
@@ -181,15 +183,28 @@ class GradingRemoteTests(unittest.TestCase):
                 self.assertEqual(prepare["env"], [
                     {"name": "HOST_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}])
 
-    def test_pods_without_network_resolve_no_names(self):
+    def test_pods_without_network_answer_name_lookups_themselves(self):
         self.start(egress="none")
         spec = self.pod("group_01")["spec"]
         self.assertEqual((spec["dnsPolicy"], spec["dnsConfig"]), ("None", {"nameservers": ["127.0.0.1"]}))
+        # The dns container answers on 127.0.0.1:53, a port that uid 1000 may open in this pod.
+        self.assertEqual(spec["securityContext"]["sysctls"],
+                         [{"name": "net.ipv4.ip_unprivileged_port_start", "value": "53"}])
+        dns = spec["initContainers"][1]
+        self.assertEqual((dns["name"], dns["restartPolicy"], dns["command"][5]), ("dns", "Always", "dns"))
+        # The group's services start once it answers.
+        self.assertEqual(dns["startupProbe"]["exec"]["command"], ["test", "-f", "/queries/ready"])
+        self.assertEqual(spec["initContainers"][2]["name"], "service")
+        self.assertEqual({mount["name"]: mount["readOnly"] for mount in dns["volumeMounts"]},
+                         {"queries": False, "runner": True})
         self.cluster = FakeCluster()
         self.start(egress="participant")
         spec = self.pod("group_01")["spec"]
         self.assertNotIn("dnsPolicy", spec)  # the cluster DNS, as in participant servers
         self.assertNotIn("dnsConfig", spec)
+        self.assertNotIn("sysctls", spec["securityContext"])
+        self.assertEqual([container["name"] for container in spec["initContainers"]], ["prepare", "service"])
+        self.assertNotIn("queries", [volume["name"] for volume in spec["volumes"]])
 
     def test_only_the_grader_sees_the_grading_files_and_the_results(self):
         self.start(kind="audit", bundle=pack(dict(FILES, **{"audit_a1.py": "print('audit')\n"})))
@@ -200,10 +215,16 @@ class GradingRemoteTests(unittest.TestCase):
             {"key": "grading-pod.py", "path": "grading-pod.py"}, {"key": "manifest.json", "path": "manifest.json"}])
         mounts = {container["name"]: {mount["name"]: mount for mount in container["volumeMounts"]}
                   for container in spec["initContainers"] + spec["containers"]}
-        self.assertEqual(sorted(mounts["service"]), ["home", "runner", "workspace"])
+        self.assertEqual(sorted(mounts["service"]), ["home", "network", "runner", "workspace"])
         self.assertEqual(sorted(mounts["prepare"]), ["home", "runner", "source", "workspace"])
-        self.assertEqual(sorted(mounts["grader"]), ["grading", "results", "source"])
+        self.assertEqual(sorted(mounts["dns"]), ["queries", "runner"])
+        self.assertEqual(sorted(mounts["grader"]), ["grading", "network", "queries", "results", "source"])
         self.assertTrue(mounts["grader"]["source"]["readOnly"])
+        self.assertTrue(mounts["grader"]["queries"]["readOnly"])
+        # The group's processes write down their network use; the grader only reads it.
+        self.assertEqual((mounts["service"]["network"]["readOnly"], mounts["grader"]["network"]["readOnly"]),
+                         (False, True))
+        self.assertEqual(volumes["network"], {"name": "network", "emptyDir": {"sizeLimit": "16Mi"}})
         # The group's code runs in the service container: no grading files, no results.
         for name in ("grading", "results", "source"):
             self.assertNotIn(name, mounts["service"])

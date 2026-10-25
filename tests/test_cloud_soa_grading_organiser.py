@@ -146,7 +146,9 @@ class LocalHelperTests(unittest.TestCase):
         run_dir = self.root / "run"
         run_dir.mkdir()
         (run_dir / "run.json").write_text(json.dumps({"run": "0123abcd"}))
-        block = {"summary": {"kind": "tests", "work": "changed", "outcome": "graded"},
+        block = {"summary": {"kind": "tests", "work": "changed", "outcome": "graded", "network": {
+                     "attempts": 2, "hosts": 1, "cut": False,
+                     "targets": [{"kind": "lookup", "target": "en.wikipedia.org", "count": 2}]}},
                  "files": {"tests.txt": "x", "tests.json": json.dumps({"earned": 3, "possible": 12, "lines": []}),
                            "../evil.txt": "no", "service.log": "no"}}
         result = {"state": "done", "reason": "", "pod": {}, "events": [], "results": block,
@@ -156,7 +158,7 @@ class LocalHelperTests(unittest.TestCase):
         done = helper("receive", "step", "--run-dir", str(run_dir), stdin=framed(answer))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.strip(), "remaining=1")
-        self.assertIn("group_01  changed    3/12 points", done.stderr)
+        self.assertIn("group_01  changed    3/12 points  (its code tried to reach other hosts)", done.stderr)
         self.assertEqual(sorted(path.name for path in (run_dir / "group_01").iterdir()),
                          ["result.json", "service.log", "tests.json", "tests.txt"])
         self.assertFalse((self.root / "evil.txt").exists())
@@ -182,10 +184,12 @@ class LocalHelperTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 run_dir = self.root / kind
                 run_dir.mkdir()
+                # The audit of this run came from another folder than the checkout's.
+                files = {"audit_common.py": {"path": "/elsewhere/ta-audit/audit_common.py"}} if kind == "audit" else {}
                 (run_dir / "run.json").write_text(json.dumps({
-                    "run": "0123abcd", "module": "1", "track": "intermediate", "kind": kind,
+                    "run": "0123abcd", "module": "1", "track": "intermediate", "kind": kind, "egress": "none",
                     "created": "2026-10-25T10:00:00Z", "started": "2026-10-25T10:00:05Z", "image": "img:1",
-                    "groups": ["group_01", "group_02", "group_03", "group_04", "group_05"]}))
+                    "groups": ["group_01", "group_02", "group_03", "group_04", "group_05"], "files": files}))
                 if kind == "tests":
                     result("group_01", kind, {"tests.json": json.dumps(tests)})
                 else:
@@ -193,21 +197,46 @@ class LocalHelperTests(unittest.TestCase):
                              "checks": [{"id": "A1-URL-03", "status": "FAIL"}, {"id": "A1-ID-02", "status": "WARN"}]}
                     result("group_01", kind, {"audit.json": json.dumps(audit)})
                 result("group_02", kind, {}, work="missing", outcome="not graded", reason="no Module-1 folder")
-                result("group_03", kind, {}, closed=[5000], listening=[5050])
-                result("group_05", kind, {f"{kind}.txt": "Traceback"}, exit=2)
+                result("group_03", kind, {}, closed=[5000], listening=[5050], network={
+                    "attempts": 30, "hosts": 25, "cut": True, "targets": [
+                        {"kind": "lookup", "target": f"host{number}.example", "count": 2} for number in range(4)]
+                    + [{"kind": "connect", "target": "192.0.2.1:5432", "count": 1}]})
+                # Names come from the group's code: in summary.md they are set as code.
+                result("group_05", kind, {f"{kind}.txt": "Traceback"}, exit=2, network={
+                    "attempts": 1, "hosts": 1, "cut": False,
+                    "targets": [{"kind": "query", "target": "<img/src=x/onerror=alert(1)>`|", "count": 1}]})
                 printed = helper("summary", "--run-dir", str(run_dir))
                 self.assertEqual(printed.returncode, 0, printed.stderr)
                 rows = list(__import__("csv").reader(io.StringIO((run_dir / "summary.csv").read_text())))
-                first = ["group_01", "changed", "11/12 points", "graded", "Methods: PUT /:id (200, 400, 404)"] \
-                    if kind == "tests" else ["group_01", "changed", "FAIL 1, WARN 2, ERROR 0", "graded", "A1-URL-03"]
+                self.assertEqual(rows[0][5], "Network use")
+                first = ["group_01", "changed", "11/12 points", "graded", "Methods: PUT /:id (200, 400, 404)", ""] \
+                    if kind == "tests" else ["group_01", "changed", "FAIL 1, WARN 2, ERROR 0", "graded", "A1-URL-03",
+                                             ""]
                 self.assertEqual(rows[1], first)
-                self.assertEqual(rows[2], ["group_02", "missing", "", "not graded: no Module-1 folder", ""])
+                self.assertEqual(rows[2], ["group_02", "missing", "", "not graded: no Module-1 folder", "", ""])
                 self.assertEqual(rows[3][3], "no service on port 5000 (listening: 5050)")
-                self.assertEqual(rows[4], ["group_04", "-", "", "no results", ""])
+                # A service that cannot start without its database, for example.
+                self.assertEqual(rows[3][5], "looked up host0.example (2), host1.example (2), host2.example (2) "
+                                             "and 1 more; connected to 192.0.2.1:5432 (1); 20 more "
+                                             "(more were left out)")
+                self.assertEqual(rows[4], ["group_04", "-", "", "no results", "", ""])
                 self.assertEqual(rows[5][3], f"no {kind}.json (exit 2); see {kind}.txt")
+                self.assertEqual(rows[5][5], "asked the DNS for <img/src=x/onerror=alert(1)>`| (1)")
                 markdown = (run_dir / "summary.md").read_text()
                 self.assertIn("| group_01 | changed |", markdown)
+                self.assertIn("| looked up `host0.example` (2), `host1.example` (2), `host2.example` (2) and 1 more; "
+                              "connected to `192.0.2.1:5432` (1); 20 more (more were left out) |", markdown)
+                self.assertIn("| asked the DNS for `<img/src=x/onerror=alert(1)>'\\|` (1) |", markdown)
                 self.assertIn(str(run_dir), printed.stdout)
+                # The organiser can grade these groups again with network: same track, image and audit.
+                action = "cloud-module1-grade" if kind == "tests" else "cloud-module1-audit"
+                audit = " CLOUD_SOA_TA_AUDIT_DIR=/elsewhere/ta-audit" if kind == "audit" else ""
+                command = ("    CLOUD_SOA_GRADING_EGRESS=participant CLOUD_SOA_GRADING_GROUPS=group_03,group_05 "
+                           f"CLOUD_COMPUTING_SOA_MODE=intermediate CLOUD_SOA_GRADING_IMAGE=img:1{audit} "
+                           f"scripts/workshops/organizer-main.sh {action}")
+                for text in (markdown, printed.stdout):
+                    self.assertIn("The code of these groups tried to reach other hosts: group_03, group_05", text)
+                    self.assertIn(command, text.splitlines())
 
 
 class OrganiserFlowTests(unittest.TestCase):

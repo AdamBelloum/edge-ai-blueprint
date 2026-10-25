@@ -212,9 +212,22 @@ def pod(run, group, claim, owned_by):
     def mount(name, path, read_only=False):
         return {"name": name, "mountPath": path, "readOnly": read_only}
 
-    # Without network, name lookups go to 127.0.0.1, where nothing answers: they
-    # fail at once, instead of after a 5-second timeout each at the cluster DNS.
-    dns = {"dnsPolicy": "None", "dnsConfig": {"nameservers": ["127.0.0.1"]}} if run["egress"] == "none" else {}
+    # Without network, the pod's only name server is its dns container on
+    # 127.0.0.1:53, a port that uid 1000 may open in this pod: it refuses every
+    # lookup at once and writes down the names. At the cluster DNS, blocked
+    # lookups would take up to 5 seconds each.
+    offline = run["egress"] == "none"
+    dns = {"dnsPolicy": "None", "dnsConfig": {"nameservers": ["127.0.0.1"]}} if offline else {}
+    ports = {"sysctls": [{"name": "net.ipv4.ip_unprivileged_port_start", "value": "53"}]} if offline else {}
+    resolver = [
+        {"name": "dns", "image": image, "imagePullPolicy": "IfNotPresent", "restartPolicy": "Always",
+         "command": command("dns", "/runner"), "securityContext": secure,
+         "resources": resources("20m", "32Mi", {"cpu": "200m", "memory": "128Mi"}),
+         # The group's services start once it answers.
+         "startupProbe": {"exec": {"command": ["test", "-f", "/queries/ready"]}, "periodSeconds": 1,
+                          "failureThreshold": 60},
+         "volumeMounts": [mount("queries", "/queries"), mount("runner", "/runner", True)]},
+    ] if offline else []
     return {
         "apiVersion": "v1", "kind": "Pod",
         "metadata": {
@@ -229,7 +242,8 @@ def pod(run, group, claim, owned_by):
             "automountServiceAccountToken": False,
             "enableServiceLinks": False,
             **dns,
-            "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"}},
+            "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"},
+                                **ports},
             # The tolerations of the chart's participant servers, so that the pod runs where they do.
             "tolerations": [{"key": key, "operator": "Equal", "value": "user", "effect": "NoSchedule"}
                             for key in ("hub.jupyter.org/dedicated", "hub.jupyter.org_dedicated")],
@@ -238,11 +252,13 @@ def pod(run, group, claim, owned_by):
                 {"name": "home", "emptyDir": {"sizeLimit": "1Gi"}},
                 {"name": "source", "emptyDir": {"sizeLimit": "64Mi"}},
                 {"name": "results", "emptyDir": {"sizeLimit": "64Mi"}},
+                # Where the group's processes write down the hosts that they try to reach.
+                {"name": "network", "emptyDir": {"sizeLimit": "16Mi"}},
                 {"name": "runner", "configMap": {"name": bundle, "items": [
                     {"key": "grading-pod.py", "path": "grading-pod.py"},
                     {"key": "manifest.json", "path": "manifest.json"}]}},
                 {"name": "grading", "configMap": {"name": bundle}},
-            ],
+            ] + ([{"name": "queries", "emptyDir": {"sizeLimit": "8Mi"}}] if offline else []),
             "initContainers": [
                 {"name": "prepare", "image": image, "imagePullPolicy": "IfNotPresent",
                  "command": command("prepare", "/runner", "--policy-wait", "60"), "securityContext": secure,
@@ -251,13 +267,14 @@ def pod(run, group, claim, owned_by):
                  "resources": resources("100m", "128Mi"),
                  "volumeMounts": [mount("workspace", "/workspace", True), mount("home", "/home/jovyan"),
                                   mount("source", "/source"), mount("runner", "/runner", True)]},
+                *resolver,
                 # A native sidecar: it runs next to the grader and stops when the grader is done.
                 {"name": "service", "image": image, "imagePullPolicy": "IfNotPresent", "restartPolicy": "Always",
                  "command": command("serve", "/runner"), "env": [{"name": "HOME", "value": "/home/jovyan"}],
                  # The limits of a participant server (singleuser cpu and memory in the JupyterHub values).
                  "securityContext": secure, "resources": resources("250m", "256Mi", {"cpu": "2", "memory": "2G"}),
                  "volumeMounts": [mount("workspace", "/workspace", True), mount("home", "/home/jovyan"),
-                                  mount("runner", "/runner", True)]},
+                                  mount("runner", "/runner", True), mount("network", "/network")]},
             ],
             "containers": [
                 {"name": "grader", "image": image, "imagePullPolicy": "IfNotPresent",
@@ -266,7 +283,8 @@ def pod(run, group, claim, owned_by):
                  "env": [{"name": "HOME", "value": "/results"}], "securityContext": secure,
                  "resources": resources("100m", "128Mi"),
                  "volumeMounts": [mount("grading", "/grading", True), mount("source", "/source", True),
-                                  mount("results", "/results")]},
+                                  mount("results", "/results"), mount("network", "/network", True)]
+                 + ([mount("queries", "/queries", True)] if offline else [])},
             ],
         },
     }
@@ -348,7 +366,7 @@ def collect(cluster, item, state, reason, deadline):
                 "started": status.get("startTime", ""), "containers": containers},
         "events": events,
         "logs": {"grader": "\n".join(other[-60:]), "service": start_and_end(cluster, name, "service"),
-                 "prepare": start_and_end(cluster, name, "prepare")},
+                 "prepare": start_and_end(cluster, name, "prepare"), "dns": start_and_end(cluster, name, "dns")},
     }
 
 

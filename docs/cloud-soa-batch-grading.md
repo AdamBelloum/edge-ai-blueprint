@@ -56,8 +56,8 @@ secrets/workshops/grading/<control-plane host>/<UTC time>-module1-tests-<run>/
     ├── tests.txt, tests.json            the grading script's output (audit.md, audit.json, audit.txt for the audit)
     ├── prepare.json                     the files graded, with checksums, and what the group changed
     ├── service.log                      the group's services
-    ├── grade.json, result.json          how the grading went; the pod's state and events
-    └── grader.log, prepare.log
+    ├── grade.json, result.json          how the grading went, the hosts that the code tried to reach; the pod's state and events
+    └── grader.log, prepare.log, dns.log
 ```
 
 The Work column compares the track's code with what the group received:
@@ -69,6 +69,11 @@ The Work column compares the track's code with what the group received:
 | `solution` | the reference solution, for example copied after its release |
 | `missing` | no Module folder, or the track's code is not there; prepare.json lists the folder's tracks |
 | `too large` | the Module folder holds more than 400 MB, or more than 20,000 files and folders; not copied |
+
+The Network use column lists the hosts that a group's code tried to reach,
+with how often. Below the table, summary.md lists the groups
+whose code tried to reach other hosts, and the command that grades them again
+with network (see Network).
 
 The points cover only what the grading script tests: 12 of the 45 points of
 Assignment 1 and 11 of the 55 of Assignment 2. The rubric lines that need a TA
@@ -87,18 +92,24 @@ final.
 ```text
 Pod grading-<run>-group-07
 ├── prepare  init container  waits for the pod's network rules, copies the group's Module folder from its volume (read-only) into an empty home
+├── dns      sidecar         without network only: refuses every name lookup at once and writes down the name
 ├── service  sidecar         starts the group's services in that copy
 └── grader   main container  waits for the services, runs the grading script or the audit, prints the results
 ```
 
-All three containers run as the participant (uid 1000) with the notebook image
-of the JupyterHub deployment:
+All containers run as the participant (uid 1000) with the notebook image of
+the JupyterHub deployment:
 
 - **prepare** waits until the pod's network rules are in force (see Network),
   then copies `Cloud-Computing-SOA/Module-N` to the same path in an
   empty home, records checksums, and compares the track's code with the files
   the track delivers and with the reference solution. It also keeps a copy of
   the track's source files for the audit.
+- **dns**, in pods without network, answers on 127.0.0.1:53, the pod's only
+  name server: it refuses every lookup at once and writes down the name (see
+  Network). The pod lets uid 1000 open ports from 53 up (the sysctl
+  `net.ipv4.ip_unprivileged_port_start`), and the services start only once dns
+  answers.
 - **service** starts the services as the participant instructions do. Module 1:
   `python app.py` in the track folder. Module 2: `bash setup_local_keys.sh` if
   the track has it, then `python auth.py` in `auth_service/` (port 5001) and
@@ -123,7 +134,7 @@ the Outcome column says so; its output is in tests.txt or audit.txt.
 | | |
 |---|---|
 | Group volume | mounted read-only in prepare and service only; nothing is written to it, and its ownership is not changed |
-| Group code | runs only in the service container, which mounts neither the grading script, the audit, the results nor the source copy; prepare never writes through a link that the group's files contain |
+| Group code | runs only in the service container, which mounts neither the grading script, the audit, the results nor the source copy; prepare never writes through a link that the group's files contain; the grader reads the group's network-use files, but follows no link and opens no pipe there; the names that dns writes down are out of the group's reach |
 | Containers | uid 1000, no privilege escalation, all capabilities dropped, the default seccomp profile; CPU and memory limits (for the services those of a participant server); size limits on the temporary volumes and on what is returned |
 | Kubernetes access | no service-account token, no environment variables for the namespace's services |
 | Network | no connections in; none out, unless the organiser asks for the internet (see Network) |
@@ -163,14 +174,29 @@ How the pods are kept offline:
   they are still not in force after a minute, the group is not graded and its
   code never runs; on a cluster that does not enforce NetworkPolicies, no group
   is graded.
-- Name lookups go to 127.0.0.1, where nothing answers, so they fail at once.
-  At the cluster DNS, blocked lookups can take up to 5 seconds each, and a
-  service that looks up names could run out of time.
+- Name lookups go to 127.0.0.1, the pod's only name server, where its dns
+  container refuses each one at once and writes down the name. At the cluster
+  DNS, blocked lookups can take up to 5 seconds each, and a service that looks
+  up names could run out of time.
 
 Code that contacts other hosts fails its checks without network. A URL check
 that looks the host up, for example, rejects every URL, also the ones that the
-grading script expects to be accepted. Such a group gets in its own server the
-points that it does not get here.
+grading script expects to be accepted, and a service that keeps its users in a
+database elsewhere cannot reach it. Such a group gets in its own server points
+that it does not get here. To show which groups that concerns, the pod writes
+down what the group's code tries to reach:
+
+- the dns container: every name that is looked up, by any library or program,
+  such as dnspython for a `mongodb+srv://` address, or libpq for PostgreSQL;
+- a start-up hook in every Python process of the group's code (`sitecustomize`,
+  through `PYTHONPATH`): the names that it looks up and the addresses that it
+  connects to, from Python's audit events, at most 1000 lines per process.
+
+Neither blocks anything, and both leave out the pod itself. The summary lists
+these hosts under Network use, and the command that grades those groups again
+with network, for comparison. Not recorded are connections to an address
+rather than a name by programs other than Python, and with network, lookups
+that Python does not report: the dns container runs only without network.
 
 ### Grading with network
 

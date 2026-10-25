@@ -1,20 +1,25 @@
 """Grading pod: copy a group's work, start its services, grade them.
 
 The organiser's grading entries (grading-main.sh) start one pod per group with
-the participants' notebook image. This script runs in its three containers,
-as the participant (uid 1000):
+the participants' notebook image. This script runs in its containers, as the
+participant (uid 1000):
 
     prepare  (init container) waits until the pod's network rules are in
              force, copies Cloud-Computing-SOA/Module-N from the group's
              volume, which is mounted read-only, into an empty home at the same
              path as in JupyterHub, and compares the track's code with the
              files the group received and with the reference solution.
+    dns      (sidecar, pods without network) answers every name lookup in the
+             pod at once with REFUSED, and writes down the names.
     serve    (sidecar) starts the group's services in that copy as the
              participant instructions do, with the group's ~/.local packages,
              and logs their output. A service that stops is not restarted.
+             The group's Python processes write down the hosts that they
+             look up or connect to (HOOK).
     grade    (main container) waits for the services, runs the grading script
              or the TA audit against them, and prints the results as one block
-             that the organiser collects with kubectl logs.
+             that the organiser collects with kubectl logs, with the hosts that
+             the group's code tried to reach.
 
 Only the grade container sees the grading scripts, the audit and the results;
 the group's code runs in the serve container and cannot read or change them.
@@ -27,12 +32,15 @@ import gzip
 import hashlib
 import json
 import os
+import re
+import select
 import shutil
 import signal
 import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -67,6 +75,12 @@ FILE_LIMIT = 2 * 2**20     # bytes of one result file returned to the organiser
 KUBELET = 10250            # the kubelet's port on every node
 BEGIN = "===== GRADING RESULTS BEGIN ====="
 END = "===== GRADING RESULTS END ====="
+NETWORK_LINE = re.compile(r"(lookup|connect|send) ([!-~]{1,220})")  # written by HOOK
+QUERY_LINE = re.compile(r"query ([!-~]{1,220})")                     # written by dns
+QUERIES = 20000          # names that dns writes down at most
+NETWORK_FILES = 200      # files of HOOK that the grader reads at most,
+NETWORK_BYTES = 200000   # bytes of each,
+NETWORK_HOSTS = 5000     # and different hosts that it counts at most
 
 
 def say(text):
@@ -247,7 +261,197 @@ def prepare(args):
     say(f"work: {record['work']}{': ' + record['reason'] if record['reason'] else ''}")
 
 
+# ---------------------------------------------------------------- dns
+
+def printable(text):
+    """Text that a group's code chose, as ASCII without spaces or control characters."""
+    text = text.encode("ascii", "backslashreplace").decode("ascii")
+    return "".join(char if char.isprintable() and not char.isspace() else "?" for char in text)[:200]
+
+
+def query_name(message):
+    """The name that a DNS query asks for, and where its question ends; None for anything else."""
+    if len(message) < 17 or message[2] & 0x80 or message[4:6] != b"\x00\x01":
+        return None
+    labels, offset = [], 12
+    while offset < len(message) and message[offset]:
+        size = message[offset]
+        if size > 63 or offset + 1 + size >= len(message):
+            return None
+        labels.append(message[offset + 1:offset + 1 + size].decode("ascii", "backslashreplace"))
+        offset += 1 + size
+    if offset + 5 > len(message):
+        return None
+    return ".".join(labels), offset + 5
+
+
+def refusal(message, end):
+    """REFUSED for a query: its identifier, operation code, question and recursion flag."""
+    return message[:2] + bytes([0x80 | message[2] & 0x79, 5]) + b"\x00\x01" + bytes(6) + message[12:end]
+
+
+def dns(args):
+    """Answer every DNS query on 127.0.0.1 at once with REFUSED, and write down the names asked for.
+
+    The pod's resolv.conf names 127.0.0.1 as its only name server, so this sees
+    every lookup, also those that libraries such as dnspython make themselves
+    and those of programs other than Python. Without an answer, such lookups
+    would wait for their timeout.
+    """
+    folder = Path(args.queries)
+    written = 0
+
+    def answer(message):
+        nonlocal written
+        found = query_name(message)
+        if found is None:
+            return None
+        if written <= QUERIES:
+            with (folder / "queries.log").open("a", encoding="ascii") as stream:
+                stream.write(("query " + printable(found[0]) if written < QUERIES else "more") + "\n")
+            written += 1
+        return refusal(message, found[1])
+
+    udp, tcp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM), socket.socket()
+    try:
+        udp.bind(("127.0.0.1", args.dns_port))
+        tcp.bind(("127.0.0.1", args.dns_port))
+        tcp.listen(16)
+    except OSError as error:  # lookups then fail without an answer, and are not written down
+        say(f"cannot answer name lookups on 127.0.0.1:{args.dns_port}: {error}")
+        (folder / "ready").write_text("")
+        while True:
+            time.sleep(3600)
+    (folder / "ready").write_text("")
+    say(f"answering name lookups on 127.0.0.1:{args.dns_port} with REFUSED")
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    buffers = {}  # TCP connections and what they sent so far
+    while True:
+        for ready in select.select([udp, tcp, *buffers], [], [], 60)[0]:
+            try:
+                if ready is udp:
+                    message, sender = udp.recvfrom(4096)
+                    reply = answer(message)
+                    if reply:
+                        udp.sendto(reply, sender)
+                elif ready is tcp:
+                    connection, _ = tcp.accept()
+                    connection.settimeout(1)
+                    if len(buffers) >= 64:  # the oldest connection makes room
+                        oldest = next(iter(buffers))
+                        oldest.close()
+                        del buffers[oldest]
+                    buffers[connection] = b""
+                else:
+                    data = ready.recv(4096)
+                    buffer = buffers[ready] + data
+                    while len(buffer) >= 2 and len(buffer) >= 2 + int.from_bytes(buffer[:2], "big"):
+                        size = int.from_bytes(buffer[:2], "big")
+                        reply = answer(buffer[2:2 + size])
+                        if reply:
+                            ready.sendall(len(reply).to_bytes(2, "big") + reply)
+                        buffer = buffer[2 + size:]
+                    if not data or len(buffer) > 65537:
+                        raise OSError("closed")
+                    buffers[ready] = buffer
+            except OSError:
+                if ready in buffers:
+                    ready.close()
+                    del buffers[ready]
+
+
 # ---------------------------------------------------------------- serve
+
+# Python runs this file at start-up (as sitecustomize, on PYTHONPATH) in every
+# process of the group's code. It blocks nothing: each process writes one line
+# per name lookup or connection to a host outside the pod into
+# $GRADING_NETWORK_LOG/<pid>.log, at most 1000 lines. Only TCP connections
+# count: connecting a UDP socket sends nothing, and Flask's development server
+# does so to find its own address.
+HOOK = r'''"""Grading: write down the hosts that this process looks up or connects to; block nothing."""
+import os
+import sys
+
+
+def _watch(folder):
+    import ipaddress
+    import socket
+
+    local = {"localhost", "ip6-localhost", "ip6-loopback"}
+    try:
+        local.add(socket.gethostname())
+        local.update(info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None))
+    except (OSError, UnicodeError):
+        pass
+    state = {"pid": None, "fd": None, "lines": 0}
+
+    def text(value):
+        if isinstance(value, bytes):
+            value = value.decode("ascii", "backslashreplace")
+        value = str(value).encode("ascii", "backslashreplace").decode("ascii")
+        return "".join(c if c.isprintable() and not c.isspace() else "?" for c in value)[:200]
+
+    def address(host):
+        try:
+            return ipaddress.ip_address(host.split("%", 1)[0])
+        except ValueError:
+            return None
+
+    def outside(host):
+        if not host or host in local or host.endswith(".localhost"):
+            return False
+        found = address(host)
+        return found is None or not (found.is_loopback or found.is_unspecified)
+
+    def write(line):
+        if state["pid"] != os.getpid():  # a new process, after fork()
+            state.update(pid=os.getpid(), fd=None, lines=0)
+        if state["lines"] > 1000:
+            return
+        state["lines"] += 1
+        if state["fd"] is None:
+            state["fd"] = os.open(os.path.join(folder, "%d.log" % state["pid"]),
+                                  os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.write(state["fd"], ((line if state["lines"] <= 1000 else "more") + "\n").encode("ascii"))
+
+    def hook(event, args):
+        if not event.startswith("socket."):
+            return
+        try:
+            if event in ("socket.getaddrinfo", "socket.gethostbyname"):
+                host = args[0].decode("ascii", "replace") if isinstance(args[0], bytes) else args[0]
+                # An address needs no lookup; the connection to it is written down.
+                if isinstance(host, str) and outside(host) and address(host) is None:
+                    write("lookup " + text(host))
+            elif event in ("socket.connect", "socket.sendto", "socket.sendmsg"):
+                sock, target = args[0], args[1]
+                if event == "socket.connect" and getattr(sock, "type", None) != socket.SOCK_STREAM:
+                    return
+                if isinstance(target, tuple) and len(target) >= 2 and isinstance(target[0], str) \
+                        and outside(target[0]):
+                    host = "[%s]" % target[0] if ":" in target[0] else target[0]
+                    kind = "connect" if event == "socket.connect" else "send"
+                    write("%s %s:%s" % (kind, text(host), text(target[1])))
+        except Exception:
+            state["lines"] = 1001  # stop, rather than get in the way of the group's code
+
+    sys.addaudithook(hook)
+
+
+if os.environ.get("GRADING_NETWORK_LOG") and hasattr(sys, "addaudithook"):
+    _watch(os.environ["GRADING_NETWORK_LOG"])
+'''
+
+
+def network_hook(folder):
+    """The environment that makes the group's Python processes run HOOK; {} if folder is not writable."""
+    if not os.access(folder, os.W_OK):
+        return {}
+    hook = Path(tempfile.mkdtemp(prefix="grading-hook-"))
+    (hook / "sitecustomize.py").write_text(HOOK, encoding="utf-8")
+    path = os.environ.get("PYTHONPATH")
+    return {"PYTHONPATH": f"{hook}{os.pathsep}{path}" if path else str(hook), "GRADING_NETWORK_LOG": str(folder)}
+
 
 def interpreter(track):
     """A virtual environment in the track or Module folder, else the image's python."""
@@ -302,7 +506,7 @@ def serve(args):
     if all((track / relative).is_file() for relative in module["code"]):
         # As in the participant's terminal, plus the packages in the group's ~/.local.
         environment = dict(os.environ, HOME=args.home, PYTHONUNBUFFERED="1",
-                           PYTHONUSERBASE=str(Path(args.workspace, ".local")))
+                           PYTHONUSERBASE=str(Path(args.workspace, ".local")), **network_hook(args.network))
         python = "python"
         venv = interpreter(track)
         if venv:
@@ -366,6 +570,80 @@ def wait_for_ports(ports, seconds):
         time.sleep(1)
 
 
+def read_regular(path, limit):
+    """Up to limit bytes of a regular file; None for anything else, such as a link or a pipe, which is not followed."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        chunks, size = [], 0
+        while size < limit:
+            chunk = os.read(descriptor, min(1 << 16, limit - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+
+
+def network_use(folder, queries):
+    """What the group's code looked up or connected to: the lines that HOOK wrote, and the names that dns saw.
+
+    The group's code can write into folder too, so only regular files and
+    lines in HOOK's form are read, within limits; "cut" says that something
+    was left out.
+    """
+    counts, cut = {}, False
+
+    def count(key, number=1):
+        nonlocal cut
+        if key in counts or len(counts) < NETWORK_HOSTS:
+            counts[key] = counts.get(key, 0) + number
+        else:
+            cut = True
+
+    names = []
+    if folder.is_dir():
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name.endswith(".log"):
+                    names.append(entry.name)
+                    if len(names) > NETWORK_FILES:
+                        break
+    cut = len(names) > NETWORK_FILES
+    for name in sorted(names)[:NETWORK_FILES]:
+        data = read_regular(folder / name, NETWORK_BYTES + 1)
+        if data is None:
+            continue
+        cut = cut or len(data) > NETWORK_BYTES
+        for line in data[:NETWORK_BYTES].decode("ascii", "replace").splitlines():
+            match = NETWORK_LINE.fullmatch(line)
+            if match:
+                count(match.groups())
+            cut = cut or line == "more"
+    # Lookups that the group's Python code did not report: libraries that send
+    # their own DNS queries, programs other than Python, CPython's own lookups.
+    reported = {target.lower().rstrip(".") for kind, target in counts if kind == "lookup"}
+    asked = {}
+    for line in (read_regular(queries / "queries.log", 4 << 20) or b"").decode("ascii", "replace").splitlines():
+        match = QUERY_LINE.fullmatch(line)
+        if match and match.group(1).lower().rstrip(".") not in reported:
+            asked[match.group(1)] = asked.get(match.group(1), 0) + 1
+        cut = cut or line == "more"
+    for name, number in asked.items():
+        count(("query", name), number)
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return {"attempts": sum(counts.values()), "hosts": len(ranked), "cut": cut,
+            "targets": [{"kind": kind, "target": target, "count": number} for (kind, target), number in ranked[:20]]}
+
+
 def readable(path):
     """The file as text, cut at 2 MB; None for a JSON file that is larger (cut, it would not parse)."""
     data = path.read_bytes()
@@ -414,6 +692,7 @@ def grade(args):
                 summary["outcome"] = "timed out"
                 output += f"\n[stopped after {args.timeout} s]\n".encode()
             (results / f"{args.kind}.txt").write_bytes(output)
+            summary["network"] = network_use(Path(args.network), Path(args.queries))
     except Exception as error:  # report what happened instead of failing the pod
         summary.update(outcome="error", error=f"{type(error).__name__}: {error}")
     summary["seconds"] = round(time.monotonic() - started, 1)
@@ -435,7 +714,7 @@ def grade(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("step", choices=("prepare", "serve", "grade"))
+    parser.add_argument("step", choices=("prepare", "dns", "serve", "grade"))
     parser.add_argument("--module", choices=sorted(MODULES), required=True)
     parser.add_argument("--track", choices=TRACKS[:3], required=True)
     parser.add_argument("--kind", choices=("tests", "audit"), default="tests")
@@ -445,14 +724,17 @@ def main():
     parser.add_argument("--manifest", default="/runner/manifest.json")
     parser.add_argument("--bundle", default="/grading", help="the grading script or the audit")
     parser.add_argument("--results", default="/results")
+    parser.add_argument("--network", default="/network", help="where the group's processes write down their hosts")
+    parser.add_argument("--queries", default="/queries", help="where dns writes down the names asked for")
+    parser.add_argument("--dns-port", type=int, default=53, help="the port that dns answers on")
     parser.add_argument("--policy-wait", type=int, default=0,
                         help="seconds prepare waits for the pod's network rules (0: no check, outside Kubernetes)")
     parser.add_argument("--wait", type=int, default=150, help="seconds to wait for the services")
     parser.add_argument("--timeout", type=int, default=600, help="seconds for the grading script or audit")
     args = parser.parse_args()
-    for name in ("workspace", "home", "source", "manifest", "bundle", "results"):
+    for name in ("workspace", "home", "source", "manifest", "bundle", "results", "network", "queries"):
         setattr(args, name, os.path.abspath(getattr(args, name)))
-    {"prepare": prepare, "serve": serve, "grade": grade}[args.step](args)
+    {"prepare": prepare, "dns": dns, "serve": serve, "grade": grade}[args.step](args)
 
 
 if __name__ == "__main__":

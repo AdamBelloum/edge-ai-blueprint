@@ -83,7 +83,7 @@ class Pod:
         test.addCleanup(temporary.cleanup)
         self.test, self.module, self.track, self.kind = test, module, track, kind
         self.root = Path(temporary.name)
-        for name in ("workspace", "home", "source", "results", "bundle", "bin"):
+        for name in ("workspace", "home", "source", "results", "bundle", "bin", "network", "queries"):
             (self.root / name).mkdir()
         self.folder = self.root / "workspace/Cloud-Computing-SOA" / f"Module-{module}"
         files, _ = local.bundle(module, kind, local.AUDIT)
@@ -120,7 +120,8 @@ class Pod:
                 "--track", self.track, "--workspace", str(self.root / "workspace"),
                 "--home", str(self.root / "home"), "--source", str(self.root / "source"),
                 "--manifest", str(self.root / "bundle/manifest.json"), "--bundle", str(self.root / "bundle"),
-                "--results", str(self.root / "results"), *extra]
+                "--results", str(self.root / "results"), "--network", str(self.root / "network"),
+                "--queries", str(self.root / "queries"), *extra]
 
     def prepare(self, *extra, environment=None):
         result = subprocess.run(self.command("prepare", *extra), capture_output=True, text=True, timeout=60,
@@ -334,6 +335,146 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(pod.grade()["work"], "error")
 
 
+class NetworkHookTests(unittest.TestCase):
+    """The hook that writes down network use, in a plain Python process, and how the grader counts its lines."""
+
+    def folder(self):
+        temporary = tempfile.TemporaryDirectory(prefix="grading-network-")
+        self.addCleanup(temporary.cleanup)
+        return Path(temporary.name)
+
+    def python(self, code, log):
+        hook = self.folder()
+        (hook / "sitecustomize.py").write_text(pod_module.HOOK, encoding="utf-8")
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
+                                env=dict(os.environ, PYTHONPATH=str(hook), GRADING_NETWORK_LOG=str(log)))
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        return result.stdout
+
+    def test_each_process_writes_at_most_1000_lines_and_a_child_its_own(self):
+        log = self.folder()
+        self.python("import os, sys\n"
+                    "for number in range(1500):\n"
+                    "    sys.audit('socket.getaddrinfo', 'host%d.example' % number, 80, 0, 0, 0)\n"
+                    "child = os.fork()\n"
+                    "if child == 0:\n"
+                    "    sys.audit('socket.getaddrinfo', 'child.example', 80, 0, 0, 0)\n"
+                    "    os._exit(0)\n"
+                    "os.waitpid(child, 0)\n", log)
+        self.assertEqual(len(list(log.iterdir())), 2)
+        use = pod_module.network_use(log, self.folder())
+        self.assertEqual((use["attempts"], use["hosts"], use["cut"], len(use["targets"])), (1001, 1001, True, 20))
+
+    def test_the_grader_reads_only_regular_files_and_hook_lines_within_limits(self):
+        # The group's code can write into the folder too.
+        log, elsewhere = self.folder(), self.folder()
+        (log / "1.log").write_text("lookup ok.example\nconnect\nlookup two words\n" + "x" * 300 + "\n")
+        (elsewhere / "secret.log").write_text("lookup leaked.example\n")
+        os.symlink(elsewhere / "secret.log", log / "link.log")  # not followed
+        os.mkfifo(log / "pipe.log")  # not opened for reading: that would wait for a writer
+        use = pod_module.network_use(log, self.folder())
+        self.assertEqual((use["attempts"], use["cut"], use["targets"]),
+                         (1, False, [{"kind": "lookup", "target": "ok.example", "count": 1}]))
+        # More files, longer files or more hosts than the limits: the rest is left out, and that is said.
+        for name, text in (("many", None), ("long", "lookup a.example\n" * 20000), ("hosts", None)):
+            with self.subTest(name):
+                log = self.folder()
+                if name == "many":
+                    for number in range(pod_module.NETWORK_FILES + 1):
+                        (log / f"{number}.log").write_text("lookup a.example\n")
+                elif name == "long":
+                    (log / "1.log").write_text(text)
+                else:
+                    for number in range(6):
+                        (log / f"{number}.log").write_text("".join(
+                            f"lookup h{number}-{line}.example\n" for line in range(1000)))
+                use = pod_module.network_use(log, self.folder())
+                self.assertTrue(use["cut"])
+                self.assertLessEqual(use["hosts"], pod_module.NETWORK_HOSTS)
+
+    def test_lookups_that_python_does_not_report_come_from_the_dns_container(self):
+        log, queries = self.folder(), self.folder()
+        (log / "7.log").write_text("lookup en.wikipedia.org\nconnect 192.0.2.1:443\n")
+        # glibc asks for A and AAAA; dnspython or a C library asks without Python's lookup event.
+        (queries / "queries.log").write_text("query en.wikipedia.org\nquery EN.wikipedia.org.\n"
+                                             + "query cluster0.mongodb.net\n" * 3 + "query bad name\n")
+        use = pod_module.network_use(log, queries)
+        self.assertEqual(use["targets"], [
+            {"kind": "query", "target": "cluster0.mongodb.net", "count": 3},
+            {"kind": "connect", "target": "192.0.2.1:443", "count": 1},
+            {"kind": "lookup", "target": "en.wikipedia.org", "count": 1}])
+        self.assertEqual(local.network_note({"network": use}),
+                         "looked up en.wikipedia.org (1); asked the DNS for cluster0.mongodb.net (3); "
+                         "connected to 192.0.2.1:443 (1)")
+
+    def test_the_hook_never_gets_in_the_way(self):
+        # A folder that cannot be written: the process goes on as if there were no hook.
+        output = self.python("import sys\nsys.audit('socket.getaddrinfo', 'example.com', 80, 0, 0, 0)\n"
+                             "print('still running')\n", Path("/nonexistent/folder"))
+        self.assertEqual(output, "still running\n")
+        self.assertEqual(pod_module.network_use(Path("/nonexistent/folder"), Path("/nonexistent"))["attempts"], 0)
+        self.assertEqual(pod_module.network_hook(Path("/nonexistent/folder")), {})
+
+
+class DnsTests(unittest.TestCase):
+    """The dns step: every query refused at once, and its name written down."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="grading-dns-")
+        self.addCleanup(temporary.cleanup)
+        self.queries = Path(temporary.name)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            self.port = probe.getsockname()[1]
+
+    def start(self):
+        process = subprocess.Popen([sys.executable, "-s", "-E", "-B", str(POD_SCRIPT), "dns", "--module", "1",
+                                    "--track", "intermediate", "--queries", str(self.queries),
+                                    "--dns-port", str(self.port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: (process.terminate(), process.wait(10), process.stdout.close()))
+        deadline = time.monotonic() + 20
+        while not (self.queries / "ready").exists():
+            self.assertLess(time.monotonic(), deadline, "dns did not get ready")
+            time.sleep(0.1)
+        return process
+
+    @staticmethod
+    def query(name, ident=0x1234, kind=1):
+        labels = b"".join(bytes([len(label)]) + label.encode() for label in name.split("."))
+        return ident.to_bytes(2, "big") + b"\x01\x00\x00\x01" + bytes(6) + labels + b"\x00" + \
+            kind.to_bytes(2, "big") + b"\x00\x01"
+
+    def test_queries_are_refused_at_once_and_written_down(self):
+        self.start()
+        question = self.query("db.example.com")
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+            udp.settimeout(2)
+            udp.sendto(question, ("127.0.0.1", self.port))
+            answer = udp.recv(512)
+            # Not queries: an answer, and a message too short; nothing is sent back.
+            udp.sendto(b"\x12\x34\x81\x80" + question[4:], ("127.0.0.1", self.port))
+            udp.sendto(b"\x00", ("127.0.0.1", self.port))
+            udp.sendto(self.query("cluster0.mongodb.net", ident=7, kind=33), ("127.0.0.1", self.port))  # SRV
+            self.assertEqual(udp.recv(512)[:2], b"\x00\x07")
+        # The same identifier and question; QR, RD and REFUSED; one question and no answer.
+        self.assertEqual(answer, b"\x12\x34\x81\x05\x00\x01" + bytes(6) + question[12:])
+        with socket.create_connection(("127.0.0.1", self.port), timeout=2) as tcp:
+            message = self.query("over.tcp.example", ident=9)
+            tcp.sendall(len(message).to_bytes(2, "big") + message)
+            size = int.from_bytes(tcp.recv(2), "big")
+            self.assertEqual(tcp.recv(size)[:4], b"\x00\x09\x81\x05")
+        log = (self.queries / "queries.log").read_text().splitlines()
+        self.assertEqual(log, ["query db.example.com", "query cluster0.mongodb.net", "query over.tcp.example"])
+
+    def test_a_port_it_cannot_open_leaves_lookups_unanswered_but_the_pod_goes_on(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as taken:
+            taken.bind(("127.0.0.1", 0))
+            self.port = taken.getsockname()[1]
+            process = self.start()
+            self.assertIsNone(process.poll())  # still running, so that the pod is not held up
+        self.assertFalse((self.queries / "queries.log").exists())
+
+
 @unittest.skipUnless(services_available(), "Flask, cryptography and requests are needed")
 class ServiceTests(unittest.TestCase):
     """The pod's steps with the group's services running on 127.0.0.1:5000 and 5001."""
@@ -355,6 +496,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(record["work"], work)
                 self.assertEqual(summary["outcome"], "graded")
                 self.assertEqual(pod.points(), expected)
+                self.assertEqual(summary["network"]["attempts"], 0)
                 if track == "advanced":  # the delivered app.py holds only comments
                     self.assertEqual(summary["closed"], [5000])
                     self.assertIn("shortener stopped with exit code 0", pod.service_log())
@@ -399,6 +541,41 @@ class ServiceTests(unittest.TestCase):
                     self.assertLess(pod.points()[0], 12)
                     self.assertIn("shortener stopped with exit code 3", pod.service_log())
 
+    def test_the_hosts_that_the_group_s_code_tries_to_reach_are_written_down(self):
+        # Audit events as name lookups and connections raise them, without any traffic.
+        probe = (
+            "import socket, sys\n"
+            "for _ in range(3):\n"
+            "    sys.audit('socket.getaddrinfo', 'en.wikipedia.org', 443, 0, 0, 0)\n"
+            "sys.audit('socket.gethostbyname', 'example.com')\n"
+            "tcp, udp = socket.socket(), socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "sys.audit('socket.connect', tcp, ('192.0.2.1', 443))\n"
+            "sys.audit('socket.connect', tcp, ('2001:db8::1', 443, 0, 0))\n"
+            "# Not counted: the pod itself, an address that needs no lookup, and a UDP socket's connect().\n"
+            "sys.audit('socket.getaddrinfo', 'localhost', 5001, 0, 0, 0)\n"
+            "sys.audit('socket.getaddrinfo', socket.gethostname(), 5001, 0, 0, 0)\n"
+            "sys.audit('socket.getaddrinfo', '192.0.2.1', 443, 0, 0, 0)\n"
+            "sys.audit('socket.connect', tcp, ('127.0.0.1', 5001))\n"
+            "sys.audit('socket.connect', udp, ('10.253.155.219', 58162))\n"
+            "tcp.close()\n"
+            "udp.close()\n"
+        )
+        pod = Pod(self, "1", "intermediate")
+        pod.deliver()
+        pod.write("intermediate/app.py", probe + (ASSETS["1"] / "solutions/app.py").read_text())
+        _, summary = pod.run()
+        self.assertEqual(pod.points(), (12, 12))
+        self.assertEqual(summary["network"], {"attempts": 6, "hosts": 4, "cut": False, "targets": [
+            {"kind": "lookup", "target": "en.wikipedia.org", "count": 3},
+            {"kind": "connect", "target": "192.0.2.1:443", "count": 1},
+            {"kind": "connect", "target": "[2001:db8::1]:443", "count": 1},
+            {"kind": "lookup", "target": "example.com", "count": 1}]})
+        self.assertEqual(local.network_note(summary),
+                         "looked up en.wikipedia.org (3), example.com (1); connected to 192.0.2.1:443 (1), "
+                         "[2001:db8::1]:443 (1)")
+        # Every line was written by a process of the group's code: the files are named after them.
+        self.assertTrue(all(path.stem.isdigit() for path in (pod.root / "network").iterdir()))
+
     def test_a_service_that_never_answers_times_out(self):
         pod = Pod(self, "1", "intermediate")
         pod.deliver()
@@ -417,6 +594,7 @@ class ServiceTests(unittest.TestCase):
                 record, summary = pod.run()
                 self.assertEqual(record["work"], work)
                 self.assertEqual(pod.points(), (11, 11))
+                self.assertEqual(summary["network"]["attempts"], 0)  # the services talk over the pod's loopback
                 log = pod.service_log()
                 self.assertIn("setup_local_keys.sh exited with code 0", log)
                 self.assertIn("[auth]", log)
