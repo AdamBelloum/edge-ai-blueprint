@@ -263,7 +263,7 @@ def receive(args):
     run_dir = Path(args.run_dir)
     if args.operation == "start":
         record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-        record.update({key: answer.get(key) for key in ("image", "host", "kubernetes", "started")})
+        record.update({key: answer.get(key) for key in ("image", "host", "kubernetes", "started", "unreachable")})
         record["groups"] = answer.get("names") or []
         (run_dir / "run.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print(clean(f"Started grading run {record['run']} for {len(record['groups'])} groups with "

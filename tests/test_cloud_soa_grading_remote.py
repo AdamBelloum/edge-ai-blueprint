@@ -102,21 +102,28 @@ class GradingRemoteTests(unittest.TestCase):
         self.assertEqual(self.run_objects()["configmap"], [])
 
     def test_start_refuses_before_creating_anything(self):
+        def no_cluster_addresses(cluster):
+            cluster.objects["node"].clear()
+            cluster.state["endpoints"] = {}
+
         cases = {
-            "old Kubernetes": lambda c: c.state["version"]["serverVersion"].update(minor="28"),
-            "a run in the cluster": lambda c: c.add("configmap", "digitafrica-grading-run",
-                                                    data={"run": "ffff0000", "started": "earlier"}),
-            "cleanup in progress": lambda c: c.objects["configmap"]["digitafrica-workshop-state"]["data"].update(
-                cleanup_status="in_progress"),
-            "no workspaces": lambda c: c.objects["pvc"].clear(),
-            "no image": lambda c: c.state["values"].update(singleuser={}),
+            "old Kubernetes": (lambda c: c.state["version"]["serverVersion"].update(minor="28"), {}),
+            "a run in the cluster": (lambda c: c.add("configmap", "digitafrica-grading-run",
+                                                     data={"run": "ffff0000", "started": "earlier"}), {}),
+            "cleanup in progress": (lambda c: c.objects["configmap"]["digitafrica-workshop-state"]["data"].update(
+                cleanup_status="in_progress"), {}),
+            "no workspaces": (lambda c: c.objects["pvc"].clear(), {}),
+            "no image": (lambda c: c.state["values"].update(singleuser={}), {}),
+            "unknown network setting": (lambda c: None, {"egress": "internet"}),
+            "addresses to keep out unknown": (no_cluster_addresses, {"egress": "participant"}),
         }
-        for name, change in cases.items():
+        for name, (change, fields) in cases.items():
             with self.subTest(name):
                 self.cluster = FakeCluster()
                 change(self.cluster)
                 with self.assertRaises(RuntimeError):
-                    self.start()
+                    self.start(**fields)
+                self.assertEqual(self.run_objects()["configmap"], [])
                 self.assertEqual(self.run_objects()["pod"], [])
                 self.assertEqual(self.run_objects()["networkpolicy"], [])
 
@@ -179,21 +186,40 @@ class GradingRemoteTests(unittest.TestCase):
         for name in ("grading", "results", "source"):
             self.assertNotIn(name, mounts["service"])
 
-    def test_network_policy_blocks_ingress_and_private_ranges(self):
-        self.start()
+    def test_network_policy_blocks_ingress_and_keeps_participant_egress_off_the_cluster(self):
+        answer = self.start(egress="participant")
         policy = self.cluster.objects["networkpolicy"][f"grading-{RUN}"]["spec"]
         self.assertEqual(policy["podSelector"], {"matchLabels": {"digitafrica.io/grading-run": RUN}})
         self.assertEqual(policy["policyTypes"], ["Ingress", "Egress"])
         self.assertEqual(policy["ingress"], [])
-        internet = policy["egress"][1]["to"][0]["ipBlock"]
-        self.assertEqual(internet["cidr"], "0.0.0.0/0")
-        self.assertEqual(sorted(internet["except"]),
-                         ["10.0.0.0/8", "169.254.169.254/32", "172.16.0.0/12", "192.168.0.0/16"])
-        self.assertEqual(policy["egress"][0]["ports"], [{"port": 53, "protocol": "UDP"},
-                                                         {"port": 53, "protocol": "TCP"}])
+        dns, internet = policy["egress"]
+        self.assertEqual(dns, {"ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}],
+                               "to": [{"namespaceSelector": {"matchLabels": {
+                                   "kubernetes.io/metadata.name": "kube-system"}}}]})
+        block = internet["to"][0]["ipBlock"]
+        self.assertEqual(block["cidr"], "0.0.0.0/0")
+        # The private, shared and link-local ranges, and the nodes' public addresses; the
+        # private and IPv6 node addresses are blocked anyway or not covered by the rule.
+        self.assertEqual(sorted(block["except"]), [
+            "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16",
+            "203.0.113.10/32", "203.0.113.11/32"])
+        self.assertEqual(answer["unreachable"], ["203.0.113.10/32", "203.0.113.11/32"])
+        # The Kubernetes API can answer on an address that no node has, such as a load balancer.
         self.cluster = FakeCluster()
-        self.start(egress="none")
+        self.cluster.state["endpoints"]["subsets"][0]["addresses"] = [{"ip": "198.51.100.7"}]
+        self.start(egress="participant")
+        block = self.cluster.objects["networkpolicy"][f"grading-{RUN}"]["spec"]["egress"][1]["to"][0]["ipBlock"]
+        self.assertIn("198.51.100.7/32", block["except"])
+        # A cluster on a private network needs no addresses of its own in the list.
+        self.cluster = FakeCluster()
+        del self.cluster.objects["node"]["worker1"]
+        self.cluster.objects["node"]["central"]["status"]["addresses"][0]["address"] = "10.0.0.4"
+        self.cluster.state["endpoints"]["subsets"][0]["addresses"] = [{"ip": "10.0.0.4"}]
+        self.assertEqual(self.start(egress="participant")["unreachable"], [])
+        self.cluster = FakeCluster()
+        self.assertEqual(self.start(egress="none")["unreachable"], [])
         self.assertEqual(self.cluster.objects["networkpolicy"][f"grading-{RUN}"]["spec"]["egress"], [])
+        self.assertFalse([command for command in self.cluster.commands if "node" in command])
 
     # ---- steps
 
@@ -313,7 +339,7 @@ class GradingRemoteTests(unittest.TestCase):
         answer = self.execute("cleanup", run=RUN)
         self.assertEqual(answer["deleted"], {"pod": 2, "networkpolicy": 1, "configmap": 2})
         self.assertEqual((answer["left"], answer["errors"]), ({}, []))
-        self.assertEqual(self.run_objects(), {"configmap": [], "pvc": [], "pod": [], "networkpolicy": []})
+        self.assertEqual(self.run_objects(), {"configmap": [], "pvc": [], "pod": [], "networkpolicy": [], "node": []})
         self.assertIn("jupyter-group-5f01", self.cluster.objects["pod"])
         self.assertIn("digitafrica-workshop-state", self.cluster.objects["configmap"])
         self.assertEqual(len(self.cluster.objects["pvc"]), 5)

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 NAMESPACE = "digitafrica"
 IMAGE = {"name": "quay.io/jupyterhub/k8s-singleuser-sample", "tag": "4.4.2"}
 KINDS = {"configmap": "ConfigMap", "pvc": "PersistentVolumeClaim", "pod": "Pod",
-         "networkpolicy": "NetworkPolicy"}
+         "networkpolicy": "NetworkPolicy", "node": "Node"}
 
 
 def results_log(summary, files):
@@ -49,11 +49,19 @@ class FakeCluster:
             "logs": {}, "events": {},
             "version": {"serverVersion": {"major": "1", "minor": "30", "gitVersion": "v1.30.4+k3s1"}},
             "values": {"singleuser": {"image": dict(IMAGE)}},
+            # The Kubernetes API answers on the public address of the first node.
+            "endpoints": {"subsets": [{"addresses": [{"ip": "203.0.113.10"}], "ports": [{"port": 6443}]}]},
             "fail": [],        # substrings of commands that fail
             "finish": None,    # grader log that newly created pods finish with
         }
         self.commands = []
         if state is None:
+            # Public node addresses, as in production; private and IPv6 ones are blocked anyway.
+            self.add("node", "central", status={"addresses": [
+                {"type": "InternalIP", "address": "203.0.113.10"}, {"type": "InternalIP", "address": "2001:db8::10"},
+                {"type": "Hostname", "address": "central"}]})
+            self.add("node", "worker1", status={"addresses": [
+                {"type": "InternalIP", "address": "10.0.0.5"}, {"type": "ExternalIP", "address": "203.0.113.11"}]})
             self.add("configmap", "digitafrica-workshop-state", data={
                 "workshop_type": "cloud-computing-soa", "workshop_module": "module1", "mode": "intermediate",
                 "solutions_released": "false", "cleanup_status": "complete"})
@@ -99,6 +107,8 @@ class FakeCluster:
         assert command[:2] == ["k3s", "kubectl"], command
         if command[2] == "version":
             return self.answer(0, json.dumps(self.state["version"]))
+        if command[2:7] == ["-n", "default", "get", "endpoints", "kubernetes"]:
+            return self.answer(0, json.dumps(self.state["endpoints"]))
         assert command[2:4] == ["-n", NAMESPACE], command
         verb, rest = command[4], command[5:]
         return getattr(self, "do_" + verb)(rest, input)

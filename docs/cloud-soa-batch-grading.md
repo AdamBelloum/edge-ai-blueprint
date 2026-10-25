@@ -125,7 +125,7 @@ the Outcome column says so; its output is in tests.txt or audit.txt.
 | Group code | runs only in the service container, which mounts neither the grading script, the audit, the results nor the source copy; prepare never writes through a link that the group's files contain |
 | Containers | uid 1000, no privilege escalation, all capabilities dropped, the default seccomp profile; CPU and memory limits (for the services those of a participant server); size limits on the temporary volumes and on what is returned |
 | Kubernetes access | no service-account token, no environment variables for the namespace's services |
-| Network | no connections in; out as for participant servers (see Network) |
+| Network | no connections in; out as for participant servers, but not to the nodes or the Kubernetes API (see Network) |
 | Participant servers | not touched; a pod can run while the group's server runs, on the same node |
 | Cleanup | every object of a run carries the label `digitafrica.io/grading-run=<run>` and belongs to the lock ConfigMap `digitafrica-grading-run`; the run removes them at its end, also after an error or Ctrl-C, and the next run offers to remove a run that was cut off |
 | TA audit | sent from the organiser's checkout in a ConfigMap that only the grader mounts, and deleted with the run |
@@ -140,14 +140,19 @@ its built-in network-policy controller, unless it was installed with
 `--disable-network-policy`; this repository's k3s installation does not
 disable it. The JupyterHub chart gives participant servers a policy that
 allows DNS and connections to the internet, but not to private address ranges
-(other pods, the Kubernetes API, the nodes) or the cloud metadata server.
+or the cloud metadata server. That keeps them away from the other pods, but
+from the nodes only while the nodes have private addresses; the production
+inventory lists public ones.
 
-The grading pods get the same rules, without the connections to JupyterHub's
-own hub and proxy that a participant server needs for its login. A group's code
-then behaves as in its own server, for example a URL check that contacts the
-URL, and it cannot reach anything in the cluster that the group's own server
-cannot. The grader talks to the services over 127.0.0.1 inside the pod, which
-the rules do not affect.
+The grading pods get DNS and the internet as participant servers do, but none
+of: private ranges, shared address space (`100.64.0.0/10`), link-local
+addresses (`169.254.0.0/16`, the cloud metadata server among them), and the
+addresses of the nodes and of the Kubernetes API, which the run reads from the
+cluster and records in run.json (`unreachable`). Nor do they get the
+connections to JupyterHub's own hub and proxy that a participant server needs
+for its login. A group's code then behaves as in its own server, for example a
+URL check that contacts the URL. The grader talks to the services over
+127.0.0.1 inside the pod, which the rules do not affect.
 With `CLOUD_SOA_GRADING_EGRESS=none` the pods get no network at all; services
 that need the internet then fail their checks.
 

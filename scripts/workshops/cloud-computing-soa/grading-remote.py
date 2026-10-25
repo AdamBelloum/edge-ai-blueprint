@@ -17,6 +17,7 @@ answer is one compressed JSON block on stdout; errors go to stderr.
 """
 import base64
 import gzip
+import ipaddress
 import json
 import re
 import socket
@@ -38,11 +39,11 @@ RESULTS_END = "===== GRADING RESULTS END ====="
 # Waiting reasons that do not resolve by themselves.
 STUCK = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError",
          "CreateContainerError", "RunContainerError"}
-# The default egress of JupyterHub's participant servers (singleuser.networkPolicy
-# of the Zero to JupyterHub chart): DNS, and the internet except private ranges
-# and the cloud metadata server.
-PRIVATE = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
-METADATA = "169.254.169.254/32"
+# Egress "participant": DNS, and the internet as for participant servers, but
+# not these ranges (other pods, Services, private networks, shared address space,
+# link-local addresses with the cloud metadata server), nor the nodes or the
+# Kubernetes API, whose addresses can be public.
+BLOCKED = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"]
 
 
 def require(condition, message):
@@ -153,16 +154,39 @@ def owner(lock):
     return {"apiVersion": "v1", "kind": "ConfigMap", "name": LOCK, "uid": lock["metadata"]["uid"]}
 
 
-def network_policy(run, egress, owned_by):
-    """No ingress; egress as for participant servers, or none at all."""
+def cluster_addresses(cluster):
+    """The IPv4 addresses of the nodes and of the Kubernetes API that BLOCKED leaves out, as /32 ranges."""
+    found = set()
+    for node in cluster.items("node"):
+        for address in (node.get("status") or {}).get("addresses") or []:
+            if address.get("type") in ("InternalIP", "ExternalIP") and address.get("address"):
+                found.add(address["address"])
+    endpoints = cluster.read(["k3s", "kubectl", "-n", "default", "get", "endpoints", "kubernetes", "-o", "json"],
+                             "the Kubernetes API endpoints") or {}
+    for subset in endpoints.get("subsets") or []:
+        found.update(address["ip"] for address in subset.get("addresses") or [] if address.get("ip"))
+    require(found, "Cannot read the addresses of the nodes and the Kubernetes API, which the grading pods "
+                   "must not reach.")
+    blocked = [ipaddress.ip_network(cidr) for cidr in BLOCKED]
+    addresses = set()
+    for text in found:
+        try:
+            address = ipaddress.ip_address(text)
+        except ValueError:
+            continue
+        if address.version == 4 and not any(address in network for network in blocked):
+            addresses.add(address)
+    return [f"{address}/32" for address in sorted(addresses)]
+
+
+def network_policy(run, egress, owned_by, unreachable=()):
+    """No ingress. Egress: none at all, or DNS and the internet except BLOCKED and the unreachable ranges."""
     rules = []
     if egress == "participant":
         rules = [
             {"ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}],
-             "to": [{"ipBlock": {"cidr": METADATA}},
-                    {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}]
-             + [{"ipBlock": {"cidr": cidr}} for cidr in PRIVATE]},
-            {"to": [{"ipBlock": {"cidr": "0.0.0.0/0", "except": PRIVATE + [METADATA]}}]},
+             "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}]},
+            {"to": [{"ipBlock": {"cidr": "0.0.0.0/0", "except": BLOCKED + list(unreachable)}}]},
         ]
     return {
         "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
@@ -356,6 +380,9 @@ def start(cluster, payload):
     cleanup_status = workshop_state(cluster)["cleanup_status"]
     require(cleanup_status not in ("in_progress", "failed"),
             f"Workshop cleanup is incomplete ({cleanup_status}); the workspaces may be partly deleted.")
+    egress = payload["egress"]
+    require(egress in ("none", "participant"), f"Unknown network setting for the grading pods: {egress}.")
+    unreachable = cluster_addresses(cluster) if egress == "participant" else []
     image = payload.get("image") or notebook_image(cluster)
     groups = workspaces(cluster)
     if payload.get("groups"):
@@ -376,10 +403,10 @@ def start(cluster, payload):
                     "metadata": {"name": f"grading-{run}-bundle", "labels": {RUN_LABEL: run},
                                  "ownerReferences": [owned_by]},
                     "data": files})
-    cluster.create(network_policy(run, payload["egress"], owned_by))
+    cluster.create(network_policy(run, egress, owned_by, unreachable))
     answer = step(cluster, {"run": run, "saved": []})
     answer.update(image=image, names=[group for group, _ in groups], host=socket.gethostname(),
-                  kubernetes=git_version, started=data["started"])
+                  kubernetes=git_version, started=data["started"], unreachable=unreachable)
     return answer
 
 
