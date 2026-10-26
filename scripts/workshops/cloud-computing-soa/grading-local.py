@@ -251,7 +251,9 @@ def save(run_dir, group, result):
             (folder / f"{name}.log").write_text(text, encoding="utf-8")
     record = {key: result.get(key) for key in ("state", "reason", "pod", "events")}
     record["summary"] = (result.get("results") or {}).get("summary")
-    (folder / "result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    # Written last and whole, also on Ctrl-C: it marks the group as saved.
+    (folder / "result.json.tmp").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    (folder / "result.json.tmp").replace(folder / "result.json")
 
 
 def progress(run_dir, answer):

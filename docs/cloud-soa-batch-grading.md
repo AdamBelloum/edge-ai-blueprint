@@ -65,6 +65,11 @@ secrets/workshops/grading/<control-plane host>/<UTC time>-module1-tests-<run>/
     └── grader.log, prepare.log, dns.log
 ```
 
+A run that fails or is stopped with Ctrl-C still writes the summary of the
+groups graded so far. When every group was graded but the run cannot be
+removed from the cluster, for example because a pod hangs in deletion, the
+results are complete, and the next grading entry offers to remove the run.
+
 The Work column compares the track's code with what the group received:
 
 | Work | Meaning |

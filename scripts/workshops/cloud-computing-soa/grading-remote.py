@@ -509,15 +509,14 @@ def cleanup(cluster, payload):
     # run's NetworkPolicy and ConfigMaps stay: without its rules a pod that still
     # runs would reach the network, and the lock lets the next run remove it.
     for kind in ("pod", "networkpolicy", "configmap"):
-        if kind != "pod" and cluster.items("pod", selector):
-            deleted[kind] = 0
-            continue
-        deleted[kind] = len(cluster.items(kind, selector))
-        error = cluster.delete(kind, selector=selector)
-        if error:
-            errors.append(error)
-    for kind in deleted:
-        names = [item["metadata"]["name"] for item in cluster.items(kind, selector)]
+        found = [item["metadata"]["name"] for item in cluster.items(kind, selector)]
+        names = found
+        if found and "pod" not in left:
+            error = cluster.delete(kind, selector=selector)
+            if error:
+                errors.append(error)
+            names = [item["metadata"]["name"] for item in cluster.items(kind, selector)]
+        deleted[kind] = len(set(found) - set(names))
         if names:
             left[kind] = names
     return {"run": run, "deleted": deleted, "left": left, "errors": errors}

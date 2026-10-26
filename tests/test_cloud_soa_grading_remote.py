@@ -391,7 +391,7 @@ class GradingRemoteTests(unittest.TestCase):
         self.assertEqual(answer["groups"]["group_01"], "saved")  # the steps go on
         answer = self.execute("cleanup", run=RUN)
         self.assertEqual(len(answer["errors"]), 1)
-        self.assertEqual(answer["deleted"], {"pod": 3, "networkpolicy": 0, "configmap": 0})
+        self.assertEqual(answer["deleted"], {"pod": 0, "networkpolicy": 0, "configmap": 0})  # none went
         self.assertEqual(sorted(answer["left"]), ["configmap", "networkpolicy", "pod"])
         # Without its NetworkPolicy, a pod that still runs would reach the network; the
         # lock lets the next run offer to remove what is left.

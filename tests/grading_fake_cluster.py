@@ -11,6 +11,7 @@ import gzip
 import json
 import os
 import sys
+import time
 import types
 from datetime import datetime, timezone
 
@@ -53,6 +54,7 @@ class FakeCluster:
             "endpoints": {"subsets": [{"addresses": [{"ip": "203.0.113.10"}], "ports": [{"port": 6443}]}]},
             "fail": [],        # substrings of commands that fail
             "finish": None,    # grader log that newly created pods finish with
+            "finish_count": None,  # how many of them finish; None: all
             "container_logs": {},  # container name -> log, for pods without a log of their own
         }
         self.commands = []
@@ -101,6 +103,9 @@ class FakeCluster:
     def call(self, command, input=None):
         self.commands.append(command)
         text = " ".join(command)
+        for slow, seconds in self.state.get("slow", {}).items():  # substrings of commands that take time
+            if slow in text:
+                time.sleep(seconds)
         if any(failing in text for failing in self.state["fail"]):
             return self.answer(1, "", f"fake failure: {text}")
         if command[0] == "helm":
@@ -152,8 +157,11 @@ class FakeCluster:
         item["metadata"].update({key: value for key, value in manifest["metadata"].items()})
         if kind == "pod":
             item["status"] = {"phase": "Pending"}
-            if self.state["finish"] is not None:
+            count = self.state.get("finish_count")
+            if self.state["finish"] is not None and count != 0:
                 self.finish(name, log=self.state["finish"])
+                if count is not None:
+                    self.state["finish_count"] = count - 1
         return self.answer(0, json.dumps(item))
 
     def do_delete(self, rest, input):
@@ -195,8 +203,10 @@ def main():
     command = sys.argv[1:]
     stdin = sys.stdin.read() if "-f" in command else None
     result = cluster.call(command, stdin)
-    with open(path, "w", encoding="utf-8") as stream:
+    # As a cluster's state, it changes as a whole or not at all, also when this program is interrupted.
+    with open(f"{path}.{os.getpid()}", "w", encoding="utf-8") as stream:
         json.dump(cluster.state, stream)
+    os.replace(f"{path}.{os.getpid()}", path)
     sys.stdout.buffer.write(result.stdout.encode() if result.raw is None else result.raw)
     sys.stdout.flush()
     # kubectl can warn on stderr also when a command succeeds, for example about API discovery.

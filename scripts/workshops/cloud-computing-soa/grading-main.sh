@@ -41,6 +41,36 @@ cloud_soa_grading_value() {
   sed -n "s/^$1=//p" <<<"$2" | head -n 1
 }
 
+# The end of a run, as its EXIT trap, so also after an error or Ctrl-C: write
+# the summary of the groups graded so far, remove the run from the cluster, and
+# show the summary or say where the results are.
+cloud_soa_grading_finish() {
+  local status=$? run="$1" run_dir="$2" removed=true table=""
+
+  # Every step runs, also when nothing can be printed any more, as after the
+  # organiser's connection dropped (SIGHUP).
+  set +e
+  # Before the removal, which can take minutes: a second Ctrl-C ends this trap.
+  if [[ -f "$run_dir/run.json" ]] &&
+    ! table="$(python3 "$CLOUD_SOA_GRADING_LOCAL" summary --run-dir "$run_dir" 2>&1)"; then
+    printf '%s\n' "$table" >&2
+    table=""
+    ((status != 0)) || status=1
+  fi
+  if [[ -f "$run_dir/run.json" ]] && ((status == 130)); then
+    printf 'The grading run was stopped. Results so far: %s\n' "$run_dir" >&2
+  elif [[ -f "$run_dir/run.json" ]] && ((status != 0)); then
+    printf 'The grading run did not complete. Results so far: %s\n' "$run_dir" >&2
+  fi
+  cloud_soa_grading_cleanup "$run" || removed=false
+  if ((status == 0)); then
+    printf '\n%s\n' "$table"
+    [[ "$removed" == true ]] || printf '%s\n' \
+      "Every group was graded, but run $run is still in the cluster: choose a grading entry again to remove it." >&2
+  fi
+  exit "$status"
+}
+
 # Start one pod per group, save each group's results as its pod finishes,
 # and remove the run from the cluster, also after an error or interruption.
 cloud_soa_grading_run() {
@@ -51,7 +81,7 @@ cloud_soa_grading_run() {
     trap 'exit 130' INT HUP TERM
     # Expanded now: the trap runs after this function's variables are gone.
     # shellcheck disable=SC2064
-    trap "cloud_soa_grading_cleanup $(printf '%q' "$run") || exit 3" EXIT
+    trap "cloud_soa_grading_finish $(printf '%q' "$run") $(printf '%q' "$run_dir")" EXIT
 
     answer="$(cloud_soa_grading_remote start "$run_dir" --run "$run" \
       --module "$module" --track "$track" --kind "$kind" \
@@ -187,12 +217,7 @@ cloud_soa_grade_groups() {
     return 0
   }
 
-  cloud_soa_grading_run "$run" "$run_dir" "$module" "$track" "$kind" || {
-    printf 'The grading run did not complete. Results so far: %s\n' "$run_dir" >&2
-    [[ -f "$run_dir/run.json" ]] &&
-      python3 "$CLOUD_SOA_GRADING_LOCAL" summary --run-dir "$run_dir" >/dev/null 2>&1
-    return 1
-  }
-  printf '\n'
-  python3 "$CLOUD_SOA_GRADING_LOCAL" summary --run-dir "$run_dir"
+  # The run shows its summary itself, as it also must after Ctrl-C: the
+  # organiser menu's own trap ends the menu as soon as the run returns.
+  cloud_soa_grading_run "$run" "$run_dir" "$module" "$track" "$kind"
 }

@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -265,10 +266,14 @@ class OrganiserFlowTests(unittest.TestCase):
         self.state_file = self.root / "cluster.json"
         self.results = self.root / "results"
 
-    def grade(self, module="1", kind="tests", answers="", **environment):
+    def command(self, module, kind, environment):
         self.state_file.write_text(json.dumps(self.cluster.state))
         script = r'''
 set -euo pipefail
+# As organizer-main.sh, which the grading functions are sourced into.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 print_heading() { printf '== %s\n' "$*"; }
 log() { :; }
 confirm() {
@@ -284,8 +289,11 @@ cloud_soa_grade_groups "$2" "$3"
                "CLOUD_SOA_GRADING_RESULTS": str(self.results), "CLOUD_SOA_GRADING_POLL_SECONDS": "0",
                "DIGITAFRICA_ASSUME_YES": "true", "HOME": str(self.root)}
         env.update(environment)
-        result = subprocess.run(["bash", "-c", script, "grading-test", str(SCRIPTS / "course-main.sh"), module, kind],
-                                input=answers, env=env, capture_output=True, text=True, timeout=300)
+        return ["bash", "-c", script, "grading-test", str(SCRIPTS / "course-main.sh"), module, kind], env
+
+    def grade(self, module="1", kind="tests", answers="", **environment):
+        command, env = self.command(module, kind, environment)
+        result = subprocess.run(command, input=answers, env=env, capture_output=True, text=True, timeout=300)
         self.cluster = FakeCluster(json.loads(self.state_file.read_text()))
         return result
 
@@ -411,6 +419,86 @@ cloud_soa_grade_groups "$2" "$3"
         result = self.grade()
         self.assertIn("they need sidecar containers", result.stderr)
         self.assertEqual(self.run_objects(), [])
+
+    def test_a_run_that_cannot_be_removed_still_shows_its_results(self):
+        self.cluster.state["fail"] = ["delete pod -l"]  # the pods hang in deletion
+        result = self.grade()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("group_03  changed  12/12 points  graded", result.stdout)
+        self.assertIn("Removed 0 pods, 0 network policy and 0 ConfigMaps", result.stderr)
+        self.assertIn("could not be removed", result.stderr)
+        self.assertIn("Every group was graded, but run", result.stderr)
+        self.assertNotIn("did not complete", result.stderr)
+        [run_dir] = self.run_dirs()
+        self.assertTrue((run_dir / "summary.md").is_file())
+        # The lock stays, so that the next run offers to remove what is left.
+        self.assertIn("digitafrica-grading-run", self.cluster.objects["configmap"])
+
+    def interrupt(self, twice=False):
+        """Press Ctrl-C once group_01 is saved (the first pod finishes at once, the second never does);
+        twice: again while the run is being removed. The exit status and what was printed on stderr."""
+        self.cluster.state["finish_count"] = 1
+        command, env = self.command("1", "tests", {"CLOUD_SOA_GRADING_PARALLEL": "1"})
+        stderr = self.root / "stderr.txt"
+        with open(stderr, "w") as stream:
+            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=stream, start_new_session=True)
+        self.addCleanup(lambda: process.poll() is None and os.killpg(process.pid, signal.SIGKILL))
+
+        def wait_for(condition):
+            deadline = time.monotonic() + 120
+            while not condition():
+                self.assertLess(time.monotonic(), deadline, stderr.read_text())
+                time.sleep(0.2)
+
+        wait_for(lambda: list(self.results.glob("*/*/group_01/result.json")))
+        time.sleep(1)  # the next steps wait for group_02
+        os.killpg(process.pid, signal.SIGINT)  # as the terminal does on Ctrl-C
+        if twice:
+            wait_for(lambda: "Removing grading run" in stderr.read_text())
+            os.killpg(process.pid, signal.SIGINT)
+        process.wait(120)
+        self.cluster = FakeCluster(json.loads(self.state_file.read_text()))
+        return process.returncode, stderr.read_text()
+
+    def test_ctrl_c_removes_the_run_and_writes_what_was_graded(self):
+        status, stderr = self.interrupt()
+        self.assertEqual(status, 130, stderr)
+        self.assertIn("Removing grading run", stderr)
+        self.assertIn("The grading run was stopped. Results so far:", stderr)
+        [run_dir] = self.run_dirs()
+        summary = (run_dir / "summary.md").read_text()
+        self.assertIn("| group_01 | changed | 12/12 points | graded |", summary)
+        self.assertIn("| group_02 | - |  | no results |", summary)
+        self.assertEqual(self.run_objects(), [])
+
+    def test_a_second_ctrl_c_during_the_removal_keeps_the_summary(self):
+        self.cluster.state["slow"] = {"delete pod -l": 30}  # the removal takes time
+        status, stderr = self.interrupt(twice=True)
+        self.assertEqual(status, 130, stderr)
+        self.assertIn("The grading run was stopped. Results so far:", stderr)
+        [run_dir] = self.run_dirs()
+        self.assertIn("| group_01 | changed | 12/12 points | graded |", (run_dir / "summary.md").read_text())
+
+    def test_the_run_is_removed_also_when_nothing_can_be_printed(self):
+        # As after SIGHUP when the organiser's connection dropped: writing to the terminal fails.
+        self.cluster.state["finish_count"] = 0
+        command, env = self.command("1", "tests", {})
+        command[2] = command[2].replace('cloud_soa_grade_groups "$2" "$3"\n', r'''
+run=0123abcd run_dir="$CLOUD_SOA_GRADING_RESULTS/cluster/run-0123abcd"
+cloud_soa_grading_remote start "$run_dir" --run "$run" --module 1 --track intermediate --kind tests \
+  --groups "" --parallel 4 --egress none --image "" --audit-dir "" >/dev/null
+(
+  trap "cloud_soa_grading_finish $run $(printf %q "$run_dir")" EXIT
+  exec 2>&-
+  exit 130
+)
+''')
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 130, result.stderr)
+        self.cluster = FakeCluster(json.loads(self.state_file.read_text()))
+        self.assertEqual(self.run_objects(), [])
+        self.assertTrue((self.results / "cluster/run-0123abcd/summary.md").is_file())
 
     def test_declining_starts_nothing(self):
         result = self.grade(answers="n\n", DIGITAFRICA_ASSUME_YES="false")
