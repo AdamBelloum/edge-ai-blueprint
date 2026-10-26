@@ -32,6 +32,95 @@ def require(condition, message):
         raise ValueError(message)
 
 
+CLIENT_IMAGE = (
+    "apache/spark@sha256:"
+    "d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576"
+)
+CLIENT_LABELS = {
+    "org.digitafrica.direct-run-id": ("digitafrica-direct-", "direct-run-", True),
+    "org.digitafrica.livy-client-run-id": (
+        "digitafrica-livy-client-", "livy-client-run-", False
+    ),
+}
+
+
+def validate_client(container):
+    """Validate a current organiser client, including stopped/detached orphans.
+
+    Labels alone do not authorise removal. Require the exact name/run-ID,
+    pinned image reference, restricted host configuration, reviewed bind
+    destinations and private-network scope. Docker remains admin-controlled.
+    No filesystem paths are deleted or followed by this validation.
+    """
+    config = container.get("Config") or {}
+    labels = config.get("Labels") or {}
+    keys = [key for key in CLIENT_LABELS if key in labels]
+    require(len(keys) == 1, "Ambiguous submission client run labels.")
+    key = keys[0]
+    name_prefix, directory_prefix, direct = CLIENT_LABELS[key]
+    token = labels[key]
+    require(isinstance(token, str) and re.fullmatch(r"[0-9a-f]{32}", token),
+            "Invalid submission client run ID.")
+    require(container.get("Name") == "/" + name_prefix + token,
+            "Submission client name/run-ID mismatch.")
+    require(all(labels.get(k) == v for k, v in OWNERSHIP.items()),
+            "Submission client ownership mismatch.")
+    require(not any(k.startswith("com.docker.compose.") for k in labels),
+            "Submission client has conflicting Compose provenance.")
+    require(config.get("Image") == CLIENT_IMAGE,
+            "Submission client pinned image reference mismatch.")
+    require(isinstance(container.get("Image"), str)
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", container["Image"]),
+            "Invalid submission client image identity.")
+    require(config.get("Entrypoint") == (
+                ["/opt/spark/bin/spark-submit"] if direct else ["python3"]),
+            "Unexpected submission client entrypoint.")
+    require(isinstance(config.get("User"), str)
+            and re.fullmatch(r"[1-9][0-9]*:[1-9][0-9]*", config["User"]),
+            "Submission client must use non-root UID/GID.")
+    host = container.get("HostConfig") or {}
+    require(host.get("Privileged") is False
+            and host.get("ReadonlyRootfs") is True
+            and not host.get("PortBindings")
+            and not host.get("CapAdd")
+            and host.get("CapDrop") == ["ALL"]
+            and host.get("NetworkMode") == NETWORK
+            and not host.get("PidMode")
+            and host.get("IpcMode") in ("", "private")
+            and not host.get("Devices")
+            and not host.get("DeviceRequests")
+            and "no-new-privileges:true" in (host.get("SecurityOpt") or []),
+            "Unsafe submission client host configuration.")
+    require((host.get("RestartPolicy") or {}).get("Name") == "no",
+            "Unexpected submission client restart policy.")
+    attached = (container.get("NetworkSettings") or {}).get("Networks") or {}
+    require(set(attached) <= {NETWORK},
+            "Submission client is attached to an unexpected network.")
+
+    mounts = container.get("Mounts") or []
+    work = [m for m in mounts if m.get("Destination") == "/work"]
+    require(len(work) == 1 and isinstance(work[0].get("Source"), str),
+            "Missing or ambiguous submission client work mount.")
+    run_dir = work[0]["Source"]
+    require(re.fullmatch(re.escape(ROOT + "/" + directory_prefix)
+                         + r"[a-z0-9_]{8}", run_dir),
+            "Submission client run directory is outside the reviewed scope.")
+    expected = {
+        (run_dir, "/work", False),
+        (run_dir + "/outputs", "/work/outputs", True),
+        (DATA_MOUNT[0], "/work/data", False),
+    }
+    if direct:
+        expected.add((DATA_MOUNT[0], DATA_MOUNT[1], False))
+    actual = set()
+    for mount in mounts:
+        require(mount.get("Type") == "bind" and type(mount.get("RW")) is bool,
+                "Unexpected submission client mount type or permissions.")
+        actual.add((mount.get("Source"), mount.get("Destination"), mount["RW"]))
+    require(actual == expected and len(mounts) == len(expected),
+            "Unexpected or missing submission client mounts.")
+
+
 def validate_snapshot(containers, networks, volumes, *,
                       verified_legacy_network_ids=()):
     """Return verified IDs; reject ambiguous ownership before deletion.
@@ -44,6 +133,7 @@ def validate_snapshot(containers, networks, volumes, *,
     require(len(networks) <= 1, "Unexpected project networks.")
     ids = set()
     services = set()
+    client_ids = set()
 
     for container in containers:
         identifier = container["Id"]
@@ -55,6 +145,10 @@ def validate_snapshot(containers, networks, volumes, *,
         require(identifier not in ids, "Duplicate container ID.")
         ids.add(identifier)
         labels = container["Config"].get("Labels") or {}
+        if any(key in labels for key in CLIENT_LABELS):
+            validate_client(container)
+            client_ids.add(identifier)
+            continue
         service = labels.get("com.docker.compose.service")
         require(service in SERVICES, "Unexpected Spark project service.")
         require(service not in services, "Duplicate Spark service.")
@@ -154,6 +248,7 @@ def validate_snapshot(containers, networks, volumes, *,
 
     return {
         "container_ids": sorted(ids),
+        "client_container_ids": sorted(client_ids),
         "network_ids": [network["Id"] for network in networks],
         "legacy_network_ids": legacy_ids,
     }
