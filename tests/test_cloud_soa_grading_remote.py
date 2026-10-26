@@ -349,17 +349,23 @@ class GradingRemoteTests(unittest.TestCase):
         answer = self.execute("step", run=RUN, saved=[])
         self.assertIsNone(answer["results"]["group_01"]["results"])
 
-    def test_a_pod_that_hangs_in_deletion_stops_neither_steps_nor_cleanup(self):
+    def test_a_pod_that_hangs_in_deletion_keeps_its_network_rules_and_the_lock(self):
         self.start()
         self.cluster.finish(f"grading-{RUN}-group-01", log=tests_result())
         self.cluster.state["fail"] = ["delete pod"]
         answer = self.execute("step", run=RUN, saved=["group_01"])
-        self.assertEqual(answer["groups"]["group_01"], "saved")
+        self.assertEqual(answer["groups"]["group_01"], "saved")  # the steps go on
         answer = self.execute("cleanup", run=RUN)
         self.assertEqual(len(answer["errors"]), 1)
-        self.assertEqual(sorted(answer["left"]), ["pod"])
-        # The NetworkPolicy and the ConfigMaps are gone; the lock's owner references take the pods along.
-        self.assertEqual(self.run_objects()["configmap"], [])
+        self.assertEqual(answer["deleted"], {"pod": 3, "networkpolicy": 0, "configmap": 0})
+        self.assertEqual(sorted(answer["left"]), ["configmap", "networkpolicy", "pod"])
+        # Without its NetworkPolicy, a pod that still runs would reach the network; the
+        # lock lets the next run offer to remove what is left.
+        self.assertEqual(self.run_objects()["networkpolicy"], [f"grading-{RUN}"])
+        self.assertIn("digitafrica-grading-run", self.run_objects()["configmap"])
+        self.cluster.state["fail"] = []
+        answer = self.execute("cleanup", run=RUN)
+        self.assertEqual((answer["left"], answer["errors"]), ({}, []))
         self.assertEqual(self.run_objects()["networkpolicy"], [])
 
     def test_steps_show_that_the_run_is_followed(self):

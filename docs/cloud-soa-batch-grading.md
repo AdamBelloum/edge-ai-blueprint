@@ -139,7 +139,7 @@ the Outcome column says so; its output is in tests.txt or audit.txt.
 | Kubernetes access | no service-account token, no environment variables for the namespace's services |
 | Network | no connections in; none out, unless the organiser asks for the internet (see Network) |
 | Participant servers | not touched; a pod can run while the group's server runs, on the same node |
-| Cleanup | every object of a run carries the label `digitafrica.io/grading-run=<run>` and belongs to the lock ConfigMap `digitafrica-grading-run`; the run removes them at its end, also after an error or Ctrl-C, and the next run offers to remove a run that was cut off |
+| Cleanup | every object of a run carries the label `digitafrica.io/grading-run=<run>` and belongs to the lock ConfigMap `digitafrica-grading-run`; the run removes them at its end, also after an error or Ctrl-C, and the next run offers to remove a run that was cut off; while a pod cannot be removed, the run's NetworkPolicy and lock stay too, so that the pod keeps its network rules and the next run offers to remove it again |
 | TA audit | sent from the organiser's checkout in a ConfigMap that only the grader mounts, and deleted with the run |
 
 `tests/test_cloud_soa_ta_audit.py` still keeps the audit out of all deployment

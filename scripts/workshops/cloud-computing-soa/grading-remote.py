@@ -483,8 +483,13 @@ def cleanup(cluster, payload):
             f"The grading run in the cluster is {current.get('run')}, not {run}.")
     selector = f"{RUN_LABEL}={run}"
     deleted, left, errors = {}, {}, []
-    # The pods first, as they use the ConfigMaps; the rest also when a pod hangs.
+    # The pods first. While one is left, for example hanging in deletion, the
+    # run's NetworkPolicy and ConfigMaps stay: without its rules a pod that still
+    # runs would reach the network, and the lock lets the next run remove it.
     for kind in ("pod", "networkpolicy", "configmap"):
+        if kind != "pod" and cluster.items("pod", selector):
+            deleted[kind] = 0
+            continue
         deleted[kind] = len(cluster.items(kind, selector))
         error = cluster.delete(kind, selector=selector)
         if error:
