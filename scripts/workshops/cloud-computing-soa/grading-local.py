@@ -194,9 +194,10 @@ def script(args):
 def answer_of(text):
     """The remote answer in Ansible's output; exit with the remote error if there is none."""
     lines = text.splitlines()
-    if ANSWER_BEGIN in lines and ANSWER_END in lines[lines.index(ANSWER_BEGIN):]:
-        first = lines.index(ANSWER_BEGIN)
-        last = lines.index(ANSWER_END, first)
+    first = lines.index(ANSWER_BEGIN) if ANSWER_BEGIN in lines else len(lines)
+    # Ansible prints the step's stderr right after its stdout, so on the END line.
+    last = next((number for number in range(first + 1, len(lines)) if lines[number].startswith(ANSWER_END)), None)
+    if last is not None:
         try:
             return json.loads(gzip.decompress(base64.b64decode("".join(lines[first + 1:last]))))
         except (ValueError, OSError, EOFError, zlib.error):

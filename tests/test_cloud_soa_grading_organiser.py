@@ -48,12 +48,12 @@ local = load("grading_local", LOCAL)
 remote = load("grading_remote", SCRIPTS / "grading-remote.py")
 
 
-def framed(answer):
-    """Ansible's output around the answer of grading-remote.py."""
+def framed(answer, stderr=""):
+    """Ansible's output around the answer of grading-remote.py: its stdout without the last newline, then stderr."""
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         remote.answer(answer)
-    return "central | CHANGED | rc=0 >>\n" + output.getvalue()
+    return "central | CHANGED | rc=0 >>\n" + output.getvalue().rstrip("\r\n") + stderr.rstrip("\r\n") + "\n"
 
 
 def helper(*arguments, stdin=""):
@@ -214,6 +214,11 @@ class LocalHelperTests(unittest.TestCase):
         self.assertIn("host=central.example-x", result.stdout.splitlines())
         self.assertIn("lock_run=", result.stdout.splitlines())
         self.assertIn("lock_idle=", result.stdout.splitlines())
+        # Also when the step wrote to stderr, which Ansible appends to the answer's last line.
+        warning = "/usr/lib/python3.14/runpy.py:1: DeprecationWarning: something\n"
+        result = helper("receive", "status", "--run-dir", "", stdin=framed(answer, stderr=warning))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("groups=2", result.stdout.splitlines())
         failed = "central | FAILED | rc=1 >>\nERROR: Kubernetes v1.28.1 cannot run the grading pods\n"
         result = helper("receive", "status", "--run-dir", "", stdin=failed)
         self.assertEqual(result.returncode, 1)
@@ -383,7 +388,14 @@ confirm() {
   [[ "${DIGITAFRICA_ASSUME_YES:-false}" == true ]] && return 0
   local reply; read -r reply; [[ "$reply" == y ]]
 }
-run_deployment_remote() { bash -c "$1"; }
+run_deployment_remote() {
+  # With REMOTE_STDERR, as Ansible prints a step: its stdout without the last newline, then stderr.
+  [[ -n "${REMOTE_STDERR:-}" ]] || { bash -c "$1"; return; }
+  local stdout status=0
+  stdout="$(bash -c "$1")" || status=$?
+  printf 'central | CHANGED | rc=%s >>\n%s%s\n' "$status" "$stdout" "$REMOTE_STDERR"
+  return "$status"
+}
 DIGITAFRICA_NAMESPACE=digitafrica
 source "$1"
 cloud_soa_grade_groups "$2" "$3"
@@ -441,6 +453,13 @@ cloud_soa_grade_groups "$2" "$3"
         for group in ("group_01", "group_02", "group_03"):
             saved = (run_dir / group / "service.log").read_text(encoding="utf-8")
             self.assertTrue(saved.startswith("start\n" + line) and saved.endswith(line), group)
+
+    def test_steps_that_also_write_to_stderr_are_read(self):
+        # Ansible prints a step's stderr right after its stdout, on the line that ends the answer.
+        result = self.grade(REMOTE_STDERR="/usr/lib/python3.14/runpy.py:1: DeprecationWarning: something")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("group_03  changed  12/12 points  graded", result.stdout)
+        self.assertEqual(self.run_objects(), [])
 
     def test_the_network_setting_is_checked_and_recorded(self):
         result = self.grade(CLOUD_SOA_GRADING_EGRESS="internet")
