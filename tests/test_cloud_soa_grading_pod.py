@@ -502,10 +502,21 @@ class DnsTests(unittest.TestCase):
     def test_a_port_it_cannot_open_leaves_lookups_unanswered_but_the_pod_goes_on(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as taken:
             taken.bind(("127.0.0.1", 0))
+            taken.settimeout(5)
             self.port = taken.getsockname()[1]
             process = self.start()
+            time.sleep(1)
             self.assertIsNone(process.poll())  # still running, so that the pod is not held up
+            # Lookups go to what holds the port instead, and dns writes nothing down.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                udp.sendto(self.query("db.example.com"), ("127.0.0.1", self.port))
+            self.assertEqual(taken.recv(512), self.query("db.example.com"))
+            time.sleep(0.5)
+            self.assertIsNone(process.poll())
         self.assertFalse((self.queries / "queries.log").exists())
+        process.terminate()
+        output = process.communicate(timeout=10)[0].decode()
+        self.assertIn(f"cannot answer name lookups on 127.0.0.1:{self.port}", output)
 
 
 @unittest.skipUnless(services_available(), "Flask, cryptography and requests are needed")

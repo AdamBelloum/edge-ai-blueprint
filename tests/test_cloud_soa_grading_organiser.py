@@ -276,7 +276,9 @@ class LocalHelperTests(unittest.TestCase):
                                 for path in (run_dir / "group_01").rglob("*")),
                          ["code", "code/app.py", "result.json", "service.log", "tests.json", "tests.txt"])
         self.assertEqual((run_dir / "group_01/code/app.py").read_bytes(), "print('é')\n".encode())
-        self.assertFalse((self.root / "evil.txt").exists())
+        # The names come from the cluster: nothing is written outside the group's folder.
+        for escaped in (run_dir / "evil.txt", run_dir / "evil.py", self.root / "evil.txt"):
+            self.assertFalse(escaped.exists(), escaped)
         answer["results"] = {"../group_03": result}
         bad = helper("receive", "step", "--run-dir", str(run_dir), stdin=framed(answer))
         self.assertNotEqual(bad.returncode, 0)
