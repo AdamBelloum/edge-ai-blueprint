@@ -220,6 +220,34 @@ class LocalHelperTests(unittest.TestCase):
         self.assertIn("ERROR: Kubernetes v1.28.1", result.stderr)
         self.assertIn("did not complete", result.stderr)
 
+    def test_receive_shows_why_a_step_did_not_run(self):
+        # Ansible's output (ansible-core 2.17) when the remote step could not run; its header always says
+        # FAILED or UNREACHABLE.
+        cases = {
+            "the host unreachable": (
+                'central | UNREACHABLE! => {\n    "changed": false,\n    "msg": "Failed to connect to the host via '
+                'ssh: ssh: connect to host 192.0.2.10 port 22: Connection timed out",\n    "unreachable": true\n}\n',
+                "Failed to connect to the host via ssh"),
+            "no sudo": ('central | FAILED! => {\n    "changed": false,\n    "module_stderr": "sudo: a password is '
+                        'required\\n",\n    "module_stdout": "",\n    "msg": "MODULE FAILURE\\nSee stdout/stderr for '
+                        'the exact error",\n    "rc": 1\n}\n', "sudo: a password is required"),
+            "no python3": ("central | FAILED | rc=127 >>\n/bin/bash: line 2: python3: command not foundnon-zero return "
+                           "code\n", "python3: command not found"),
+            "a traceback": ("central | FAILED | rc=1 >>\nTraceback (most recent call last):\n  File \"<stdin>\", "
+                            "line 3, in <module>\nAttributeError: 'NoneType' object has no attribute 'get'"
+                            "non-zero return code\n", "AttributeError: 'NoneType'"),
+        }
+        for name, (output, reason) in cases.items():
+            with self.subTest(name):
+                result = helper("receive", "status", "--run-dir", "", stdin=output)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(reason, result.stderr)
+                self.assertIn("did not complete", result.stderr)
+        # The step's own error, without Ansible's header.
+        result = helper("receive", "status", "--run-dir", "",
+                        stdin="central | FAILED | rc=1 >>\nERROR: No workspace for group_07.non-zero return code\n")
+        self.assertEqual(result.stderr.splitlines()[0], "ERROR: No workspace for group_07.non-zero return code")
+
     def test_receive_saves_known_files_of_known_groups_only(self):
         run_dir = self.root / "run"
         run_dir.mkdir()

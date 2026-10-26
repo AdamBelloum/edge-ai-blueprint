@@ -201,7 +201,9 @@ def answer_of(text):
             return json.loads(gzip.decompress(base64.b64decode("".join(lines[first + 1:last]))))
         except (ValueError, OSError, EOFError, zlib.error):
             fail("The answer from the control plane is damaged.")
-    errors = [line for line in lines if "ERROR" in line or "FAILED" in line or "UNREACHABLE" in line]
+    # The errors of grading-remote.py, or else Ansible's last lines, which say why
+    # the step did not run: the host unreachable, no sudo, no python3, a traceback.
+    errors = [line for line in lines if line.startswith("ERROR: ")]
     for line in (errors or lines[-15:]):
         print(clean(line), file=sys.stderr)
     fail("The grading step did not complete on the control plane.")
