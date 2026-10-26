@@ -1,5 +1,5 @@
 """Runner wiring tests; Docker and filesystem access are mocked."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import importlib.util
 from pathlib import Path
 import sys
@@ -27,6 +27,73 @@ with patch.dict(sys.modules, dependencies):
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        # Existing wiring tests must not access the production submission lock.
+        mock = patch.object(runner, "locked_submission_runtime",
+                            side_effect=lambda: nullcontext())
+        mock.start()
+        self.addCleanup(mock.stop)
+
+    def test_submission_lock_failure_prevents_docker_and_releases_evidence(self):
+        events = []
+
+        @contextmanager
+        def evidence_lock():
+            try:
+                yield 42
+            finally:
+                events.append("evidence released")
+
+        @contextmanager
+        def submission_lock():
+            raise RuntimeError("submission active")
+            yield
+
+        with patch.object(runner, "locked_evidence_directory", evidence_lock), \
+             patch.object(runner, "locked_submission_runtime", submission_lock), \
+             patch.object(runner, "Docker") as factory:
+            with self.assertRaisesRegex(RuntimeError, "submission active"):
+                runner.run_teardown()
+            factory.assert_not_called()
+        self.assertEqual(events, ["evidence released"])
+
+    def test_both_locks_cover_docker_and_sequence_and_release_in_reverse(self):
+        events = []
+
+        @contextmanager
+        def evidence_lock():
+            events.append("evidence acquired")
+            try:
+                yield 42
+            finally:
+                events.append("evidence released")
+
+        @contextmanager
+        def submission_lock():
+            events.append("submission acquired")
+            try:
+                yield 99
+            finally:
+                events.append("submission released")
+
+        def factory():
+            events.append("docker")
+            return Mock()
+
+        def sequence(**callbacks):
+            events.append("sequence")
+            return {"verified": True}
+
+        with patch.object(runner, "locked_evidence_directory", evidence_lock), \
+             patch.object(runner, "locked_submission_runtime", submission_lock), \
+             patch.object(runner, "Docker", side_effect=factory), \
+             patch.object(runner, "teardown", side_effect=sequence):
+            self.assertEqual(runner.run_teardown(), {"verified": True})
+        self.assertEqual(events, [
+            "evidence acquired", "submission acquired", "docker", "sequence",
+            "submission released", "evidence released",
+        ])
+
     def test_lock_precedes_docker_and_evidence_uses_daemon_identity(self):
         events = []
         docker = Mock()
