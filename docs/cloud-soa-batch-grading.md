@@ -70,7 +70,12 @@ groups graded so far. When every group was graded but the run cannot be
 removed from the cluster, for example because a pod hangs in deletion, the
 results are complete, and the next grading entry offers to remove the run.
 
-The Work column compares the track's code with what the group received:
+The Work column compares the track's code with what the group received. A
+cohort may have received another version than the organiser's checkout has, so
+every version counts: the checkout's, those in its Git history (also under the
+module folders' earlier names, but not from another track), and the one in the
+ConfigMaps that the cluster seeds participant servers with (run.json,
+`published`). The same holds for the reference solution.
 
 | Work | Meaning |
 |---|---|

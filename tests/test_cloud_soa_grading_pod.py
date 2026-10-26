@@ -193,6 +193,21 @@ class PrepareTests(unittest.TestCase):
                 copied = (pod.root / "home/Cloud-Computing-SOA/Module-1").is_dir()
                 self.assertEqual(copied, work in ("unchanged", "solution", "changed"))
 
+    def test_every_version_that_groups_may_have_received_counts(self):
+        # An earlier cohort's files, or those that the cluster seeds, may differ from this checkout's.
+        earlier = "print('as an earlier cohort received it')\n"
+        for known, work in ((False, "changed"), (True, "unchanged")):
+            with self.subTest(known=known):
+                pod = Pod(self, "1", "intermediate")
+                pod.deliver()
+                pod.write("intermediate/app.py", earlier)
+                if known:
+                    path = pod.root / "bundle/manifest.json"
+                    manifest = json.loads(path.read_text())
+                    manifest["delivered"]["intermediate"]["app.py"].append(hashlib.sha256(earlier.encode()).hexdigest())
+                    path.write_text(json.dumps(manifest))
+                self.assertEqual(pod.prepare()["work"], work)
+
     def test_module2_needs_both_services(self):
         pod = Pod(self, "2", "advanced")
         pod.deliver()

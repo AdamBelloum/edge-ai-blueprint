@@ -6,9 +6,10 @@
 
 The remote script carries grading-remote.py and a payload; for a start, the
 payload holds the files of the grading pods: grading-pod.py, a manifest of the
-delivered and reference files, and the grading script or the TA audit from
-this checkout. The results are written under DIR, one folder per group.
-Standard library only.
+delivered and reference files (every version that this checkout's Git history
+has; the control plane adds those that the cluster seeds participant servers
+with), and the grading script or the TA audit from this checkout. The results
+are written under DIR, one folder per group. Standard library only.
 """
 import argparse
 import base64
@@ -31,6 +32,8 @@ MODULES = {
         "title": "Module 1 (REST API)", "assignment": "Assignment 1",
         "assets": REPO / "workshop_assets/cloud-computing-soa/module1-rest-api",
         "code": ["app.py"],
+        # The keys of the code in the ConfigMaps that participant servers are seeded from.
+        "published": {"app.py": "app.py"},
         "tests": ["test_api.py", "read_from.csv"],
         "audit": ["audit_common.py", "audit_a1.py"],
     },
@@ -38,10 +41,13 @@ MODULES = {
         "title": "Module 2 (Microservices and JWT Authentication)", "assignment": "Assignment 2",
         "assets": REPO / "workshop_assets/cloud-computing-soa/module2-microservices",
         "code": ["auth_service/auth.py", "shortener_service/shortener.py"],
+        "published": {"auth_service/auth.py": "auth_service_auth_py",
+                      "shortener_service/shortener.py": "shortener_service_shortener_py"},
         "tests": ["test_microservices.py", "test_ownership_isolation.py", "read_from.csv"],
         "audit": ["audit_common.py", "audit_a1.py", "audit_a2.py"],
     },
 }
+PUBLISHED = "digitafrica-notebooks-cloud-computing-soa-module{module}-{track}"  # roles/k8s_apps
 # The TA audit is not delivered to participants; only grading pods use it, in
 # their grader container (tests/test_cloud_soa_grading_remote.py).
 AUDIT = REPO / "workshop_assets/cloud-computing-soa/ta-audit"
@@ -88,21 +94,51 @@ def bundle(module, kind, audit_dir):
             hint = " (set CLOUD_SOA_TA_AUDIT_DIR to the TA audit folder)" if kind == "audit" else ""
             fail(f"Missing {path}{hint}")
     files = {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
-    manifest = {"delivered": {}, "solution": {}}
-    for track in TRACKS:
-        manifest["delivered"][track] = {
-            code: sha256(spec["assets"] / track / code) for code in spec["code"]
-            if (spec["assets"] / track / code).is_file()}
-    manifest["solution"] = {code: sha256(spec["assets"] / "solutions" / code) for code in spec["code"]}
+    # A group may have received an earlier version than this checkout's.
+    manifest = {"delivered": {track: {code: versions(spec["assets"], f"{track}/{code}") for code in spec["code"]}
+                              for track in TRACKS},
+                "solution": {code: versions(spec["assets"], f"solutions/{code}") for code in spec["code"]}}
     files["manifest.json"] = json.dumps(manifest, indent=2) + "\n"
     return files, paths
 
 
+def git(*arguments):
+    """The output of git in this checkout; None if that failed or there is no git."""
+    try:
+        result = subprocess.run(["git", "-C", str(REPO), *arguments], capture_output=True)
+    except OSError:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def versions(assets, name):
+    """sha256 of the file assets/name of this checkout and of every version of it in the checkout's Git history.
+
+    The history covers the file's earlier paths, from the renames of the
+    module's folders, but not a copy or a move from another track's file:
+    before that, it was another file.
+    """
+    path = assets / name
+    found = {sha256(path)} if path.is_file() else set()
+    paths = [path.relative_to(REPO).as_posix()]
+    for line in (git("log", "--follow", "--format=", "--name-status", "--", paths[0]) or b"").decode().splitlines():
+        fields = line.split("\t")
+        if len(fields) == 3 and (fields[0][:1] == "C" or not fields[1].endswith("/" + name)):
+            break
+        if len(fields) == 3 and fields[1] not in paths:
+            paths.append(fields[1])
+    # Every commit that changed one of them, also on merged branches and before a deletion.
+    for relative in paths:
+        for commit in (git("log", "--full-history", "--format=%H", "--", relative) or b"").decode().split():
+            content = git("cat-file", "blob", f"{commit}:{relative}")
+            if content is not None:
+                found.add(hashlib.sha256(content).hexdigest())
+    return sorted(found)
+
+
 def checkout():
-    def git(*arguments):
-        result = subprocess.run(["git", "-C", str(REPO), *arguments], capture_output=True, text=True)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    return {"commit": git("rev-parse", "HEAD"), "changed": bool(git("status", "--porcelain"))}
+    commit = git("rev-parse", "HEAD")
+    return {"commit": commit.decode().strip() if commit else "", "changed": bool(git("status", "--porcelain"))}
 
 
 def remote_script(payload):
@@ -132,7 +168,9 @@ def script(args):
         run = {"run": args.run, "module": args.module, "track": args.track, "kind": args.kind,
                "parallel": args.parallel, "egress": args.egress, "wait": WAIT, "timeout": TIMEOUTS[args.kind],
                "groups": groups, "image": args.image or ""}
-        payload.update(run, bundle=pack(files))
+        payload.update(run, bundle=pack(files), published={
+            track: [PUBLISHED.format(module=args.module, track=track), MODULES[args.module]["published"]]
+            for track in TRACKS + ("solutions",)})
         script_text = remote_script(payload)
         if run_dir.exists():
             fail(f"{run_dir} exists already.")
@@ -300,7 +338,8 @@ def receive(args):
     run_dir = Path(args.run_dir)
     if args.operation == "start":
         record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-        record.update({key: answer.get(key) for key in ("image", "host", "kubernetes", "started", "unreachable")})
+        record.update({key: answer.get(key)
+                       for key in ("image", "host", "kubernetes", "started", "unreachable", "published")})
         record["groups"] = answer.get("names") or []
         (run_dir / "run.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print(clean(f"Started grading run {record['run']} for {len(record['groups'])} groups with "

@@ -128,9 +128,10 @@ def examine(found, track, module, manifest):
             files[relative] = {"state": "missing"}
             continue
         digest = sha256(path)
-        if digest == manifest["delivered"].get(track, {}).get(relative):
+        # Every version that groups may have received, and every version of the reference solution.
+        if digest in manifest["delivered"].get(track, {}).get(relative, []):
             state = "delivered"
-        elif digest == manifest["solution"].get(relative):
+        elif digest in manifest["solution"].get(relative, []):
             state = "solution"
         else:
             state = "changed"

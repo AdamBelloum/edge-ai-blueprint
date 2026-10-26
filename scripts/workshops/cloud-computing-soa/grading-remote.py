@@ -17,6 +17,7 @@ answer is one compressed JSON block on stdout; errors go to stderr.
 """
 import base64
 import gzip
+import hashlib
 import ipaddress
 import json
 import re
@@ -155,6 +156,23 @@ def notebook_image(cluster):
 
 def owner(lock):
     return {"apiVersion": "v1", "kind": "ConfigMap", "name": LOCK, "uid": lock["metadata"]["uid"]}
+
+
+def published(cluster, sources):
+    """sha256 of the code in the ConfigMaps that participant servers are seeded from: {track: {code: digest}}.
+
+    sources: {track: [ConfigMap, {code: key}]}. The cluster may seed another
+    version than the organiser's checkout has.
+    """
+    found = {}
+    for track, (name, keys) in sources.items():
+        configmap = cluster.get("configmap", name) or {}
+        texts, binaries = configmap.get("data") or {}, configmap.get("binaryData") or {}
+        for code, key in keys.items():
+            if key in texts or key in binaries:
+                content = texts[key].encode() if key in texts else base64.b64decode(binaries[key])
+                found.setdefault(track, {})[code] = hashlib.sha256(content).hexdigest()
+    return found
 
 
 def cluster_addresses(cluster):
@@ -436,6 +454,16 @@ def start(cluster, payload):
         require(not unknown, f"No workspace for {', '.join(unknown)}.")
         groups = [(group, claim) for group, claim in groups if group in payload["groups"]]
     require(groups, "There are no participant workspaces (claim-group-NN volumes) to grade.")
+    files = json.loads(gzip.decompress(base64.b64decode(payload["bundle"])))
+    seeded = published(cluster, payload.get("published") or {})
+    if seeded:  # work equal to these counts as unchanged, or as the solution, too
+        manifest = json.loads(files["manifest.json"])
+        for track, digests in seeded.items():
+            known = manifest.setdefault("solution", {}) if track == "solutions" else \
+                manifest.setdefault("delivered", {}).setdefault(track, {})
+            for code, digest in digests.items():
+                known[code] = sorted(set(known.get(code) or []) | {digest})
+        files["manifest.json"] = json.dumps(manifest, indent=2) + "\n"
     run = payload["run"]
     data = {key: str(payload[key]) for key in ("run", "module", "track", "kind", "parallel", "egress",
                                                "wait", "timeout")}
@@ -444,7 +472,6 @@ def start(cluster, payload):
     lock = cluster.create({"apiVersion": "v1", "kind": "ConfigMap",
                            "metadata": {"name": LOCK, "labels": {RUN_LABEL: run}}, "data": data})
     owned_by = owner(lock)
-    files = json.loads(gzip.decompress(base64.b64decode(payload["bundle"])))
     cluster.create({"apiVersion": "v1", "kind": "ConfigMap",
                     "metadata": {"name": f"grading-{run}-bundle", "labels": {RUN_LABEL: run},
                                  "ownerReferences": [owned_by]},
@@ -452,7 +479,7 @@ def start(cluster, payload):
     cluster.create(network_policy(run, egress, owned_by, unreachable))
     answer = step(cluster, {"run": run, "saved": []})
     answer.update(image=image, names=[group for group, _ in groups], host=socket.gethostname(),
-                  kubernetes=git_version, started=data["started"], unreachable=unreachable)
+                  kubernetes=git_version, started=data["started"], unreachable=unreachable, published=seeded)
     return answer
 
 

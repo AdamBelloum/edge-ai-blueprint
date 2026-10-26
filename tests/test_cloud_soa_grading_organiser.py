@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -94,11 +95,74 @@ class LocalHelperTests(unittest.TestCase):
                 manifest = json.loads(files["manifest.json"])
                 assets = local.MODULES[module]["assets"]
                 for code in local.MODULES[module]["code"]:
-                    self.assertEqual(manifest["solution"][code],
-                                     hashlib.sha256((assets / "solutions" / code).read_bytes()).hexdigest())
+                    self.assertIn(hashlib.sha256((assets / "solutions" / code).read_bytes()).hexdigest(),
+                                  manifest["solution"][code])
                     for track in ("beginner", "intermediate", "advanced"):
-                        self.assertEqual(manifest["delivered"][track][code],
-                                         hashlib.sha256((assets / track / code).read_bytes()).hexdigest())
+                        self.assertIn(hashlib.sha256((assets / track / code).read_bytes()).hexdigest(),
+                                      manifest["delivered"][track][code])
+
+    @unittest.skipUnless(shutil.which("git"), "git is needed")
+    def test_versions_are_those_of_the_checkout_and_of_its_history(self):
+        # A cohort may have received an earlier version than the organiser's checkout has.
+        repo = self.root / "repo"
+        repo.mkdir()
+
+        def git(*arguments):
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            *arguments], check=True, capture_output=True)
+
+        def write(name, text):
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(text)
+
+        def sha(text):
+            return hashlib.sha256(text.encode()).hexdigest()
+
+        one = "".join(f"line {number}\n" for number in range(10))
+        two, beginner, advanced = one + "two\n", one.replace("line 5", "beginner") + "two\n", \
+            one.replace("line 3", "advanced") + "two\n"
+        git("init", "-q")
+        write("old/beginner/app.py", one)  # before the module's folder was renamed
+        git("add", ".")
+        git("commit", "-q", "-m", "one")
+        git("mv", "old", "new")
+        git("commit", "-q", "-m", "rename")
+        write("new/beginner/app.py", two)
+        git("commit", "-q", "-am", "two")
+        # A track copied from another one: before the copy, the history is the other track's.
+        write("new/beginner/app.py", beginner)
+        write("new/advanced/app.py", advanced)
+        git("add", ".")
+        git("commit", "-q", "-m", "copy")
+        write("new/beginner/app.py", "not committed\n")
+        original = local.REPO
+        self.addCleanup(setattr, local, "REPO", original)
+        local.REPO = repo
+        assets = repo / "new"
+        self.assertEqual(local.versions(assets, "beginner/app.py"),
+                         sorted(sha(text) for text in (one, two, beginner, "not committed\n")))
+        self.assertEqual(local.versions(assets, "advanced/app.py"), [sha(advanced)])
+        self.assertEqual(local.versions(assets, "intermediate/app.py"), [])
+        # A version made in a merge, and one from before the file was deleted and added again.
+        git("checkout", "-q", "-b", "side")
+        write("new/beginner/app.py", beginner.replace("line 0", "side"))
+        git("commit", "-q", "-am", "side")
+        git("checkout", "-q", "-")
+        write("new/beginner/app.py", beginner.replace("line 0", "main"))
+        git("commit", "-q", "-am", "main")
+        subprocess.run(["git", "-C", str(repo), "merge", "-q", "side"], capture_output=True)  # a conflict
+        merged = beginner.replace("line 0", "merged")
+        write("new/beginner/app.py", merged)
+        git("commit", "-q", "-am", "merge")
+        git("rm", "-q", "new/beginner/app.py")
+        git("commit", "-q", "-m", "delete")
+        write("new/beginner/app.py", "again\n")
+        git("add", ".")
+        git("commit", "-q", "-m", "again")
+        self.assertLessEqual({sha(text) for text in (one, two, beginner, merged, "again\n")},
+                             set(local.versions(assets, "beginner/app.py")))
+        shutil.rmtree(repo / ".git")  # a copy without Git history
+        self.assertEqual(local.versions(assets, "beginner/app.py"), [sha("again\n")])
 
     def test_every_start_fits_into_one_ansible_argument_with_room_to_grow(self):
         for module in ("1", "2"):
@@ -305,6 +369,9 @@ cloud_soa_grade_groups "$2" "$3"
         return sorted(self.results.glob("*/*")) if self.results.exists() else []
 
     def test_a_run_grades_every_group_saves_the_results_and_cleans_up(self):
+        seeded = "print('as the cluster seeds it')\n"  # the Work column also compares with this
+        self.cluster.add("configmap", "digitafrica-notebooks-cloud-computing-soa-module1-intermediate",
+                         data={"app.py": seeded, "upstream-participants-guide.md": "guide\n"})
         result = self.grade(CLOUD_SOA_GRADING_PARALLEL="2")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         [run_dir] = self.run_dirs()
@@ -313,6 +380,7 @@ cloud_soa_grade_groups "$2" "$3"
         self.assertEqual((record["track"], record["groups"]), ("intermediate", ["group_01", "group_02", "group_03"]))
         self.assertEqual(record["image"], "quay.io/jupyterhub/k8s-singleuser-sample:4.4.2")
         self.assertEqual((record["egress"], record["unreachable"]), ("none", []))  # no network by default
+        self.assertEqual(record["published"], {"intermediate": {"app.py": hashlib.sha256(seeded.encode()).hexdigest()}})
         self.assertIn("Network: none: the groups' code cannot reach the internet or the cluster.", result.stdout)
         for group in record["groups"]:
             self.assertTrue((run_dir / group / "tests.json").is_file(), group)

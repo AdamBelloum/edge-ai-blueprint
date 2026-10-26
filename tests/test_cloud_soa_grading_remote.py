@@ -8,6 +8,7 @@ cleanup leaves nothing behind. No Kubernetes, Helm or network access.
 import base64
 import contextlib
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -126,6 +127,26 @@ class GradingRemoteTests(unittest.TestCase):
                 self.assertEqual(self.run_objects()["configmap"], [])
                 self.assertEqual(self.run_objects()["pod"], [])
                 self.assertEqual(self.run_objects()["networkpolicy"], [])
+
+    def test_the_code_that_the_cluster_seeds_counts_as_received(self):
+        # The cluster may seed another version than the organiser's checkout has.
+        def sha(data):
+            return hashlib.sha256(data).hexdigest()
+
+        prefix = "digitafrica-notebooks-cloud-computing-soa-module1-"
+        self.cluster.add("configmap", prefix + "intermediate", data={"app.py": "print('seeded') # é\n"})
+        self.cluster.add("configmap", prefix + "solutions",
+                         binaryData={"app.py": base64.b64encode(b"print('solution')\n").decode()})
+        self.cluster.add("configmap", prefix + "advanced", data={"README.md": "no app.py\n"})
+        manifest = {"delivered": {"intermediate": {"app.py": ["a" * 64]}}, "solution": {"app.py": ["b" * 64]}}
+        answer = self.start(bundle=pack(dict(FILES, **{"manifest.json": json.dumps(manifest)})), published={
+            track: [prefix + track, {"app.py": "app.py"}] for track in ("beginner", "intermediate", "advanced",
+                                                                         "solutions")})
+        seeded, solution = sha("print('seeded') # é\n".encode()), sha(b"print('solution')\n")
+        self.assertEqual(answer["published"], {"intermediate": {"app.py": seeded}, "solutions": {"app.py": solution}})
+        sent = json.loads(self.cluster.objects["configmap"][f"grading-{RUN}-bundle"]["data"]["manifest.json"])
+        self.assertEqual(sent, {"delivered": {"intermediate": {"app.py": sorted(["a" * 64, seeded])}},
+                                "solution": {"app.py": sorted(["b" * 64, solution])}})
 
     def test_an_image_given_by_the_organiser_replaces_the_jupyterhub_one(self):
         self.start(image="registry.example/notebook:1")
