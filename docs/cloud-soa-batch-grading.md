@@ -130,14 +130,18 @@ the JupyterHub deployment:
   answers.
 - **service** starts the services as the participant instructions do. Module 1:
   `python app.py` in the track folder. Module 2: `bash setup_local_keys.sh` if
-  the track has it, then `python auth.py` in `auth_service/` (port 5001) and
-  `python shortener.py` in `shortener_service/` (port 5000). Python finds the
-  packages in the group's `~/.local`, read-only, and a virtual environment
-  named `.venv`, `venv` or `env` in the track or Module folder is used if there
-  is one. A service that stops is not restarted; service.log has its exit code.
-- **grader** waits for the ports, then runs the grading script or the audit
-  from the organiser's checkout, not the group's copy, and prints the results
-  as one block that the organiser collects with `kubectl logs`.
+  the track has it, for at most 60 s, then `python auth.py` in `auth_service/`
+  (port 5001) and `python shortener.py` in `shortener_service/` (port 5000).
+  What the setup script leaves running is stopped first, such as an `auth.py`
+  without a `__main__` guard, which serves as soon as the script imports it and
+  would hold port 5001. Python finds the packages in the group's `~/.local`,
+  read-only, and a virtual environment named `.venv`, `venv` or `env` in the
+  track or Module folder is used if there is one. A service that stops is not
+  restarted; service.log has its exit code.
+- **grader** waits until the service container has started the services and
+  their ports answer, then runs the grading script or the audit from the
+  organiser's checkout, not the group's copy, and prints the results as one
+  block that the organiser collects with `kubectl logs`.
 
 The environment is that of the group's server after a restart, with the same
 CPU and memory limits for the services. Packages that were installed outside
@@ -145,7 +149,10 @@ CPU and memory limits for the services. Packages that were installed outside
 services that the group started differently, from another folder or with
 another command, are not found; the Outcome column then shows the ports that
 were open instead. When the grading script or the audit ends without results,
-the Outcome column says so; its output is in tests.txt or audit.txt.
+the Outcome column says so; its output is in tests.txt or audit.txt. The
+group's code runs in the service container as the same user as serve, so a
+group that sets out to can still have something other than the code kept with
+its results answer the grader.
 
 ## Isolation
 

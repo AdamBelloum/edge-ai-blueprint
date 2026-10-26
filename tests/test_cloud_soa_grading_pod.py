@@ -9,11 +9,14 @@ tests are skipped when Flask, cryptography or requests is missing or the
 ports are taken.
 """
 import base64
+import contextlib
 import gzip
 import hashlib
 import importlib.util
+import io
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -24,6 +27,7 @@ import time
 import unittest
 import venv
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts/workshops/cloud-computing-soa"
@@ -130,11 +134,11 @@ class Pod:
         self.prepare_log = result.stdout
         return json.loads((self.root / "source/prepare.json").read_text())
 
-    def serve(self):
+    def serve(self, *extra):
         environment = dict(os.environ, PATH=f"{self.root / 'bin'}:{os.environ.get('PATH', '')}")
         self.log = open(self.root / "service.log", "w+")
         self.test.addCleanup(self.log.close)
-        self.service = subprocess.Popen(self.command("serve"), stdout=self.log, stderr=subprocess.STDOUT,
+        self.service = subprocess.Popen(self.command("serve", *extra), stdout=self.log, stderr=subprocess.STDOUT,
                                         env=environment)
         self.test.addCleanup(self.stop)
 
@@ -519,6 +523,101 @@ class DnsTests(unittest.TestCase):
         self.assertIn(f"cannot answer name lookups on 127.0.0.1:{self.port}", output)
 
 
+class SetupTests(unittest.TestCase):
+    """Module 2's setup script runs before the services, nothing that it starts keeps running, and the
+    grader waits for the services that serve starts."""
+
+    # Holds a port, as a service started by the script would, and writes on.
+    LISTENER = ("import socket, time\nserver = socket.socket()\nserver.bind(('127.0.0.1', 0))\nserver.listen()\n"
+                "open('port', 'w').write(str(server.getsockname()[1]))\n"
+                "while True:\n    print('serving', flush=True)\n    time.sleep(0.2)\n")
+
+    def run_setup(self, script, seconds):
+        temporary = tempfile.TemporaryDirectory(prefix="grading-setup-")
+        self.addCleanup(temporary.cleanup)
+        track = Path(temporary.name)
+        (track / "listener.py").write_text(self.LISTENER)
+        script = script.replace("LISTENER", f"{shlex.quote(sys.executable)} listener.py")
+        (track / "setup_local_keys.sh").write_text(script)
+        output = io.StringIO()
+        started = time.monotonic()
+        with contextlib.redirect_stdout(output):
+            pod_module.run_setup("setup_local_keys.sh", track, dict(os.environ), seconds, [])
+        port = int((track / "port").read_text()) if (track / "port").exists() else None
+        return output.getvalue(), time.monotonic() - started, port
+
+    def assert_closed(self, port):
+        deadline = time.monotonic() + 5
+        while True:
+            with socket.socket() as probe:
+                if probe.connect_ex(("127.0.0.1", port)) != 0:
+                    return
+            self.assertLess(time.monotonic(), deadline, f"port {port} is still open")
+            time.sleep(0.1)
+
+    def test_what_the_script_leaves_running_is_stopped(self):
+        for started in ("LISTENER &", "LISTENER >/dev/null 2>&1 &"):
+            with self.subTest(started=started):
+                log, seconds, port = self.run_setup(
+                    f"echo generating keys\n{started}\nwhile [ ! -s port ]; do sleep 0.1; done\necho done\n", 30)
+                self.assertLess(seconds, 10)  # the script ended: no waiting for the 30 s limit
+                self.assertIn("[setup] generating keys\n", log)
+                self.assertIn("[setup] done\n", log)
+                self.assertTrue(log.endswith("[runner] setup_local_keys.sh exited with code 0; "
+                                             "stopped what it left running\n"), log)
+                self.assert_closed(port)
+
+    def test_a_script_that_does_not_end_is_stopped_and_its_output_kept(self):
+        # As "import auth" in setup_local_keys.sh, when auth.py has no __main__ guard.
+        log, seconds, port = self.run_setup("echo importing auth\nLISTENER\n", 3)
+        self.assertLess(seconds, 10)
+        self.assertIn("[setup] importing auth\n[setup] serving\n", log)
+        self.assertTrue(log.endswith("[runner] setup_local_keys.sh did not finish within 3 s; stopped it\n"), log)
+        self.assert_closed(port)
+
+    def test_a_script_that_leaves_nothing_running(self):
+        log, seconds, port = self.run_setup("echo keys ready\nexit 3\n", 30)
+        self.assertLess(seconds, 10)
+        self.assertEqual(log, "[runner] bash setup_local_keys.sh\n[setup] keys ready\n"
+                              "[runner] setup_local_keys.sh exited with code 3\n")
+        self.assertIsNone(port)
+
+    def test_in_the_pod_every_other_process_of_the_container_is_stopped(self):
+        # There serve is the container's first process, so also what left the script's process group
+        # is stopped (seen in the end-to-end test). kill(-1) is faked: here it would stop every
+        # process of the user who runs the tests.
+        calls = []
+
+        def kill(pid, number):
+            calls.append(("kill", pid, number))
+
+        def waitpid(pid, options):
+            calls.append(("waitpid", pid))
+            raise ChildProcessError  # no process left
+
+        # getpid last in, first out: it never says 1 while the real kill is in place.
+        with mock.patch.object(pod_module.os, "kill", kill), \
+                mock.patch.object(pod_module.os, "killpg", side_effect=AssertionError("killpg")), \
+                mock.patch.object(pod_module.os, "waitpid", waitpid), \
+                mock.patch.object(pod_module.os, "getpid", return_value=1):
+            self.assertTrue(pod_module.stop_left(4321))
+        self.assertEqual(calls, [("waitpid", -1), ("kill", -1, 0), ("kill", -1, signal.SIGKILL), ("waitpid", -1)])
+
+    def test_the_grader_waits_until_serve_has_started_the_services(self):
+        # Until then, a port can answer from what the setup script left, which serve stops.
+        with socket.socket() as server, tempfile.TemporaryDirectory(prefix="grading-wait-") as folder:
+            server.bind(("127.0.0.1", 0))
+            server.listen(50)
+            port, started = server.getsockname()[1], Path(folder, pod_module.STARTED)
+            waiting, waited = pod_module.wait_for_ports([port], 2, started)
+            self.assertEqual(waiting, [])
+            self.assertGreaterEqual(waited, 2)
+            started.touch()
+            waiting, waited = pod_module.wait_for_ports([port], 30, started)
+            self.assertEqual(waiting, [])
+            self.assertLess(waited, 1)
+
+
 @unittest.skipUnless(services_available(), "Flask, cryptography and requests are needed")
 class ServiceTests(unittest.TestCase):
     """The pod's steps with the group's services running on 127.0.0.1:5000 and 5001."""
@@ -621,7 +720,9 @@ class ServiceTests(unittest.TestCase):
                          "looked up en.wikipedia.org (3), example.com (1); connected to 192.0.2.1:443 (1), "
                          "[2001:db8::1]:443 (1)")
         # Every line was written by a process of the group's code: the files are named after them.
-        self.assertTrue(all(path.stem.isdigit() for path in (pod.root / "network").iterdir()))
+        # serve's note that the services are started is the only other file.
+        names = {path.name for path in (pod.root / "network").iterdir()} - {pod_module.STARTED}
+        self.assertTrue(names and all(name.endswith(".log") and name[:-4].isdigit() for name in names), names)
 
     def test_a_service_that_never_answers_times_out(self):
         pod = Pod(self, "1", "intermediate")
@@ -641,14 +742,57 @@ class ServiceTests(unittest.TestCase):
                 record, summary = pod.run()
                 self.assertEqual(record["work"], work)
                 self.assertEqual(pod.points(), (11, 11))
+                self.assertLess(summary["waited"], 30)  # serve told the grader that the services are started
                 self.assertEqual(summary["network"]["attempts"], 0)  # the services talk over the pod's loopback
                 self.assertEqual({code: base64.b64decode(data) for code, data in pod.block["code"].items()},
                                  {code: (pod.folder / track / code).read_bytes()
                                   for code in ("auth_service/auth.py", "shortener_service/shortener.py")})
                 log = pod.service_log()
-                self.assertIn("setup_local_keys.sh exited with code 0", log)
+                self.assertIn("setup_local_keys.sh exited with code 0\n", log)
                 self.assertIn("[auth]", log)
                 self.assertIn("[shortener]", log)
+
+    def test_module2_setup_script_that_starts_the_auth_service(self):
+        # The group made its keys, then dropped auth.py's __main__ guard: the setup
+        # script's "import auth" now serves on port 5001 and never ends.
+        pod = Pod(self, "2", "intermediate")
+        pod.deliver(solution=True)
+        track = pod.folder / "intermediate"
+        subprocess.run(["bash", "setup_local_keys.sh"], cwd=track, check=True, capture_output=True, timeout=60,
+                       env=dict(os.environ, PATH=f"{pod.root / 'bin'}:{os.environ.get('PATH', '')}"))
+        auth = track / "auth_service/auth.py"
+        code = auth.read_text()
+        for old, new in (('if __name__ == "__main__":', "if True:"),
+                         ("def login_user():\n", "def login_user():\n    print('login request')\n")):
+            self.assertIn(old, code)
+            code = code.replace(old, new)
+        auth.write_text(code)
+        pod.prepare()
+        pod.serve("--setup-timeout", "5")
+        pod.grade()
+        pod.stop()
+        self.assertEqual(pod.points(), (11, 11))
+        log = pod.service_log()
+        self.assertIn("setup_local_keys.sh did not finish within 5 s; stopped it\n", log)
+        self.assertIn("[auth] login request\n", log)  # the service that serve started answered
+
+    def test_the_grader_tests_the_services_that_serve_starts(self):
+        # The setup script holds both ports for a while with servers that are not the group's
+        # services; serve stops them and starts the services. Its note from before a restart
+        # of the container does not count.
+        pod = Pod(self, "2", "intermediate")
+        pod.deliver(solution=True)
+        setup = pod.folder / "intermediate/setup_local_keys.sh"
+        setup.write_text(setup.read_text() + "".join(
+            f"python -m http.server {port} --bind 127.0.0.1 >/dev/null 2>&1 &\n" for port in (5000, 5001))
+            + "sleep 4\n")
+        pod.prepare()
+        (pod.root / "network" / pod_module.STARTED).touch()
+        pod.serve()
+        pod.grade()
+        pod.stop()
+        self.assertEqual(pod.points(), (11, 11))
+        self.assertIn("setup_local_keys.sh exited with code 0; stopped what it left running\n", pod.service_log())
 
     def test_module2_virtual_environment_in_the_track(self):
         pod = Pod(self, "2", "intermediate")

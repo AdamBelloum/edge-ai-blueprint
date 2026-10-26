@@ -75,6 +75,7 @@ NOT_SOURCE = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "si
 FILE_LIMIT = 2 * 2**20     # bytes of one result file returned to the organiser
 CODE_LIMIT = 2**20         # bytes of one graded code file returned to the organiser
 KUBELET = 10250            # the kubelet's port on every node
+STARTED = "services-started"  # serve writes it into the network folder once it has started the services
 BEGIN = "===== GRADING RESULTS BEGIN ====="
 END = "===== GRADING RESULTS END ====="
 NETWORK_LINE = re.compile(r"(lookup|connect|send) ([!-~]{1,220})")  # written by HOOK
@@ -494,6 +495,84 @@ def relay(process, name):
     threading.Thread(target=copy, daemon=True).start()
 
 
+def run_setup(setup, track, environment, seconds, running):
+    """Run the track's setup script as the participant does, then stop whatever it left running.
+
+    A process that it leaves, such as an auth.py without a __main__ guard that
+    serves as soon as the script imports it, would hold a service's port. The
+    output is read to its end, so that no process writes into a closed pipe.
+    """
+    say(f"bash {setup}")
+    try:
+        process = subprocess.Popen(["bash", setup], cwd=track, env=environment, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as error:
+        say(f"{setup}: cannot start: {error}")
+        return
+
+    def copy():
+        for line in iter(process.stdout.readline, b""):
+            print(f"[setup] {line.decode('utf-8', 'replace').rstrip()}", flush=True)
+
+    copying = threading.Thread(target=copy, daemon=True)
+    copying.start()
+    running.append((setup, process))  # stopped with the services, should the pod end meanwhile
+    try:
+        ended = f"{setup} exited with code {process.wait(seconds)}"
+        if stop_left(process.pid):
+            ended += "; stopped what it left running"
+    except subprocess.TimeoutExpired:
+        stop_left(process.pid)
+        process.wait()
+        ended = f"{setup} did not finish within {seconds} s; stopped it"
+    finally:
+        running.remove((setup, process))
+    copying.join(5)
+    if copying.is_alive():  # a process that left the script's process group, outside the pod
+        ended += "; a process that it started still runs"
+    else:
+        process.stdout.close()
+    say(ended)
+
+
+def stop_left(group):
+    """Stop what the setup script left running and wait until it has ended; whether there was anything.
+
+    In the pod, serve is the first process of its container, so every other
+    process in the container comes from the script, also one that left the
+    script's process group. Elsewhere, as in the tests, only that group is stopped.
+    """
+    first = os.getpid() == 1
+    if first:
+        reap()  # processes that ended already
+    target, kill = (-1, os.kill) if first else (group, os.killpg)
+    try:
+        kill(target, 0)
+    except OSError:  # nothing left
+        return False
+    try:
+        kill(target, signal.SIGKILL)
+    except OSError:
+        pass
+    if first:
+        reap(5)
+    return True
+
+
+def reap(seconds=0):
+    """As the first process of a container, collect the processes that have ended, waiting up to seconds for all."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            if os.waitpid(-1, os.WNOHANG)[0]:
+                continue
+        except ChildProcessError:  # none left
+            return
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.05)
+
+
 def end(process):
     for signal_number, wait in ((signal.SIGTERM, 3), (signal.SIGKILL, 3)):
         try:
@@ -519,6 +598,10 @@ def serve(args):
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, stop)
+    try:
+        Path(args.network, STARTED).unlink()  # from before a restart of this container
+    except OSError:
+        pass
     if all((track / relative).is_file() for relative in module["code"]):
         # As in the participant's terminal, plus the packages in the group's ~/.local.
         environment = dict(os.environ, HOME=args.home, PYTHONUNBUFFERED="1",
@@ -531,15 +614,7 @@ def serve(args):
             say(f"using the virtual environment {venv}")
         setup = module.get("setup")
         if setup and (track / setup).is_file():
-            say(f"bash {setup}")
-            try:
-                result = subprocess.run(["bash", setup], cwd=track, env=environment, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, timeout=60)
-                for line in result.stdout.decode("utf-8", "replace").splitlines():
-                    print(f"[setup] {line}", flush=True)
-                say(f"{setup} exited with code {result.returncode}")
-            except subprocess.TimeoutExpired:
-                say(f"{setup} did not finish within 60 s")
+            run_setup(setup, track, environment, args.setup_timeout, running)
         for name, folder, script, port in module["services"]:
             say(f"cd {Path(folder, script).parent.as_posix()} && python {script}")
             try:
@@ -556,6 +631,10 @@ def serve(args):
                 time.sleep(0.5)
     else:
         say(f"nothing to start: {track} lacks {', '.join(module['code'])}")
+    try:
+        Path(args.network, STARTED).touch()  # the grader goes on
+    except OSError as error:
+        say(f"cannot tell the grader that the services are started: {error}")
     while True:  # the pod stops this container when the grader is done
         time.sleep(3600)
 
@@ -577,12 +656,17 @@ def listening_ports():
     return sorted(ports)
 
 
-def wait_for_ports(ports, seconds):
-    started = time.monotonic()
+def wait_for_ports(ports, seconds, started):
+    """Wait until serve has started the services (the file started) and their ports answer.
+
+    Until then, a port can answer from a process that the setup script left,
+    which serve stops.
+    """
+    begun = time.monotonic()
     while True:
         waiting = [port for port in ports if not port_open(port)]
-        if not waiting or time.monotonic() - started > seconds:
-            return waiting, round(time.monotonic() - started, 1)
+        if (started.exists() and not waiting) or time.monotonic() - begun > seconds:
+            return waiting, round(time.monotonic() - begun, 1)
         time.sleep(1)
 
 
@@ -687,7 +771,7 @@ def grade(args):
             summary["outcome"] = "not graded"
         else:
             ports = [port for *_, port in module["services"]]
-            waiting, waited = wait_for_ports(ports, args.wait)
+            waiting, waited = wait_for_ports(ports, args.wait, Path(args.network, STARTED))
             summary.update(waited=waited, closed=waiting, listening=listening_ports())
             script, *options = module[args.kind]
             command = [sys.executable, "-s", "-E", "-B", str(bundle / script), *options]
@@ -751,6 +835,7 @@ def main():
     parser.add_argument("--dns-port", type=int, default=53, help="the port that dns answers on")
     parser.add_argument("--policy-wait", type=int, default=0,
                         help="seconds prepare waits for the pod's network rules (0: no check, outside Kubernetes)")
+    parser.add_argument("--setup-timeout", type=int, default=60, help="seconds for the track's setup script")
     parser.add_argument("--wait", type=int, default=150, help="seconds to wait for the services")
     parser.add_argument("--timeout", type=int, default=600, help="seconds for the grading script or audit")
     args = parser.parse_args()
