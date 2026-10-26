@@ -134,6 +134,9 @@ class FakeCluster:
             item = self.objects[kind].get(rest[1])
             if item is None:
                 return self.answer(0, "") if "--ignore-not-found" in rest else self.answer(1, "", "NotFound")
+            output = rest[rest.index("-o") + 1] if "-o" in rest else ""
+            if output.startswith("jsonpath={.data.") and output.endswith("}"):  # the only JSONPath used
+                return self.answer(0, str((item.get("data") or {}).get(output[len("jsonpath={.data."):-1], "")))
             return self.answer(0, json.dumps(item))
         return self.answer(0, json.dumps({"items": self.selected(kind, rest)}))
 
@@ -196,7 +199,8 @@ def main():
         json.dump(cluster.state, stream)
     sys.stdout.buffer.write(result.stdout.encode() if result.raw is None else result.raw)
     sys.stdout.flush()
-    sys.stderr.write(result.stderr)
+    # kubectl can warn on stderr also when a command succeeds, for example about API discovery.
+    sys.stderr.write(result.stderr or cluster.state.get("warning", ""))
     sys.exit(result.returncode)
 
 

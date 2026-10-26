@@ -111,15 +111,8 @@ cloud_soa_grade_groups() {
   print_heading "Cloud Computing SOA Module $module: $what for every group"
   state="$(cloud_soa_grading_remote status "")" || return $?
 
-  case "$(cloud_soa_grading_value cleanup_status "$state")" in
-    in_progress|failed)
-      printf '%s\n' \
-        'Workshop cleanup is incomplete; the workspaces may be partly deleted.' \
-        'Resume the reset before grading.' >&2
-      return 1
-      ;;
-  esac
-
+  # A leftover run is removed first, also during a reset: its pods use the
+  # workspaces, so that the reset could not delete them.
   lock_run="$(cloud_soa_grading_value lock_run "$state")"
   if [[ -n "$lock_run" ]]; then
     idle="$(cloud_soa_grading_value lock_idle "$state")"
@@ -139,6 +132,15 @@ cloud_soa_grade_groups() {
     fi
     cloud_soa_grading_cleanup "$lock_run" || return 1
   fi
+
+  case "$(cloud_soa_grading_value cleanup_status "$state")" in
+    in_progress|failed)
+      printf '%s\n' \
+        'Workshop cleanup is incomplete; the workspaces may be partly deleted.' \
+        'Resume the reset before grading.' >&2
+      return 1
+      ;;
+  esac
 
   groups="$(cloud_soa_grading_value groups "$state")"
   if [[ "$groups" == 0 ]]; then

@@ -153,6 +153,24 @@ REMOTE
 )" </dev/null
 }
 
+# BEGIN GRADING RUN CHECK
+# The pods of a Cloud Computing SOA grading run use the participant workspaces,
+# so the reset could not delete them. The grading entries remove such a run.
+# Ansible appends stderr to the last line, so kubectl's must not reach it.
+grading_check="$(run_deployment_remote "$(cat <<REMOTE
+set -euo pipefail
+run="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" get configmap digitafrica-grading-run \
+  --ignore-not-found -o jsonpath='{.data.run}' 2>/dev/null)"
+printf 'GRADING_RUN=%s\n' "\$run"
+REMOTE
+)" </dev/null)" || fail 'Could not check the cluster for a grading run; no change made.'
+grep -qx 'GRADING_RUN=[[:alnum:]_.-]*' <<< "$grading_check" ||
+  fail 'Could not check the cluster for a grading run; no change made.'
+grading_run="$(sed -n 's/^GRADING_RUN=\([[:alnum:]_.-]*\)$/\1/p' <<< "$grading_check" | head -n 1)"
+[[ -z "$grading_run" ]] ||
+  fail "Grading run $grading_run is still in the cluster, and its pods use the participant workspaces. Remove it first: Cloud Computing SOA, Module 1 or 2, entry 7 or 8 offers to remove it. No change made."
+# END GRADING RUN CHECK
+
 printf '%s\n' \
   "Participant identities: ${GROUP_IDS[*]}" \
   '' \

@@ -87,8 +87,9 @@ assignment's grading script (entry 7) or runs the TA audit on it (entry 8).
 The actions are `cloud-module1-grade`, `cloud-module1-audit`,
 `cloud-module2-grade` and `cloud-module2-audit`. Each group's work runs in its
 own pod on a copy of its workspace, which stays unchanged; the results are
-written under `secrets/workshops/grading/`. See
-[cloud-soa-batch-grading.md](cloud-soa-batch-grading.md).
+written under `secrets/workshops/grading/`. A reset refuses to start while a
+grading run is in the cluster; the grading entries remove a run that was cut
+off. See [cloud-soa-batch-grading.md](cloud-soa-batch-grading.md).
 
 ## Participant guidance
 

@@ -59,6 +59,16 @@ def helper(*arguments, stdin=""):
                           text=True, timeout=60)
 
 
+def fake_programs(folder):
+    """k3s and helm in folder/bin, answered by the fake cluster whose state is in the file FAKE_CLUSTER."""
+    (folder / "bin").mkdir()
+    for program in ("k3s", "helm"):
+        wrapper = folder / "bin" / program
+        wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{TESTS / "grading_fake_cluster.py"}" '
+                           f'{program} "$@"\n')
+        wrapper.chmod(0o755)
+
+
 class LocalHelperTests(unittest.TestCase):
     maxDiff = None
 
@@ -249,12 +259,7 @@ class OrganiserFlowTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="grading-flow-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        (self.root / "bin").mkdir()
-        for program in ("k3s", "helm"):
-            wrapper = self.root / "bin" / program
-            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{TESTS / "grading_fake_cluster.py"}" '
-                               f'{program} "$@"\n')
-            wrapper.chmod(0o755)
+        fake_programs(self.root)
         self.cluster = FakeCluster()
         self.cluster.state["finish"] = tests_result(earned=12)
         self.state_file = self.root / "cluster.json"
@@ -351,6 +356,8 @@ cloud_soa_grade_groups "$2" "$3"
         self.cluster.add("configmap", "digitafrica-grading-run", data={
             "run": "ffff0000", "started": started, "touched": started, "kind": "audit", "module": "1",
         })["metadata"]["labels"] = {"digitafrica.io/grading-run": "ffff0000"}
+        self.cluster.add("pod", "grading-ffff0000-group-01", status={"phase": "Succeeded"})["metadata"]["labels"] = {
+            "digitafrica.io/grading-run": "ffff0000", "digitafrica.io/grading-group": "group_01"}
         return started
 
     def test_a_leftover_run_is_removed_only_with_consent(self):
@@ -376,13 +383,21 @@ cloud_soa_grade_groups "$2" "$3"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.run_objects(), [])
 
-    def test_nothing_starts_while_a_reset_is_incomplete(self):
+    def test_nothing_starts_while_a_reset_is_incomplete_but_a_leftover_run_is_removed(self):
         self.cluster.objects["configmap"]["digitafrica-workshop-state"]["data"]["cleanup_status"] = "in_progress"
         result = self.grade()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Workshop cleanup is incomplete", result.stderr)
         self.assertEqual(self.run_dirs(), [])
         self.assertEqual(self.run_objects(), [])
+        # A leftover run's pods use the workspaces, so that the reset cannot delete them.
+        self.leftover(minutes_ago=30)
+        result = self.grade()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Removing grading run ffff0000 from the cluster.", result.stderr)
+        self.assertIn("Resume the reset before grading.", result.stderr)
+        self.assertEqual(self.run_objects(), [])
+        self.assertEqual(self.run_dirs(), [])
 
     def test_a_failed_start_still_cleans_up(self):
         self.cluster.state["fail"] = ["create -f - -o json"]  # the lock cannot be written
@@ -403,6 +418,64 @@ cloud_soa_grade_groups "$2" "$3"
         self.assertIn("No grading run was started.", result.stdout)
         self.assertEqual(self.run_dirs(), [])
         self.assertEqual(self.run_objects(), [])
+
+
+class ResetTests(unittest.TestCase):
+    """The workshop reset refuses while a grading run is in the cluster: its pods use the workspaces."""
+
+    SOURCE = (ROOT / "scripts/workshops/reset-workshops.sh").read_text()
+    BLOCK = SOURCE.split("# BEGIN GRADING RUN CHECK", 1)[1].split("# END GRADING RUN CHECK", 1)[0]
+
+    def check(self, cluster, remote_status=0, stderr=""):
+        with tempfile.TemporaryDirectory(prefix="grading-reset-") as temporary:
+            root = Path(temporary)
+            fake_programs(root)
+            (root / "cluster.json").write_text(json.dumps(cluster.state))
+            # As Ansible prints it: the header, stdout without its last newline, then stderr.
+            script = r'''
+set -euo pipefail
+fail() { printf 'FAIL %s\n' "$*" >&2; exit 1; }
+DIGITAFRICA_NAMESPACE=digitafrica
+run_deployment_remote() {
+  ((REMOTE_STATUS == 0)) || return "$REMOTE_STATUS"
+  bash -c "$1" > "$HOME/stdout" 2> "$HOME/stderr"
+  printf 'central | CHANGED | rc=0 >>\n%s%s%s\n' "$(cat "$HOME/stdout")" "$(cat "$HOME/stderr")" "$REMOTE_STDERR"
+}
+''' + self.BLOCK + "\nprintf 'EVENT confirmation\\n'\n"
+            return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60, env={
+                "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "FAKE_CLUSTER": str(root / "cluster.json"),
+                "REMOTE_STATUS": str(remote_status), "REMOTE_STDERR": stderr, "HOME": str(root)})
+
+    def test_a_reset_refuses_while_a_grading_run_is_in_the_cluster(self):
+        cluster = FakeCluster()
+        result = self.check(cluster)
+        self.assertEqual((result.returncode, result.stdout), (0, "EVENT confirmation\n"), result.stderr)
+        cluster.add("configmap", "digitafrica-grading-run", data={"run": "ffff0000"})
+        result = self.check(cluster)
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn("FAIL Grading run ffff0000 is still in the cluster", result.stderr)
+        self.assertIn("entry 7 or 8 offers to remove it. No change made.", result.stderr)
+        # kubectl's warnings do not end up in the answer.
+        for lock, expected in ((False, 0), (True, 1)):
+            cluster = FakeCluster()
+            cluster.state["warning"] = "E1026 memcache.go:265] couldn't get current server API group list\n"
+            if lock:
+                cluster.add("configmap", "digitafrica-grading-run", data={"run": "ffff0000"})
+            result = self.check(cluster)
+            self.assertEqual(result.returncode, expected, result.stderr)
+            if lock:
+                self.assertIn("FAIL Grading run ffff0000 is still in the cluster", result.stderr)
+        # The step failed, or its answer is not the one line expected: no guess at a run's name.
+        for result in (self.check(FakeCluster(), remote_status=4),
+                       self.check(FakeCluster(), stderr="E1026 memcache.go:265] couldn't get resource list")):
+            self.assertEqual((result.returncode, result.stdout), (1, ""))
+            self.assertIn("FAIL Could not check the cluster for a grading run", result.stderr)
+
+    def test_the_check_comes_before_the_confirmation_and_any_change(self):
+        check = self.SOURCE.index("# BEGIN GRADING RUN CHECK")
+        for later in ("Confirm DESTRUCTIVE workshop reset", "# Persist retry context before the first destructive",
+                      "\nstop_selected_participant_servers\n", '"$COHORT_HELPER" "${workspace_args[@]}"'):
+            self.assertLess(check, self.SOURCE.index(later), later)
 
 
 class EntryPointTests(unittest.TestCase):

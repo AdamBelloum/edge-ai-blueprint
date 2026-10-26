@@ -45,6 +45,11 @@ offers to remove it. A run that an organiser followed in the last 10 minutes
 may still be going, so its removal always needs an answer at the terminal,
 also with `DIGITAFRICA_ASSUME_YES=true`.
 
+A run's pods use the participant workspaces, so a reset could not delete them
+while the run is in the cluster. The reset therefore refuses to start then,
+and the grading entries remove a run that was cut off also while a reset is
+incomplete.
+
 ## Results
 
 ```text
