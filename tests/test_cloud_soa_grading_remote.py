@@ -319,17 +319,51 @@ class GradingRemoteTests(unittest.TestCase):
         answer = self.execute("step", run=RUN, saved=[])
         self.assertIsNone(answer["results"]["group_01"]["results"])
 
-    def test_service_logs_keep_their_start_and_their_end(self):
+    def test_long_logs_keep_their_start_and_their_end_in_whole_lines(self):
         self.start(parallel=1)
         name = f"grading-{RUN}-group-01"
         self.cluster.finish(name, log=tests_result())
-        lines = ["[shortener] Traceback at start-up"] + [f"[shortener] request {n}" for n in range(5000)]
-        self.cluster.state["logs"][f"{name}/service"] = "\n".join(lines) + "\n"
-        log = self.execute("step", run=RUN, saved=[])["results"]["group_01"]["logs"]["service"]
-        self.assertTrue(log.startswith("[shortener] Traceback at start-up\n"))
-        self.assertIn("[... the middle of the log is left out ...]", log)
-        self.assertTrue(log.endswith("[shortener] request 4999\n"))
-        self.assertLess(len(log), 130000)
+        middle, end = "[... the middle of the log is left out ...]\n", "[... the end of the log is left out ...]"
+
+        def service_log(lines):
+            self.cluster.state["logs"][f"{name}/service"] = "".join(line + "\n" for line in lines)
+            return self.execute("step", run=RUN, saved=[])["results"]["group_01"]["logs"]["service"]
+
+        # Characters of two and three bytes, so that the byte limits fall inside them.
+        lines = ["[shortener] Traceback at start-up é"] + [f"[shortener] request {n} ✓ é" for n in range(8000)]
+        log = service_log(lines)
+        self.assertTrue(log.startswith(lines[0] + "\n"))
+        self.assertTrue(log.endswith(lines[-1] + "\n"))
+        head, tail = log.split(middle)
+        for part in (head, tail):
+            self.assertLessEqual(len(part.encode()), remote.LOG_PART)
+            self.assertLessEqual(set(part.splitlines()), set(lines))  # whole lines only
+        # The last 200 lines are longer than 60 kB: the end is still the log's end.
+        lines = [f"[shortener] {n} " + "x" * 400 for n in range(400)]
+        self.assertTrue(service_log(lines).endswith(lines[-1] + "\n"))
+        # A last line longer than 60 kB: its end is kept.
+        for lines in (["[shortener] start", "y" * 70000, "[shortener] Traceback: " + "z" * 70000], ["a" * 120001]):
+            log = service_log(lines)
+            self.assertIn(middle, log)
+            self.assertTrue(log.endswith(lines[-1][-1000:] + "\n"))
+            self.assertGreater(len(log.split(middle)[1]), remote.LOG_PART - 100)
+        # Longer than is read at all: the end comes from the last lines, fewer if they are long.
+        read = remote.LOG_READ
+        self.addCleanup(setattr, remote, "LOG_READ", read)
+        remote.LOG_READ = 300000
+        lines = [f"[shortener] {n} " + "y" * 2000 for n in range(400)]
+        log = service_log(lines)
+        self.assertTrue(log.endswith(lines[-1] + "\n"))
+        self.assertNotIn(end, log)
+        # A last line longer than that: what is left out is said.
+        log = service_log(["[shortener] start", "z" * 400000])
+        self.assertTrue(log.startswith("[shortener] start\n" + middle + "z"))
+        self.assertTrue(log.endswith(end + "\n"))
+
+    def test_output_cut_inside_a_character_is_read(self):
+        # kubectl logs --limit-bytes can end a log inside a character of several bytes.
+        result = remote.call([sys.executable, "-c", "import sys; sys.stdout.buffer.write('ok é'.encode()[:-1])"])
+        self.assertEqual((result.returncode, result.stdout), (0, "ok �"))
 
     def test_a_finished_pod_is_kept_until_its_results_can_be_read(self):
         self.start(parallel=1)

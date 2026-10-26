@@ -53,6 +53,7 @@ class FakeCluster:
             "endpoints": {"subsets": [{"addresses": [{"ip": "203.0.113.10"}], "ports": [{"port": 6443}]}]},
             "fail": [],        # substrings of commands that fail
             "finish": None,    # grader log that newly created pods finish with
+            "container_logs": {},  # container name -> log, for pods without a log of their own
         }
         self.commands = []
         if state is None:
@@ -113,8 +114,9 @@ class FakeCluster:
         verb, rest = command[4], command[5:]
         return getattr(self, "do_" + verb)(rest, input)
 
-    def answer(self, code, stdout, stderr=""):
-        return types.SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr)
+    def answer(self, code, stdout, stderr="", raw=None):
+        """As grading-remote.py's call() returns it; raw: the bytes that kubectl prints, for main()."""
+        return types.SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr, raw=raw)
 
     def selected(self, kind, rest):
         items = list(self.objects[kind].values())
@@ -172,13 +174,14 @@ class FakeCluster:
         pod, container = rest[0], rest[rest.index("-c") + 1]
         if pod not in self.objects["pod"]:
             return self.answer(1, "", "NotFound")
-        log = self.state["logs"].get(f"{pod}/{container}", "")
+        log = self.state["logs"].get(f"{pod}/{container}", self.state.get("container_logs", {}).get(container, ""))
+        data = log.encode()
         if "--tail" in rest:
-            log = "".join(log.splitlines(True)[-int(rest[rest.index("--tail") + 1]):])
+            data = b"".join(data.splitlines(True)[-int(rest[rest.index("--tail") + 1]):])
         for option in rest:
-            if option.startswith("--limit-bytes="):
-                log = log[:int(option.split("=", 1)[1])]
-        return self.answer(0, log)
+            if option.startswith("--limit-bytes="):  # as kubelet: bytes, from the start of the tail
+                data = data[:int(option.split("=", 1)[1])]
+        return self.answer(0, data.decode("utf-8", "replace"), raw=data)
 
 
 def main():
@@ -191,7 +194,8 @@ def main():
     result = cluster.call(command, stdin)
     with open(path, "w", encoding="utf-8") as stream:
         json.dump(cluster.state, stream)
-    sys.stdout.write(result.stdout)
+    sys.stdout.buffer.write(result.stdout.encode() if result.raw is None else result.raw)
+    sys.stdout.flush()
     sys.stderr.write(result.stderr)
     sys.exit(result.returncode)
 

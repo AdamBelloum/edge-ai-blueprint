@@ -308,6 +308,19 @@ cloud_soa_grade_groups "$2" "$3"
         self.assertEqual(self.run_objects(), [])  # nothing of the run is left in the cluster
         self.assertIn("Removed 1 pods, 1 network policy and 2 ConfigMaps", result.stderr)
 
+    def test_a_service_log_cut_inside_a_character_is_saved(self):
+        # kubectl cuts logs at a byte limit: byte 60000 of this log falls inside an "é".
+        line = "[shortener] GET /é 200\n"
+        log = "start\n" + line * 8000
+        self.assertEqual(len("start\n".encode()) + 2499 * len(line.encode()) + 18, 60000)
+        self.cluster.state["container_logs"]["service"] = log
+        result = self.grade()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [run_dir] = self.run_dirs()
+        for group in ("group_01", "group_02", "group_03"):
+            saved = (run_dir / group / "service.log").read_text(encoding="utf-8")
+            self.assertTrue(saved.startswith("start\n" + line) and saved.endswith(line), group)
+
     def test_the_network_setting_is_checked_and_recorded(self):
         result = self.grade(CLOUD_SOA_GRADING_EGRESS="internet")
         self.assertEqual(result.returncode, 2)

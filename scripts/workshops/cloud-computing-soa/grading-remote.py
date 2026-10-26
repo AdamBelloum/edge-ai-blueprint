@@ -44,6 +44,8 @@ STUCK = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContaine
 # link-local addresses with the cloud metadata server), nor the nodes or the
 # Kubernetes API, whose addresses can be public.
 BLOCKED = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"]
+LOG_PART = 60000    # bytes kept from the start and from the end of a long container log
+LOG_READ = 2000000  # bytes of a container log read at most
 
 
 def require(condition, message):
@@ -52,7 +54,8 @@ def require(condition, message):
 
 
 def call(command, input=None):
-    return subprocess.run(command, input=input, capture_output=True, text=True)
+    # A log cut at a byte limit can end inside a character.
+    return subprocess.run(command, input=input, capture_output=True, encoding="utf-8", errors="replace")
 
 
 def short(text, limit=400):
@@ -331,12 +334,31 @@ def results_block(log):
 
 
 def start_and_end(cluster, pod, container):
-    """A log's first 60 kB, where start-up errors are, and its last 200 lines."""
-    head = cluster.logs(pod, container, limit=60000)
-    if head is None or len(head) < 60000:
-        return head or ""
-    tail = cluster.logs(pod, container, tail=200, limit=60000) or ""
-    return head.rsplit("\n", 1)[0] + "\n[... the middle of the log is left out ...]\n" + tail
+    """A log's first and last 60 kB in whole lines: start-up errors are at its start, why a service stopped at its end."""
+    log = cluster.logs(pod, container, limit=LOG_READ)
+    if log is None:
+        return ""
+    data = end = log.encode()
+    if len(data) <= 2 * LOG_PART:
+        return log
+    if len(data) >= LOG_READ:
+        # Longer than was read: the end comes from the last lines. kubectl cuts
+        # those at the byte limit too, so fewer are read if they are long.
+        for lines in (200, 5):
+            last = cluster.logs(pod, container, tail=lines, limit=LOG_READ)
+            if last is None:
+                break
+            end = last.encode()
+            if len(end) < LOG_READ:
+                break
+    head = data[:LOG_PART].rsplit(b"\n", 1)[0]
+    cut = len(end) - LOG_PART
+    # The first whole line in the last 60 kB; none if the last line alone is longer.
+    newline = end.find(b"\n", cut - 1, len(end) - 1) if cut > 0 else -1
+    tail = end[newline + 1:] if newline >= 0 else end[max(cut, 0):]
+    if len(end) >= LOG_READ:
+        tail += b"\n[... the end of the log is left out ...]\n"
+    return (head + b"\n[... the middle of the log is left out ...]\n" + tail).decode("utf-8", "replace")
 
 
 def collect(cluster, item, state, reason, deadline):
