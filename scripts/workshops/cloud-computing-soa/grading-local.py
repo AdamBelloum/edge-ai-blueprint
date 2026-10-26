@@ -106,8 +106,11 @@ def checkout():
 
 
 def remote_script(payload):
-    code = (HERE / "grading-remote.py").read_text(encoding="utf-8")
-    script = (f"set -euo pipefail\npython3 - {pack(payload)} <<'GRADING_REMOTE'\n{code}\nGRADING_REMOTE\n")
+    """The bash script of one step: grading-remote.py, compressed, with the payload as its argument."""
+    code = base64.b64encode(gzip.compress((HERE / "grading-remote.py").read_bytes())).decode()
+    script = (f"set -euo pipefail\npython3 - {pack(payload)} <<'GRADING_REMOTE'\nimport base64, gzip\n"
+              f"exec(compile(gzip.decompress(base64.b64decode('{code}')), 'grading-remote.py', 'exec'))\n"
+              "GRADING_REMOTE\n")
     if len(script) > SCRIPT_LIMIT:
         fail(f"The grading files are too large to send ({len(script)} bytes, at most {SCRIPT_LIMIT}).")
     return script

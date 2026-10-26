@@ -103,6 +103,9 @@ class LocalHelperTests(unittest.TestCase):
                     self.assertLess(len(script), 0.85 * local.SCRIPT_LIMIT)
                     payload = script.split("python3 - ", 1)[1].split(" <<", 1)[0]
                     sent = json.loads(gzip.decompress(base64.b64decode(payload)))
+                    code = script.split("b64decode('", 1)[1].split("')", 1)[0]
+                    self.assertEqual(gzip.decompress(base64.b64decode(code)),
+                                     (SCRIPTS / "grading-remote.py").read_bytes())
                     self.assertEqual((sent["operation"], sent["kind"], sent["module"]), ("start", kind, module))
                     record = json.loads((run_dir / "run.json").read_text())
                     self.assertEqual(record["run"], "0123abcd")
