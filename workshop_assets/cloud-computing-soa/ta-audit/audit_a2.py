@@ -897,9 +897,10 @@ def src_shortener_private_key(ctx):
             ctx.problem(f"{path} contains a private key")
 
 
-# Names of locations (PRIVATE_KEY_FILE, KEYS_DIR) and of public keys, which both
-# services may share.
-NOT_SECRET = re.compile(r"public|(file|path|dir|folder|url|name)$", re.IGNORECASE)
+# Names of public keys and of their files, which both services may share. A
+# private key's file is not one: both services naming it, as ../keys/private.pem
+# for example, lets the shortener sign tokens.
+NOT_SECRET = re.compile("public", re.IGNORECASE)
 
 
 def secret_literals(folder):
