@@ -69,6 +69,8 @@ MODULES = {
 TRACKS = ("beginner", "intermediate", "advanced", "solutions")
 COPY_LIMIT = 400 * 2**20   # bytes of a Module folder that are copied at most
 COPY_FILES = 20000         # files of a Module folder that are copied at most
+FOLDER_DEPTH = 100         # folder levels below a Module folder that are copied at most
+FOLDER = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK  # opens a folder, never a link or a pipe
 SOURCE_LIMIT = 20 * 2**20  # bytes of the track's source kept for the audit
 NOT_SOURCE = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "site-packages",
               ".ipynb_checkpoints"}
@@ -152,38 +154,85 @@ def examine(found, track, module, manifest):
     return {"work": work, "reason": reason, "files": files, "tracks": tracks}
 
 
+def copy_regular(name, into, folder):
+    """Copy the regular file name in the open folder, with its mode, following no link; the bytes copied,
+    or None if it is something else."""
+    def opener(path, flags):
+        return os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+
+    with open(name, "rb", opener=opener) as source:
+        mode = os.fstat(source.fileno()).st_mode
+        if not stat.S_ISREG(mode):
+            return None
+        with open(into, "xb") as target:  # a new file, not a link
+            shutil.copyfileobj(source, target, 1 << 20)
+            target.flush()  # a write after the chmod would clear setuid and setgid
+            os.fchmod(target.fileno(), stat.S_IMODE(mode) | stat.S_IRUSR | stat.S_IWUSR)
+            return target.tell()
+
+
 def copy_tree(source, destination):
     """Copy files, folders and symbolic links; skip other entries and unreadable files.
 
-    Nothing is written through a link: the group's running server may change
-    the workspace while it is copied.
+    Below source, nothing is read or written through a link: the group's
+    running server may change the workspace while it is copied, and swap a
+    file or a folder for a link or a pipe. Each folder and file is opened
+    through its folder's descriptor, and only as what it was seen to be.
     """
     copied = {"files": 0, "bytes": 0}
     skipped = []
-    for root, dirs, files in os.walk(source):
-        relative = Path(root).relative_to(source)
+
+    def skip(relative, reason):
+        skipped.append(f"{relative.as_posix()}: {reason}")
+
+    def copy_folder(folder, relative):
         target = destination / relative
         if target.is_symlink():
-            dirs[:] = []
-            continue
-        target.mkdir(parents=True, exist_ok=True)
-        for name in dirs + files:
-            path, into = Path(root, name), target / name
+            return
+        try:
+            names = sorted(os.listdir(folder))
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            skip(relative, error.strerror or error)
+            return
+        for name in names:
+            path, into = relative / name, target / name
             try:
-                if os.path.lexists(into):
+                info = os.stat(name, dir_fd=folder, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    if len(path.parts) > FOLDER_DEPTH:
+                        skip(path, f"more than {FOLDER_DEPTH} folders deep")
+                        continue
+                    inner = os.open(name, FOLDER, dir_fd=folder)
+                    try:
+                        copy_folder(inner, path)
+                    finally:
+                        os.close(inner)
+                elif os.path.lexists(into):
                     continue
-                info = os.lstat(path)
-                if stat.S_ISLNK(info.st_mode):
-                    os.symlink(os.readlink(path), into)
+                elif stat.S_ISLNK(info.st_mode):
+                    os.symlink(os.readlink(name, dir_fd=folder), into)
                 elif stat.S_ISREG(info.st_mode):
-                    shutil.copyfile(path, into, follow_symlinks=False)
-                    os.chmod(into, stat.S_IMODE(info.st_mode) | stat.S_IRUSR | stat.S_IWUSR)
+                    size = copy_regular(name, into, folder)
+                    if size is None:
+                        skip(path, "not a regular file")
+                        continue
                     copied["files"] += 1
-                    copied["bytes"] += info.st_size
-                elif not stat.S_ISDIR(info.st_mode):
-                    skipped.append(f"{(relative / name).as_posix()}: not a regular file")
+                    copied["bytes"] += size
+                else:
+                    skip(path, "not a regular file")
             except OSError as error:
-                skipped.append(f"{(relative / name).as_posix()}: {error.strerror or error}")
+                skip(path, error.strerror or error)
+
+    try:
+        top = os.open(os.path.realpath(source), FOLDER)  # the Module folder may be a link, as for examine()
+    except OSError as error:
+        skip(Path("."), error.strerror or error)
+        return copied, skipped
+    try:
+        copy_folder(top, Path("."))
+    finally:
+        os.close(top)
     return copied, skipped
 
 

@@ -122,7 +122,9 @@ the JupyterHub deployment:
   empty home, records checksums, and compares the track's code in the copy
   with the files the track delivers and with the reference solution. It also
   keeps a copy of the track's source files for the audit, and of the code
-  files for the results; links are not followed.
+  files for the results; links are not followed. Folders more than 100 levels
+  below the Module folder are left out, as are entries that cannot be copied;
+  prepare.json lists them.
 - **dns**, in pods without network, answers on 127.0.0.1:53, the pod's only
   name server: it refuses every lookup at once and writes down the name (see
   Network). The pod lets uid 1000 open ports from 53 up (the sysctl

@@ -20,9 +20,11 @@ import shlex
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import venv
@@ -301,6 +303,144 @@ class PrepareTests(unittest.TestCase):
         os.symlink(outside, copy / "intermediate/data")
         pod_module.copy_tree(pod.folder, copy)
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_the_copy_keeps_each_file_s_mode(self):
+        pod = Pod(self, "1", "intermediate")
+        modes = {"private.pem": 0o600, "run.sh": 0o750, "tool": 0o4755, "read-only.txt": 0o444}
+        for name, mode in modes.items():
+            pod.write(f"intermediate/{name}", "x")
+            (pod.folder / "intermediate" / name).chmod(mode)
+        pod_module.copy_tree(pod.folder, pod.root / "home/copy")
+        copied = {name: stat.S_IMODE((pod.root / "home/copy/intermediate" / name).stat().st_mode) for name in modes}
+        # Readable and writable for the participant, who owns the copy.
+        self.assertEqual(copied, dict(modes, **{"read-only.txt": 0o644}))
+
+    def test_folders_more_than_100_levels_deep_are_left_out(self):
+        pod = Pod(self, "1", "intermediate")
+        deepest = pod.folder.joinpath("intermediate", *["d"] * 100)  # 101 levels below the Module folder
+        deepest.mkdir(parents=True)
+        (deepest / "x.txt").write_text("x")
+        (deepest.parent / "y.txt").write_text("y")
+        copied, skipped = pod_module.copy_tree(pod.folder, pod.root / "home/copy")
+        self.assertEqual(copied, {"files": 1, "bytes": 1})  # y.txt
+        self.assertEqual(skipped, ["intermediate/" + "d/" * 99 + "d: more than 100 folders deep"])
+
+    def test_a_module_folder_that_is_a_link_is_copied(self):
+        # examine() follows such a link, and so does the copy.
+        pod = Pod(self, "1", "intermediate")
+        pod.deliver(solution=True)
+        pod.folder.rename(pod.folder.with_name("my-module-1"))
+        pod.folder.symlink_to("my-module-1")
+        self.assertEqual(pod.prepare()["work"], "solution")
+        self.assertTrue((pod.root / "home/Cloud-Computing-SOA/Module-1/intermediate/app.py").is_file())
+
+    def copy_in_time(self, pod, pipe=None):
+        """copy_tree in a thread, so that a copy that waits on a pipe fails the test instead of hanging it."""
+        result = []
+
+        def copy():
+            try:
+                result.append(pod_module.copy_tree(pod.folder, pod.root / "home/copy"))
+            except Exception as error:
+                result.append(error)
+
+        thread = threading.Thread(target=copy, daemon=True)
+        thread.start()
+        thread.join(30)
+        if thread.is_alive():
+            if pipe:
+                os.close(os.open(pipe, os.O_WRONLY | os.O_NONBLOCK))  # a writer, so that the reader goes on
+            thread.join(5)
+            self.fail("the copy hangs")
+        if isinstance(result[0], Exception):
+            raise result[0]
+        return result[0]
+
+    def test_a_file_swapped_during_the_copy_is_skipped(self):
+        # The group's server swaps a file for a link or a pipe just after prepare looked at it.
+        for kind in ("link", "pipe"):
+            with self.subTest(kind=kind):
+                pod = Pod(self, "1", "intermediate")
+                pod.write("intermediate/notes.txt", "notes")
+                pod.write("intermediate/run.sh", "echo run")
+                (pod.folder / "intermediate/run.sh").chmod(0o750)
+                outside = pod.root / "outside.txt"
+                outside.write_text("not the group's file")
+                outside.chmod(0o600)
+                swapped = str(pod.folder / "intermediate/notes.txt")
+                real = {"lstat": os.lstat, "stat": os.stat}
+
+                def looked_at(call):
+                    def look(path, *arguments, **keywords):
+                        info = real[call](path, *arguments, **keywords)
+                        if os.path.basename(str(path)) == "notes.txt" and stat.S_ISREG(info.st_mode) \
+                                and not os.path.lexists(swapped + ".old"):
+                            os.rename(swapped, swapped + ".old")
+                            if kind == "link":
+                                os.symlink(outside, swapped)
+                            else:
+                                os.mkfifo(swapped)
+                        return info
+                    return look
+
+                os.lstat, os.stat = looked_at("lstat"), looked_at("stat")
+                try:
+                    copied, skipped = self.copy_in_time(pod, pipe=swapped if kind == "pipe" else None)
+                finally:
+                    os.lstat, os.stat = real["lstat"], real["stat"]
+                self.assertTrue(os.path.lexists(swapped + ".old"))  # the swap happened
+                # Neither its mode set nor its content copied through the link.
+                self.assertEqual(stat.S_IMODE(outside.stat().st_mode), 0o600)
+                self.assertFalse(os.path.lexists(pod.root / "home/copy/intermediate/notes.txt"))
+                self.assertEqual([entry.split(":")[0] for entry in skipped], ["intermediate/notes.txt"])
+                # The other file is copied, with its mode.
+                self.assertEqual(stat.S_IMODE((pod.root / "home/copy/intermediate/run.sh").stat().st_mode), 0o750)
+                self.assertEqual(copied, {"files": 1, "bytes": 8})
+
+    def test_a_folder_swapped_during_the_copy_is_skipped(self):
+        # The group's server swaps a folder for a link to another folder, a pipe or a file just
+        # before prepare opens it; the copy goes on with the rest.
+        for kind in ("link", "pipe", "file"):
+            with self.subTest(kind=kind):
+                pod = Pod(self, "1", "intermediate")
+                pod.write("intermediate/data/urls.json", "{}")
+                pod.write("intermediate/zz.txt", "copied")
+                outside = pod.root / "outside"
+                outside.mkdir()
+                (outside / "not-the-groups.txt").write_text("not the group's file")
+                folder = pod.folder / "intermediate/data"
+                real_open, real_scandir = os.open, os.scandir
+
+                def swap():
+                    if not os.path.lexists(folder.with_name("data.old")):
+                        folder.rename(folder.with_name("data.old"))
+                        if kind == "link":
+                            folder.symlink_to(outside)
+                        elif kind == "pipe":
+                            os.mkfifo(folder)
+                        else:
+                            folder.write_text("now a file")
+
+                def opened(path, flags, *arguments, **keywords):  # each folder opened by name in its parent
+                    if path == "data" and keywords.get("dir_fd") is not None:
+                        swap()
+                    return real_open(path, flags, *arguments, **keywords)
+
+                def listed(path="."):  # os.walk lists each folder by path
+                    if str(path) == str(folder):
+                        swap()
+                    return real_scandir(path)
+
+                os.open, os.scandir = opened, listed
+                try:
+                    copied, skipped = self.copy_in_time(pod, pipe=str(folder) if kind == "pipe" else None)
+                finally:
+                    os.open, os.scandir = real_open, real_scandir
+                self.assertTrue(os.path.lexists(folder.with_name("data.old")))  # the swap happened
+                self.assertEqual(sorted(path.name for path in (pod.root / "home/copy").rglob("*")),
+                                 ["intermediate", "zz.txt"])
+                self.assertEqual([entry.split(":")[0] for entry in skipped], ["intermediate/data"])
+                self.assertEqual(copied, {"files": 1, "bytes": 6})
 
     def test_the_graded_code_is_kept_from_the_copy_but_no_link(self):
         pod = Pod(self, "2", "intermediate")
