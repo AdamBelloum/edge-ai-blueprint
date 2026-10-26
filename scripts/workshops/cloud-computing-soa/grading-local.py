@@ -279,13 +279,22 @@ def outcome(result):
     return "graded"
 
 
-def save(run_dir, group, result):
+def save(run_dir, group, result, codes):
+    """A group's results; codes: the names of the module's code files, the only ones kept."""
     folder = run_dir / group
     folder.mkdir(exist_ok=True)
     files = (result.get("results") or {}).get("files") or {}
     for name in RESULT_FILES:
         if isinstance(files.get(name), str):
             (folder / name).write_text(files[name], encoding="utf-8")
+    for relative, data in ((result.get("results") or {}).get("code") or {}).items():
+        if relative in codes and isinstance(data, str):
+            try:
+                content = base64.b64decode(data, validate=True)
+            except ValueError:
+                continue
+            (folder / "code" / relative).parent.mkdir(parents=True, exist_ok=True)
+            (folder / "code" / relative).write_bytes(content)
     for name, text in (result.get("logs") or {}).items():
         if name in ("grader", "service", "prepare", "dns") and text:
             (folder / f"{name}.log").write_text(text, encoding="utf-8")
@@ -296,11 +305,11 @@ def save(run_dir, group, result):
     (folder / "result.json.tmp").replace(folder / "result.json")
 
 
-def progress(run_dir, answer):
+def progress(run_dir, answer, codes):
     for group, result in sorted(answer.get("results", {}).items()):
         if not GROUP.match(group):
             fail(f"Unexpected group name from the cluster: {clean(group)!r}")
-        save(run_dir, group, result)
+        save(run_dir, group, result, codes)
         summary = (result.get("results") or {}).get("summary") or {}
         score, _ = points(result)
         work = summary.get("work") or "-"
@@ -338,15 +347,15 @@ def receive(args):
             fail(f"Still in the cluster: {clean(json.dumps(answer['left']))}")
         return
     run_dir = Path(args.run_dir)
+    record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     if args.operation == "start":
-        record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         record.update({key: answer.get(key)
                        for key in ("image", "host", "kubernetes", "started", "unreachable", "published")})
         record["groups"] = answer.get("names") or []
         (run_dir / "run.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print(clean(f"Started grading run {record['run']} for {len(record['groups'])} groups with "
                     f"{record['image']} (Kubernetes {record['kubernetes']})."), file=sys.stderr)
-    progress(run_dir, answer)
+    progress(run_dir, answer, MODULES[record["module"]]["code"])
 
 
 def rerun(run, groups):
@@ -415,8 +424,9 @@ def summary(args):
     lines += ["| " + " | ".join(clean(cell).replace("|", "\\|") for cell in row[:5] + [network]) + " |"
               for row, network in zip(rows, cells)]
     lines += [""] + (note + [""] if note else [])
-    lines += ["Each group's folder holds the grading output, prepare.json (the files graded, with checksums), "
-              "service.log (the group's services), and result.json (the pod).", ""]
+    lines += ["Each group's folder holds the grading output, code (the graded code, as the services ran it), "
+              "prepare.json (the files graded, with checksums), service.log (the group's services), and "
+              "result.json (the pod).", ""]
     (run_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
     widths = [max(len(clean(row[column])) for row in [header] + rows) for column in range(4)]
     for row in [header] + rows:

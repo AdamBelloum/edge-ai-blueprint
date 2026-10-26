@@ -251,12 +251,19 @@ class LocalHelperTests(unittest.TestCase):
     def test_receive_saves_known_files_of_known_groups_only(self):
         run_dir = self.root / "run"
         run_dir.mkdir()
-        (run_dir / "run.json").write_text(json.dumps({"run": "0123abcd"}))
+        (run_dir / "run.json").write_text(json.dumps({"run": "0123abcd", "module": "1"}))
+
+        def encoded(data):
+            return base64.b64encode(data).decode()
+
         block = {"summary": {"kind": "tests", "work": "changed", "outcome": "graded", "network": {
                      "attempts": 2, "hosts": 1, "cut": False,
                      "targets": [{"kind": "lookup", "target": "en.wikipedia.org", "count": 2}]}},
                  "files": {"tests.txt": "x", "tests.json": json.dumps({"earned": 3, "possible": 12, "lines": []}),
-                           "../evil.txt": "no", "service.log": "no"}}
+                           "../evil.txt": "no", "service.log": "no"},
+                 # Only the module's code files are kept, byte for byte.
+                 "code": {"app.py": encoded("print('é')\n".encode()), "../evil.py": encoded(b"no"),
+                          "auth_service/auth.py": encoded(b"no"), "data.json": encoded(b"no")}}
         result = {"state": "done", "reason": "", "pod": {}, "events": [], "results": block,
                   "logs": {"service": "[shortener] up\n", "other": "no"}}
         answer = {"run": "0123abcd", "groups": {"group_01": "done", "group_02": "running"},
@@ -265,8 +272,10 @@ class LocalHelperTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.strip(), "remaining=1")
         self.assertIn("group_01  changed    3/12 points  (its code tried to reach other hosts)", done.stderr)
-        self.assertEqual(sorted(path.name for path in (run_dir / "group_01").iterdir()),
-                         ["result.json", "service.log", "tests.json", "tests.txt"])
+        self.assertEqual(sorted(path.relative_to(run_dir / "group_01").as_posix()
+                                for path in (run_dir / "group_01").rglob("*")),
+                         ["code", "code/app.py", "result.json", "service.log", "tests.json", "tests.txt"])
+        self.assertEqual((run_dir / "group_01/code/app.py").read_bytes(), "print('é')\n".encode())
         self.assertFalse((self.root / "evil.txt").exists())
         answer["results"] = {"../group_03": result}
         bad = helper("receive", "step", "--run-dir", str(run_dir), stdin=framed(answer))
@@ -412,6 +421,7 @@ cloud_soa_grade_groups "$2" "$3"
         self.assertIn("Network: none: the groups' code cannot reach the internet or the cluster.", result.stdout)
         for group in record["groups"]:
             self.assertTrue((run_dir / group / "tests.json").is_file(), group)
+            self.assertEqual((run_dir / group / "code/app.py").read_text(), "# app.py, as graded\n")
         self.assertIn("group_03  changed  12/12 points  graded", result.stdout)
         self.assertIn("Network: none: the groups' code could not reach the internet", (run_dir / "summary.md").read_text())
         self.assertEqual(self.run_objects(), [])  # nothing of the run is left in the cluster

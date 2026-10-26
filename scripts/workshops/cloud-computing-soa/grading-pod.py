@@ -7,8 +7,9 @@ participant (uid 1000):
     prepare  (init container) waits until the pod's network rules are in
              force, copies Cloud-Computing-SOA/Module-N from the group's
              volume, which is mounted read-only, into an empty home at the same
-             path as in JupyterHub, and compares the track's code with the
-             files the group received and with the reference solution.
+             path as in JupyterHub, compares the track's code in the copy with
+             the files the group received and with the reference solution, and
+             keeps that code for the results.
     dns      (sidecar, pods without network) answers every name lookup in the
              pod at once with REFUSED, and writes down the names.
     serve    (sidecar) starts the group's services in that copy as the
@@ -19,7 +20,7 @@ participant (uid 1000):
     grade    (main container) waits for the services, runs the grading script
              or the TA audit against them, and prints the results as one block
              that the organiser collects with kubectl logs, with the hosts that
-             the group's code tried to reach.
+             the group's code tried to reach and the graded code.
 
 Only the grade container sees the grading scripts, the audit and the results;
 the group's code runs in the serve container and cannot read or change them.
@@ -72,6 +73,7 @@ SOURCE_LIMIT = 20 * 2**20  # bytes of the track's source kept for the audit
 NOT_SOURCE = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "site-packages",
               ".ipynb_checkpoints"}
 FILE_LIMIT = 2 * 2**20     # bytes of one result file returned to the organiser
+CODE_LIMIT = 2**20         # bytes of one graded code file returned to the organiser
 KUBELET = 10250            # the kubelet's port on every node
 BEGIN = "===== GRADING RESULTS BEGIN ====="
 END = "===== GRADING RESULTS END ====="
@@ -115,11 +117,11 @@ def measure(folder):
 def examine(found, track, module, manifest):
     """What the group did with the track: missing, unchanged, solution or changed."""
     if not found.is_dir():
-        return {"work": "missing", "reason": f"no {module['folder']} folder"}
+        return {"work": "missing", "reason": f"no {module['folder']} folder", "files": {}, "tracks": []}
     tracks = [name for name in TRACKS if (found / name).is_dir()]
     count, size = measure(found)
     if count > COPY_FILES or size > COPY_LIMIT:
-        return {"work": "too large", "tracks": tracks,
+        return {"work": "too large", "tracks": tracks, "files": {},
                 "reason": f"{module['folder']} holds {count} files and folders, {size / 2**20:.0f} MB"}
     files = {}
     for relative in module["code"]:
@@ -203,6 +205,15 @@ def keep_source(track, destination):
             kept += info.st_size
 
 
+def keep_code(track, codes, destination):
+    """The graded code files for the results, from the copy that the services run; no links."""
+    for relative in codes:
+        data = read_regular(track / relative, CODE_LIMIT + 1)
+        if data is not None and len(data) <= CODE_LIMIT:
+            (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+            (destination / relative).write_bytes(data)
+
+
 def rules_in_force(seconds):
     """Seconds until the pod's NetworkPolicy is in force, or None if it is not after `seconds`.
 
@@ -252,10 +263,14 @@ def prepare(args):
                     f"the pod's network rules were not in force after {args.policy_wait} s, so the group's code "
                     "was not run; does the cluster enforce NetworkPolicies?")
         if record["work"] in ("unchanged", "solution", "changed"):
-            keep_source(found / args.track, Path(args.source, "track"))
             copy = Path(args.home, "Cloud-Computing-SOA", module["folder"])
             record["copied"], skipped = copy_tree(found, copy)
             record["skipped"] = skipped[:50] + ([f"... {len(skipped) - 50} more"] if len(skipped) > 50 else [])
+            # The code as copied, which the services run: the group's server may
+            # have changed the workspace meanwhile.
+            record.update(examine(copy, args.track, module, manifest))
+            keep_source(copy / args.track, Path(args.source, "track"))
+            keep_code(copy / args.track, module["code"], Path(args.source, "code"))
     except Exception as error:  # the grader reports it; the pod goes on
         record["work"], record["reason"] = "error", f"prepare: {type(error).__name__}: {error}"
     Path(args.source, "prepare.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -705,8 +720,14 @@ def grade(args):
             else:
                 files[name] = text
     files["grade.json"] = json.dumps(summary, indent=2) + "\n"
+    code = {}  # what prepare kept, as the services ran it
+    for relative in module["code"]:
+        data = read_regular(source / "code" / relative, CODE_LIMIT + 1)
+        if data is not None and len(data) <= CODE_LIMIT:
+            code[relative] = base64.b64encode(data).decode()
     say(f"{summary.get('work')}, {summary.get('outcome')}")
-    block = base64.b64encode(gzip.compress(json.dumps({"summary": summary, "files": files}).encode())).decode()
+    block = base64.b64encode(gzip.compress(json.dumps({"summary": summary, "files": files, "code": code})
+                                           .encode())).decode()
     print(BEGIN)
     for start in range(0, len(block), 76):
         print(block[start:start + 76])

@@ -21,9 +21,10 @@ KINDS = {"configmap": "ConfigMap", "pvc": "PersistentVolumeClaim", "pod": "Pod",
          "networkpolicy": "NetworkPolicy", "node": "Node"}
 
 
-def results_log(summary, files):
+def results_log(summary, files, code=None):
     """The grader's log, as grading-pod.py prints it."""
-    block = base64.b64encode(gzip.compress(json.dumps({"summary": summary, "files": files}).encode())).decode()
+    block = {"summary": summary, "files": files, "code": code or {}}
+    block = base64.b64encode(gzip.compress(json.dumps(block).encode())).decode()
     return "\n".join(["[runner] done", "===== GRADING RESULTS BEGIN ====="]
                      + [block[start:start + 76] for start in range(0, len(block), 76)]
                      + ["===== GRADING RESULTS END ====="]) + "\n"
@@ -38,8 +39,10 @@ def tests_result(module="1", earned=12, possible=12, work="changed"):
                          "problems": [] if earned == possible else [{"outcome": "fail", "detail": "expected 301"}]}]}
     summary = {"module": module, "kind": "tests", "track": "intermediate", "work": work, "reason": "",
                "waited": 1.0, "closed": [], "listening": [5000], "exit": 0, "outcome": "graded"}
+    code = {name: base64.b64encode(f"# {name}, as graded\n".encode()).decode()
+            for name in (["app.py"] if module == "1" else ["auth_service/auth.py", "shortener_service/shortener.py"])}
     return results_log(summary, {"tests.json": json.dumps(report), "tests.txt": "12/12 tested by this script\n",
-                                 "prepare.json": json.dumps({"work": work}), "grade.json": json.dumps(summary)})
+                                 "prepare.json": json.dumps({"work": work}), "grade.json": json.dumps(summary)}, code)
 
 
 class FakeCluster:

@@ -298,6 +298,22 @@ class PrepareTests(unittest.TestCase):
         pod_module.copy_tree(pod.folder, copy)
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_the_graded_code_is_kept_from_the_copy_but_no_link(self):
+        pod = Pod(self, "2", "intermediate")
+        pod.deliver(solution=True)
+        self.assertEqual(pod.prepare()["work"], "solution")
+        for code in ("auth_service/auth.py", "shortener_service/shortener.py"):
+            self.assertEqual((pod.root / "source/code" / code).read_bytes(),
+                             (pod.root / "home/Cloud-Computing-SOA/Module-2/intermediate" / code).read_bytes())
+        # A link is copied as a link, and its target is not kept.
+        pod = Pod(self, "1", "intermediate")
+        pod.deliver()
+        (pod.root / "outside.py").write_text("print('not the group's file')\n")
+        (pod.folder / "intermediate/app.py").unlink()
+        os.symlink(pod.root / "outside.py", pod.folder / "intermediate/app.py")
+        self.assertEqual(pod.prepare()["work"], "changed")
+        self.assertFalse((pod.root / "source/code").exists())
+
     def test_files_that_vanish_during_prepare_are_skipped(self):
         pod = Pod(self, "1", "intermediate")
         pod.deliver(solution=True)
@@ -336,7 +352,8 @@ class PrepareTests(unittest.TestCase):
             record = pod_module.examine(pod.folder, "intermediate", pod_module.MODULES["1"], manifest)
         finally:
             pod_module.COPY_LIMIT = limit
-        self.assertEqual(record["work"], "too large")
+        # Also when prepare examines the copy again: no checksums of an earlier look are left.
+        self.assertEqual((record["work"], record["files"]), ("too large", {}))
 
     def test_the_grader_reports_work_it_cannot_grade_without_waiting(self):
         pod = Pod(self, "1", "intermediate")
@@ -346,6 +363,7 @@ class PrepareTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual((summary["work"], summary["outcome"]), ("missing", "not graded"))
         self.assertNotIn("tests.txt", pod.block["files"])
+        self.assertEqual(pod.block["code"], {})
         (pod.root / "source/prepare.json").unlink()
         self.assertEqual(pod.grade()["work"], "error")
 
@@ -512,6 +530,9 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(summary["outcome"], "graded")
                 self.assertEqual(pod.points(), expected)
                 self.assertEqual(summary["network"]["attempts"], 0)
+                # The graded code comes back with the results.
+                self.assertEqual(base64.b64decode(pod.block["code"]["app.py"]),
+                                 (pod.folder / track / "app.py").read_bytes())
                 if track == "advanced":  # the delivered app.py holds only comments
                     self.assertEqual(summary["closed"], [5000])
                     self.assertIn("shortener stopped with exit code 0", pod.service_log())
@@ -610,6 +631,9 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(record["work"], work)
                 self.assertEqual(pod.points(), (11, 11))
                 self.assertEqual(summary["network"]["attempts"], 0)  # the services talk over the pod's loopback
+                self.assertEqual({code: base64.b64decode(data) for code, data in pod.block["code"].items()},
+                                 {code: (pod.folder / track / code).read_bytes()
+                                  for code in ("auth_service/auth.py", "shortener_service/shortener.py")})
                 log = pod.service_log()
                 self.assertIn("setup_local_keys.sh exited with code 0", log)
                 self.assertIn("[auth]", log)

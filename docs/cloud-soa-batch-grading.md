@@ -59,6 +59,7 @@ secrets/workshops/grading/<control-plane host>/<UTC time>-module1-tests-<run>/
 ├── summary.csv
 └── group_07/
     ├── tests.txt, tests.json            the grading script's output (audit.md, audit.json, audit.txt for the audit)
+    ├── code/                            the graded code, as the services ran it: app.py, or auth_service/auth.py and shortener_service/shortener.py
     ├── prepare.json                     the files graded, with checksums, and what the group changed
     ├── service.log                      the group's services
     ├── grade.json, result.json          how the grading went, the hosts that the code tried to reach; the pod's state and events
@@ -83,7 +84,7 @@ ConfigMaps that the cluster seeds participant servers with (run.json,
 | `unchanged` | the files the group received, unchanged (the beginner code is complete and gets most points) |
 | `solution` | the reference solution, for example copied after its release |
 | `missing` | no Module folder, or the track's code is not there; prepare.json lists the folder's tracks |
-| `too large` | the Module folder holds more than 400 MB, or more than 20,000 files and folders; not copied |
+| `too large` | the Module folder holds more than 400 MB, or more than 20,000 files and folders; not graded |
 
 The Network use column lists the hosts that a group's code tried to reach,
 with how often. Below the table, summary.md lists the groups
@@ -96,11 +97,12 @@ are listed in each group's tests.txt. For the audit, the summary counts FAIL,
 WARN and ERROR findings; deduct per bug, not per check, and use the oral-exam
 questions in audit.md (see `workshop_assets/cloud-computing-soa/ta-audit/README.md`).
 
-The results hold the groups' code and logs. Git ignores `secrets/`, but the
-folder is inside the checkout: if the checkout is in a synchronised folder
-(OneDrive, Dropbox), set `CLOUD_SOA_GRADING_RESULTS` to a folder outside it.
-Give the results to the TAs who grade, and delete them when the grades are
-final.
+The results hold the graded code, at most 1 MB per file, and the logs of the
+groups' services, but not the rest of the Module folders, which a reset
+deletes. Git ignores `secrets/`, but the folder is inside the checkout: if the
+checkout is in a synchronised folder (OneDrive, Dropbox), set
+`CLOUD_SOA_GRADING_RESULTS` to a folder outside it. Give the results to the
+TAs who grade, and delete them when the grades are final.
 
 ## How a group is graded
 
@@ -117,9 +119,10 @@ the JupyterHub deployment:
 
 - **prepare** waits until the pod's network rules are in force (see Network),
   then copies `Cloud-Computing-SOA/Module-N` to the same path in an
-  empty home, records checksums, and compares the track's code with the files
-  the track delivers and with the reference solution. It also keeps a copy of
-  the track's source files for the audit.
+  empty home, records checksums, and compares the track's code in the copy
+  with the files the track delivers and with the reference solution. It also
+  keeps a copy of the track's source files for the audit, and of the code
+  files for the results; links are not followed.
 - **dns**, in pods without network, answers on 127.0.0.1:53, the pod's only
   name server: it refuses every lookup at once and writes down the name (see
   Network). The pod lets uid 1000 open ports from 53 up (the sysctl
