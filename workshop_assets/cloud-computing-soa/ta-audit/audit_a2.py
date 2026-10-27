@@ -28,7 +28,7 @@ from urllib.parse import quote
 import audit_a1
 from audit_common import (
     Client, Context, ServiceUnreachable, gives_url, holds_private_key, is_5xx, listed, print_report, registry,
-    returned_id, run_checks, shorten, wait_for, write_markdown,
+    returned_id, run_checks, shorten, wait_for, write_json, write_markdown,
 )
 
 CHECKS, check = registry()
@@ -897,6 +897,12 @@ def src_shortener_private_key(ctx):
             ctx.problem(f"{path} contains a private key")
 
 
+# Names of public keys and of their files, which both services may share. A
+# private key's file is not one: both services naming it, as ../keys/private.pem
+# for example, lets the shortener sign tokens.
+NOT_SECRET = re.compile("public", re.IGNORECASE)
+
+
 def secret_literals(folder):
     """String constants assigned to names that look like secrets or keys."""
     found = {}
@@ -909,7 +915,8 @@ def secret_literals(folder):
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
                     and isinstance(node.value.value, str) and len(node.value.value) >= 6:
                 for target in node.targets:
-                    if isinstance(target, ast.Name) and re.search("secret|key|signing", target.id, re.IGNORECASE):
+                    if isinstance(target, ast.Name) and re.search("secret|key|signing", target.id, re.IGNORECASE) \
+                            and not NOT_SECRET.search(target.id):
                         found.setdefault(node.value.value, f"{path}:{node.lineno} {target.id}")
     return found
 
@@ -961,6 +968,7 @@ def main():
     parser.add_argument("--auth-source", metavar="DIR", help="the students' authentication service source")
     parser.add_argument("--shortener-source", metavar="DIR", help="the students' URL shortener source")
     parser.add_argument("--report", metavar="FILE.md", help="also write the findings to a Markdown file")
+    parser.add_argument("--json", metavar="FILE.json", help="also write every result to a JSON file")
     parser.add_argument("--quick", action="store_true", help="fewer URLs, no collision search")
     parser.add_argument("--only", nargs="*", help="run only checks whose id starts with these, e.g. A2-JWT")
     parser.add_argument("-v", "--verbose", action="store_true", help="show each check while it runs")
@@ -1015,6 +1023,8 @@ def main():
     if args.report:
         write_markdown(args.report, title, target, results)
         print(f"Report written to {args.report}")
+    if args.json:
+        write_json(args.json, title, target, results)
     sys.exit(1 if any(result.status == "FAIL" for result in results) else 0)
 
 

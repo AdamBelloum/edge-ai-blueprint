@@ -21,6 +21,8 @@ kubectl works (for example on the control-plane VM) to check the cluster:
 
     python -m unittest -v        # pass/fail only, for all test files here
 
+Add --json FILE to any of these to also write the points as JSON.
+
 test_ownership_isolation.py holds the multi-user checks, which count for the
 shortener's points in Assignment 2. The checks create accounts and mappings.
 They delete their mappings afterwards; the accounts remain, since the API has
@@ -740,38 +742,60 @@ def outcome_of(result, test_name):
     return ("not run", "")
 
 
-def print_report(result, title, rubric, not_tested):
-    """Print the points per rubric line; return True if every line passed."""
-    print(f"\n{title}\n")
-    print("Points  Rubric line")
-    earned = total = not_checked = 0
+def score(result, rubric, not_tested):
+    """The points per rubric line, as print_report prints them and --json writes them.
+
+    A line is "not checked" when its tests were skipped (and none failed); it
+    then counts neither for nor against the points of this run. A problem's
+    detail is the start of the failure message, which can quote the service.
+    """
+    lines = []
     for line, points, tests in rubric:
         outcomes = [outcome_of(result, name) for name in tests]
         if all(outcome in ("pass", "skipped") for outcome, _ in outcomes) and \
                 any(outcome == "skipped" for outcome, _ in outcomes):
-            not_checked += points
-            print(f" -/{points:<4} {line}")
+            status = "not checked"
         else:
-            passed = all(outcome == "pass" for outcome, _ in outcomes)
-            earned += points if passed else 0
-            total += points
-            print(f"{points if passed else 0:>2}/{points:<4} {line}")
-        for outcome, detail in dict.fromkeys(outcomes):
-            if outcome != "pass":
-                detail = " ".join(detail.split())
-                print(f"          {outcome}: {detail[:160]}")
-    print(f"{earned:>2}/{total:<4} tested by this script")
-    if not_checked:
-        print(f"{not_checked:>5}   not checked in this run (see above)")
+            status = "passed" if all(outcome == "pass" for outcome, _ in outcomes) else "failed"
+        problems = [{"outcome": outcome, "detail": " ".join(detail.split())[:300]}
+                    for outcome, detail in dict.fromkeys(outcomes) if outcome != "pass"]
+        lines.append({"line": line, "points": points, "status": status,
+                      "earned": points if status == "passed" else 0, "problems": problems})
+    checked = [line for line in lines if line["status"] != "not checked"]
+    return {
+        "earned": sum(line["earned"] for line in checked),
+        "possible": sum(line["points"] for line in checked),
+        "not_checked": sum(line["points"] for line in lines if line["status"] == "not checked"),
+        "lines": lines,
+        "not_tested": [{"line": line, "points": points} for line, points in not_tested],
+        "notes": list(dict.fromkeys(NOTES)),
+    }
+
+
+def print_report(result, title, rubric, not_tested):
+    """Print the points per rubric line and return them (see score)."""
+    report = score(result, rubric, not_tested)
+    print(f"\n{title}\n")
+    print("Points  Rubric line")
+    for line in report["lines"]:
+        if line["status"] == "not checked":
+            print(f" -/{line['points']:<4} {line['line']}")
+        else:
+            print(f"{line['earned']:>2}/{line['points']:<4} {line['line']}")
+        for problem in line["problems"]:
+            print(f"          {problem['outcome']}: {problem['detail'][:160]}")
+    print(f"{report['earned']:>2}/{report['possible']:<4} tested by this script")
+    if report["not_checked"]:
+        print(f"{report['not_checked']:>5}   not checked in this run (see above)")
     print()
     print("Not tested by this script:")
-    for line, points in not_tested:
-        print(f"{points:>5}   {line}")
-    if NOTES:
+    for line in report["not_tested"]:
+        print(f"{line['points']:>5}   {line['line']}")
+    if report["notes"]:
         print("\nNotes:")
-        for note in dict.fromkeys(NOTES):
+        for note in report["notes"]:
             print(f"  {note}")
-    return earned == total
+    return report
 
 
 def selected(suite, class_names):
@@ -797,6 +821,7 @@ def main():
                         help="3.1: shell command that restarts both services (or RESTART_COMMAND)")
     parser.add_argument("--namespace", default=NAMESPACE,
                         help="3.2: namespace of the Deployments, for the kubectl checks (or K8S_NAMESPACE)")
+    parser.add_argument("--json", metavar="FILE", help="also write the points to FILE as JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="list every test while it runs")
     args = parser.parse_args()
     SHORTENER_URL, AUTH_URL = args.url.rstrip("/"), args.auth_url.rstrip("/")
@@ -817,7 +842,12 @@ def main():
     runner = unittest.TextTestRunner(verbosity=2 if args.verbose else 1, resultclass=GradingResult)
     result = runner.run(suite)
     services = f"shortener {SHORTENER_URL}, authentication {AUTH_URL}"
-    passed = print_report(result, f"{title} ({services})", rubric, not_tested)
+    title = f"{title} ({services})"
+    report = print_report(result, title, rubric, not_tested)
+    passed = report["earned"] == report["possible"]
+    if args.json:
+        report = dict(assignment=args.assignment, title=title, passed=passed, **report)
+        Path(args.json).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     sys.exit(0 if passed else 1)
 
 

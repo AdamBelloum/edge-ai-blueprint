@@ -291,6 +291,32 @@ def write_markdown(path, title, target, results):
         stream.write("\n".join(lines) + "\n")
 
 
+def write_json(path, title, target, results):
+    """Every result with its details, for tools that collect the audits of many groups.
+
+    Details and evidence can quote the service, so each list keeps 50 entries
+    of at most 1,000 characters.
+    """
+    def kept(items):
+        items = [shorten(item, 1000) for item in items]
+        return items[:50] + ([f"... {len(items) - 50} more"] if len(items) > 50 else [])
+
+    data = {
+        "title": title,
+        "target": target,
+        "generated": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+        "counts": {status: sum(r.status == status for r in results) for status in ORDER},
+        "checks": [{
+            "id": r.check.id, "area": r.check.area, "title": r.check.title, "severity": r.check.severity,
+            "status": r.status, "problems": kept(r.problems), "notes": kept(r.notes),
+            "evidence": kept(r.evidence), "why": r.check.why, "ask": r.check.ask, "seconds": round(r.seconds, 1),
+        } for r in sorted(results, key=lambda r: r.check.id)],
+    }
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(data, stream, indent=2, ensure_ascii=False)
+        stream.write("\n")
+
+
 def base62_length(count):
     """Characters needed to give count different identifiers with 62 symbols."""
     return max(1, math.ceil(math.log(max(count, 2), 62)))
