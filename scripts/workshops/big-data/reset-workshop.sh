@@ -7,11 +7,15 @@ usage() {
   cat <<'USAGE'
 Usage: reset-workshop.sh --runtime-only --module spark
 
-Remove ownership-verified Spark/Livy containers and the private network through
-the existing teardown helper. Requires administrative control of Docker.
+Remove ownership-verified Spark/Livy containers, the private network,
+generated runtime files and the staged worker-side Spark seed/data bundle.
+Requires administrative control of Docker and stopped participant servers.
 
-Preserves images, source datasets, staged runtime assets and participant
-workspaces/accounts. This stage does not verify full workshop reset.
+Deletes generated runtime files, including submission logs, reports and outputs.
+Deletes the staged participant seed/data bundle and verified locked Spark/Livy image references.
+No forced image removal, Docker prune or unrelated image-reference deletion.
+The global reset handles participant workspaces and its selected account option.
+This local stage does not verify full workshop reset.
 USAGE
 }
 
@@ -42,8 +46,8 @@ teardown="$SCRIPT_DIR/spark/teardown-runtime.sh"
 printf '%s\n' 'Big Data reset: tearing down the verified Spark/Livy runtime.'
 if "$teardown" --execute; then
   printf '%s\n' \
-    'Spark/Livy container and network cleanup verified.' \
-    'Staged-file cleanup and full workshop reset are NOT verified.'
+    'Big Data worker cleanup verified: containers, networks, locked image references, runtime files and staged seed/data.' \
+    'Full workshop reset is NOT verified by this local helper; the global reset handles participant workspaces, account options and neutral reconciliation.'
 else
   status=$?
   printf '%s\n' 'ERROR: Spark/Livy teardown failed; cleanup remains unverified.' >&2

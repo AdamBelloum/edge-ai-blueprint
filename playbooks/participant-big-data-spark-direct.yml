@@ -1,0 +1,285 @@
+---
+- name: Manage opt-in participant direct submission on selected VMs
+  hosts: '{{ big_data_worker_group }}'
+  become: true
+  gather_facts: true
+  serial: 1
+  vars:
+    big_data_spark_client_enabled: true
+    big_data_spark_worker_count: 1
+    big_data_livy_enabled: true
+    big_data_spark_image: apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576
+    big_data_spark_runtime_host_path: /opt/digitafrica/big-data/runtime/spark
+    big_data_spark_project_name: digitafrica-spark
+    big_data_spark_client_image: digitafrica/spark-client:3.5.3-ssh-v1
+    big_data_livy_image: digitafrica/livy:0.9.0-incubating-spark3.5.3
+    big_data_spark_client_port: 2222
+  tasks:
+  - name: Validate action and explicit VM address
+    ansible.builtin.assert:
+      that:
+      - big_data_direct_action in ['prepare', 'start']
+      - big_data_spark_client_bind_ip in ansible_all_ipv4_addresses
+      - big_data_spark_client_bind_ip not in ['0.0.0.0', '127.0.0.1']
+      - inventory_hostname is match('^[A-Za-z0-9_.-]+$')
+  - name: Prepare participant runtime without starting services
+    when: big_data_direct_action == 'prepare'
+    block:
+    - name: Require an ignored secrets directory before exporting any key
+      ansible.builtin.command:
+        argv:
+        - git
+        - -C
+        - '{{ playbook_dir }}/..'
+        - check-ignore
+        - secrets/big-data-spark-direct/probe
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_python_interpreter: '{{ ansible_playbook_python }}'
+    - name: Refuse restaging while project containers are running
+      ansible.builtin.command:
+        argv:
+        - docker
+        - ps
+        - --quiet
+        - --filter
+        - label=com.docker.compose.project=digitafrica-spark
+      register: direct_active
+      changed_when: false
+    - name: Require inactive project before preparation
+      ansible.builtin.assert:
+        that: direct_active.stdout | trim == ''
+        fail_msg: Stop the existing Big Data runtime explicitly before restaging;
+          no automatic deletion is performed.
+    - name: Stage existing Spark and optional Livy assets plus client
+      ansible.builtin.include_role:
+        name: big_data_spark_runtime
+    - name: Build only the client image
+      ansible.builtin.command:
+        argv:
+        - docker
+        - build
+        - --pull=false
+        - --tag
+        - '{{ big_data_spark_client_image }}'
+        - --label
+        - org.digitafrica.workshop=big-data
+        - --label
+        - org.digitafrica.module=spark
+        - --label
+        - org.digitafrica.managed-by=organiser
+        - '{{ big_data_spark_runtime_host_path }}/client-build'
+      changed_when: true
+    - name: Create protected runtime key directory
+      ansible.builtin.file:
+        path: '{{ big_data_spark_runtime_host_path }}/client-access'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Generate absent host and group-login keys inside a disposable container
+      ansible.builtin.command:
+        argv:
+        - docker
+        - run
+        - --rm
+        - --network=none
+        - --entrypoint
+        - /usr/bin/ssh-keygen
+        - --mount
+        - type=bind,src={{ big_data_spark_runtime_host_path }}/client-access,dst=/keys
+        - '{{ big_data_spark_client_image }}'
+        - -t
+        - ed25519
+        - -N
+        - ''
+        - -f
+        - /keys/{{ item }}
+        creates: '{{ big_data_spark_runtime_host_path }}/client-access/{{ item }}'
+      loop:
+      - host_key
+      - login_key
+      no_log: true
+    - name: Protect private keys
+      ansible.builtin.file:
+        path: '{{ big_data_spark_runtime_host_path }}/client-access/{{ item }}'
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+      - host_key
+      - login_key
+    - name: Make public keys readable inside the container
+      ansible.builtin.file:
+        path: '{{ big_data_spark_runtime_host_path }}/client-access/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+      - host_key.pub
+      - login_key.pub
+    - name: Create protected local credential export directory
+      ansible.builtin.file:
+        path: '{{ playbook_dir }}/../secrets/big-data-spark-direct/{{ inventory_hostname
+          }}'
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_python_interpreter: '{{ ansible_playbook_python }}'
+    - name: Fetch only the login private key and host PUBLIC key
+      ansible.builtin.fetch:
+        src: '{{ big_data_spark_runtime_host_path }}/client-access/{{ item }}'
+        dest: '{{ playbook_dir }}/../secrets/big-data-spark-direct/{{ inventory_hostname
+          }}/{{ item }}'
+        flat: true
+      loop:
+      - login_key
+      - host_key.pub
+      no_log: true
+    - name: Protect exported group login key
+      ansible.builtin.file:
+        path: '{{ playbook_dir }}/../secrets/big-data-spark-direct/{{ inventory_hostname
+          }}/login_key'
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_python_interpreter: '{{ ansible_playbook_python }}'
+    - name: Read the trusted host public key for known-hosts export
+      ansible.builtin.slurp:
+        src: '{{ big_data_spark_runtime_host_path }}/client-access/host_key.pub'
+      register: direct_host_public
+    - name: Export pinned host identity and public connection information
+      ansible.builtin.copy:
+        dest: '{{ playbook_dir }}/../secrets/big-data-spark-direct/{{ inventory_hostname
+          }}/known_hosts'
+        mode: '0600'
+        content: '[{{ big_data_spark_client_bind_ip }}]:{{ big_data_spark_client_port
+          }} {{ direct_host_public.content | b64decode | trim }}
+
+          '
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_python_interpreter: '{{ ansible_playbook_python }}'
+    - name: Report endpoint without displaying credentials
+      ansible.builtin.debug:
+        msg: '{{ inventory_hostname }}: {{ big_data_spark_client_bind_ip }}:{{ big_data_spark_client_port
+          }}; credentials exported under ignored secrets/big-data-spark-direct/{{
+          inventory_hostname }}. No services started.'
+  - name: Start the staged Step 1 runtime only
+    when: big_data_direct_action == 'start'
+    block:
+    - name: Read staged client-profile configuration
+      ansible.builtin.command:
+        argv:
+        - docker
+        - compose
+        - --profile
+        - participant-direct
+        - --project-name
+        - digitafrica-spark
+        - --file
+        - '{{ big_data_spark_runtime_host_path }}/compose.yaml'
+        - config
+        - --format
+        - json
+      register: direct_compose_raw
+      changed_when: false
+    - name: Decode staged configuration
+      ansible.builtin.set_fact:
+        direct_compose: '{{ direct_compose_raw.stdout | from_json }}'
+    - name: Require reviewed client and exactly one worker
+      ansible.builtin.assert:
+        that:
+        - '''spark-client'' in direct_compose.services'
+        - direct_compose.services['spark-client'].image == big_data_spark_client_image
+        - (direct_compose.services['spark-client'].mem_limit | int) == 1073741824
+        - direct_compose.services['spark-master'].image == big_data_spark_image
+        - direct_compose.services['spark-worker-1'].image == big_data_spark_image
+        - '''spark-worker-2'' not in direct_compose.services'
+        - (ansible_memtotal_mb | int) >= 7168
+        fail_msg: Run participant-direct preparation first; this increment supports
+          one worker per VM only.
+    - name: Inspect local client and Spark images before startup
+      ansible.builtin.command:
+        argv:
+        - docker
+        - image
+        - inspect
+        - '{{ item }}'
+      loop:
+      - '{{ big_data_spark_client_image }}'
+      - '{{ big_data_spark_image }}'
+      changed_when: false
+    - name: Inspect existing project services and reject orphans or active Livy
+      ansible.builtin.command:
+        argv:
+        - python3
+        - -c
+        - "import json, subprocess, sys\nallowed = {'spark-master', 'spark-worker-1',\
+          \ 'spark-client', 'spark-livy'}\nids = subprocess.check_output(['docker',\
+          \ 'ps', '-aq', '--filter', 'label=com.docker.compose.project=digitafrica-spark'],\
+          \ text=True).split()\nrecords = json.loads(subprocess.check_output(['docker',\
+          \ 'inspect'] + ids, text=True)) if ids else []\nfor r in records:\n    labels\
+          \ = r['Config'].get('Labels') or {}\n    service = labels.get('com.docker.compose.service')\n\
+          \    if labels.get('org.digitafrica.managed-by') != 'organiser' or service\
+          \ not in allowed:\n        sys.exit('Unmanaged/orphan Big Data container;\
+          \ inspect explicitly before starting.')\n    if service == 'spark-livy'\
+          \ and r['State']['Running']:\n        sys.exit('Livy is running; Step 1\
+          \ startup will not stop it automatically.')\nprint('Existing project ownership\
+          \ checked; no active Livy.')\n"
+      changed_when: false
+    - name: Inspect running project containers before startup
+      ansible.builtin.command:
+        argv:
+        - docker
+        - ps
+        - --quiet
+        - --filter
+        - 'label=com.docker.compose.project={{ big_data_spark_project_name }}'
+      register: direct_running_before_start
+      changed_when: false
+    - name: Require explicit stop before updating the runtime
+      ansible.builtin.assert:
+        that:
+        - direct_running_before_start.stdout | trim == ''
+        fail_msg: Stop the existing Big Data runtime explicitly before startup; active services will not be replaced.
+    - name: Start only master, one worker and client without replacing active services
+      ansible.builtin.command:
+        argv:
+        - docker
+        - compose
+        - --profile
+        - participant-direct
+        - --project-name
+        - digitafrica-spark
+        - --file
+        - '{{ big_data_spark_runtime_host_path }}/compose.yaml'
+        - up
+        - --detach
+        - --no-build
+        - --pull
+        - never
+        - spark-master
+        - spark-worker-1
+        - spark-client
+      changed_when: true
+    - name: Check SSH listener reachability from the VM only
+      ansible.builtin.wait_for:
+        host: '{{ big_data_spark_client_bind_ip }}'
+        port: '{{ big_data_spark_client_port }}'
+        timeout: 45
+        search_regex: SSH-
+    - name: Report limited readiness
+      ansible.builtin.debug:
+        msg: SSH listens on the selected VM address. Participant login, executor callbacks
+          and computation still require an actual participant test. No Livy started.

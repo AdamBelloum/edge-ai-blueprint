@@ -66,6 +66,13 @@ def save_evidence(directory_fd, daemon_id, network_ids):
         "legacy_network_ids": sorted(set(network_ids)),
     }
     check_record(record, daemon_id)
+    # A clean reset must not manufacture a retry record solely to delete it.
+    # Existing records are still updated to empty after network verification.
+    if not record["legacy_network_ids"]:
+        try:
+            os.stat(NAME, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
     temporary = ".evidence-" + secrets.token_hex(16)
     fd = os.open(
         temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -87,3 +94,15 @@ def save_evidence(directory_fd, daemon_id, network_ids):
             os.unlink(temporary, dir_fd=directory_fd)
         except FileNotFoundError:
             pass
+
+
+def clear_evidence(directory_fd, daemon_id):
+    """Delete an empty, validated retry record; retain the lock directory."""
+    if load_evidence(directory_fd, daemon_id):
+        raise ValueError("Cannot discard unresolved legacy-network evidence.")
+    try:
+        os.unlink(NAME, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return False
+    os.fsync(directory_fd)
+    return True

@@ -21,6 +21,13 @@ big_data_spark_worker_container_memory: 2048m
 # limit also leaves room for the worker daemon and executor overhead.
 # END managed Spark Compose staging
 
+# Opt-in participant Step 1. No host SSH configuration changes.
+big_data_spark_client_enabled: false
+big_data_spark_client_image: digitafrica/spark-client:3.5.3-ssh-v1
+big_data_spark_client_bind_ip: ""
+big_data_spark_client_port: 2222
+big_data_spark_client_container_memory: 1024m
+
 # BEGIN managed Livy release lock
 # Opt-in: preparation must continue to stage only, never start services.
 big_data_livy_enabled: false
