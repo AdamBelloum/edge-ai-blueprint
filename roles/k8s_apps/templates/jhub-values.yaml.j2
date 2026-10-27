@@ -902,6 +902,7 @@ singleuser:
                   echo "[seed] ERROR: Spark currently supports beginner mode only." >&2
                   exit 1
                 fi
+{% filter indent(16, true) %}{% include 'workshop-hooks/spark-credential-permissions.sh.j2' %}{% endfilter %}
                 big_data_source=/seed/big-data/spark
                 big_data_parent=/home/jovyan/Big-Data
                 big_data_workspace="$big_data_parent/Spark"
