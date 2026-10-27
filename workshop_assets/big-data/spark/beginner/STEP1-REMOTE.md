@@ -46,14 +46,13 @@ Run in `~/Big-Data/Spark` after receiving your group's credentials:
 mkdir -p .access
 chmod 700 .access
 chmod 600 .access/login_key .access/known_hosts
-python -m pip install --target .deps paramiko==5.1.0
-export PYTHONPATH="$PWD/.deps${PYTHONPATH:+:$PYTHONPATH}"
+# Use the organiser-prepared Python environment; do not install packages here.
 export SPARK_CLIENT_HOST='<organiser-supplied-address>'
 ```
 
-The Paramiko version is pinned, but transitive dependencies are not yet hash
-locked. This is pilot setup, not a reproducible dependency lock. Dependencies
-remain under this workshop folder, not the shared Python environment.
+The organiser supplies the Python environment with Paramiko available.
+Missing dependencies are an organiser preparation issue, not a participant
+installation task.
 
 Set a convenience transport function (the submitted command remains visible):
 

@@ -140,9 +140,23 @@ class SeedTests(unittest.TestCase):
             if not line.startswith("        - "):
                 break
             published.add(line[len("        - "):].strip())
-        self.assertEqual(len(published), 8)
+        self.assertEqual(len(published), 10)
         self.assertEqual(module.FILES - module.LEGACY_FILES, published)
         self.assertTrue(module.LEGACY_FILES.isdisjoint(published))
+        self.assertTrue({"spark_remote.py", "STEP1-REMOTE.md"}.issubset(published))
+
+        template = (root / "roles/k8s_apps/templates/jhub-values.yaml.j2").read_text()
+        spark_section = template.split("big_data_source=/seed/big-data/spark\n", 1)[1]
+        delivered = spark_section.split("for filename in ", 1)[1]
+        delivered = delivered.split("; do", 1)[0].split()
+        self.assertEqual(set(delivered), published)
+        self.assertIn(
+            'copy_seed_file "$big_data_source/$filename" "$big_data_workspace/$filename" false',
+            spark_section,
+        )
+        for filename in published:
+            source = root / "workshop_assets/big-data/spark/beginner" / filename
+            self.assertTrue(source.is_file(), str(source))
 
     def test_extra_seed_symlink_cannot_touch_an_external_file(self):
         target = self.other / "source.csv"
