@@ -18,7 +18,15 @@ with patch.dict(sys.modules, {"teardown_docker": adapter}):
 
 def metadata(reference, identifier):
     value = {"Id": identifier, "Os": "linux", "Architecture": "amd64"}
-    if reference == module.SPARK:
+    if reference == module.SSH_CLIENT:
+        value.update(RepoTags=[module.SSH_CLIENT], Config={
+            "User": "root", "Cmd": list(module.SSH_CMD),
+            "WorkingDir": "/home/workshop/work",
+            "Env": ["SPARK_HOME=/opt/spark", "SPARK_DRIVER_HOST=spark-client",
+                    "SPARK_MASTER_URL=spark://spark-master:7077"],
+            "Labels": dict(module.SSH_LABELS),
+        })
+    elif reference == module.SPARK:
         value["RepoDigests"] = [module.SPARK]
     else:
         value.update(RepoTags=[module.LIVY], Config={
@@ -36,7 +44,8 @@ def metadata(reference, identifier):
 class FakeDocker:
     def __init__(self):
         self.records = {module.SPARK: metadata(module.SPARK, "sha256:" + "a" * 64),
-                        module.LIVY: metadata(module.LIVY, "sha256:" + "b" * 64)}
+                        module.LIVY: metadata(module.LIVY, "sha256:" + "b" * 64),
+                        module.SSH_CLIENT: metadata(module.SSH_CLIENT, "sha256:" + "f" * 64)}
         self.commands, self.busy = [], set()
         self.fail_remove = False
         self.keep_removed = False
@@ -54,7 +63,7 @@ class FakeDocker:
                     rows.append({"Repository": "apache/spark", "Tag": "<none>",
                                  "Digest": reference.split("@", 1)[1], "ID": info["Id"]})
                 else:
-                    rows.append({"Repository": "digitafrica/livy", "Tag": reference.split(":", 1)[1],
+                    rows.append({"Repository": reference.rsplit(":", 1)[0], "Tag": reference.rsplit(":", 1)[1],
                                  "Digest": "<none>", "ID": info["Id"]})
             return "\n".join(json.dumps(row) for row in rows)
         if args[:2] == ("image", "inspect"):
@@ -77,9 +86,9 @@ class ImageTests(unittest.TestCase):
     def setUp(self):
         self.docker = FakeDocker()
 
-    def test_verified_images_removed_livy_before_spark_without_force_or_prune(self):
-        self.assertEqual(module.ImageCleanup(self.docker).remove(), [module.LIVY, module.SPARK])
-        self.assertEqual(self.docker.removals(), [("image", "rm", module.LIVY), ("image", "rm", module.SPARK)])
+    def test_verified_images_removed_client_before_livy_before_spark_without_force_or_prune(self):
+        self.assertEqual(module.ImageCleanup(self.docker).remove(), list(module.ORDER))
+        self.assertEqual(self.docker.removals(), [("image", "rm", ref) for ref in module.ORDER])
         self.assertFalse(any("--force" in cmd or "prune" in cmd for cmd in self.docker.commands))
         self.assertFalse(any("unrelated/platform" in cmd for cmd in self.docker.commands))
 
@@ -88,7 +97,7 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(module.ImageCleanup(self.docker).remove(), [])
         self.assertEqual(self.docker.removals(), [])
 
-    def test_spark_only_or_livy_only(self):
+    def test_each_supported_reference_can_be_removed_alone(self):
         for reference in module.ORDER:
             docker = FakeDocker()
             docker.records = {reference: docker.records[reference]}
@@ -161,7 +170,7 @@ class ImageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "removal failed"):
             plan.remove()
         self.docker.fail_remove = False
-        self.assertEqual(module.ImageCleanup(self.docker).remove(), [module.LIVY, module.SPARK])
+        self.assertEqual(module.ImageCleanup(self.docker).remove(), list(module.ORDER))
 
     def test_remaining_reference_fails_final_verification(self):
         plan = module.ImageCleanup(self.docker)

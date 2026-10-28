@@ -12,7 +12,14 @@ SPARK = 'apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db
 LIVY = 'digitafrica/livy:0.9.0-incubating-spark3.5.3'
 ARCHIVE_SHA512 = '50151be834bba3011fccbb564c3c9d6bf7a08af468c2082604f3c5b40ba95705a4c2e925e835bd58a58abcbeb18f3ab7bf588e01fa4f778ff9e82a4b91b9d2de'
 DOCKERFILE_SHA512 = 'b2c6bd9f9e95b90e534aadc0cba9acd0af0e17beec5c6455d70bba99add05630ac1ee4e44311067674e1475843fa33b44e015a02cb58c5baafd5412cba6915ad'
-ORDER = (LIVY, SPARK)
+SSH_CLIENT = 'digitafrica/spark-client:3.5.3-ssh-v1'
+SSH_LABELS = {
+    'org.digitafrica.workshop': 'big-data',
+    'org.digitafrica.module': 'spark',
+    'org.digitafrica.managed-by': 'organiser',
+}
+SSH_CMD = ['/usr/sbin/sshd', '-D', '-e', '-f', '/etc/ssh/workshop_sshd_config']
+ORDER = (SSH_CLIENT, LIVY, SPARK)
 
 
 def require(condition, message):
@@ -29,7 +36,7 @@ def image_id(value):
 class ImageCleanup:
     def __init__(self, docker):
         self.docker = docker
-        # Verify both references before destructive resource teardown starts.
+        # Verify all reviewed references before destructive resource teardown starts.
         self.initial = self.snapshot()
 
     def _metadata(self, reference, identifier):
@@ -44,6 +51,22 @@ class ImageCleanup:
             digests = info.get("RepoDigests")
             require(isinstance(digests, list) and SPARK in digests,
                     "Pinned Spark repository digest mismatch.")
+        elif reference == SSH_CLIENT:
+            tags = info.get("RepoTags")
+            require(isinstance(tags, list) and SSH_CLIENT in tags,
+                    "Participant client repository tag mismatch.")
+            config = info.get("Config")
+            require(isinstance(config, dict), "Invalid participant client image configuration.")
+            labels, env = config.get("Labels"), config.get("Env")
+            require(isinstance(labels, dict) and isinstance(env, list)
+                    and all(labels.get(k) == v for k, v in SSH_LABELS.items()),
+                    "Participant client image ownership mismatch.")
+            require(config.get("User") == "root" and config.get("Cmd") == SSH_CMD
+                    and config.get("WorkingDir") == "/home/workshop/work"
+                    and "SPARK_HOME=/opt/spark" in env
+                    and "SPARK_DRIVER_HOST=spark-client" in env
+                    and "SPARK_MASTER_URL=spark://spark-master:7077" in env,
+                    "Participant client image runtime configuration mismatch.")
         else:
             tags = info.get("RepoTags")
             require(isinstance(tags, list) and LIVY in tags, "Livy repository tag mismatch.")
@@ -79,6 +102,8 @@ class ImageCleanup:
                 reference = SPARK
             elif row.get("Repository") == "digitafrica/livy" and row.get("Tag") == LIVY.split(":", 1)[1]:
                 reference = LIVY
+            elif row.get("Repository") == "digitafrica/spark-client" and row.get("Tag") == SSH_CLIENT.split(":", 1)[1]:
+                reference = SSH_CLIENT
             if reference is not None:
                 identifier = image_id(row.get("ID"))
                 require(reference not in found or found[reference] == identifier,

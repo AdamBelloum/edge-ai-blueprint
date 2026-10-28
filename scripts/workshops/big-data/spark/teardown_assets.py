@@ -11,6 +11,13 @@ from teardown_directory import FLAGS, SUBMISSION_COMPONENTS, check_ancestor
 
 ROOT = "/" + "/".join(SUBMISSION_COMPONENTS)
 FILES = {"compose.yaml", "livy.conf", "livy-spark-defaults.conf"}
+CLIENT_FILES = {
+    "client-build": {"Dockerfile": 0o600, ".dockerignore": 0o600},
+    "client-access": {
+        "host_key": 0o600, "host_key.pub": 0o644,
+        "login_key": 0o600, "login_key.pub": 0o644,
+    },
+}
 LOCK = ".direct-run.lock"
 RUN = re.compile(r"(?:direct-run-|livy-client-run-)[a-z0-9_]{8}")
 
@@ -64,6 +71,36 @@ class Assets:
         finally:
             os.close(fd)
 
+
+    def _client_inventory(self, name, entry):
+        """Validate approved client files without reading credential contents.
+
+        Partial preparation is supported; unknown entries remain prohibited.
+        Capture child identities so replacement also blocks removal.
+        """
+        require(stat.S_ISDIR(entry.st_mode)
+                and stat.S_IMODE(entry.st_mode) == 0o700,
+                "Participant client directory must have mode 0700.")
+        fd = os.open(name, FLAGS, dir_fd=self.fd)
+        try:
+            require(identity(os.fstat(fd)) == identity(entry),
+                    "Participant client directory identity changed.")
+            children = sorted(os.listdir(fd))
+            require(set(children) <= set(CLIENT_FILES[name]),
+                    "Unknown participant client asset; cleanup refused: " + name)
+            result = []
+            for child in children:
+                info = self._stat(fd, child)
+                require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
+                        "Linked or special participant client file refused.")
+                self._protected(info)
+                require(stat.S_IMODE(info.st_mode) == CLIENT_FILES[name][child],
+                        "Unexpected participant client permissions: " + child)
+                result.append((child, identity(info)))
+            return tuple(result)
+        finally:
+            os.close(fd)
+
     def scan(self):
         if self.fd is None:
             return {}
@@ -80,12 +117,14 @@ class Assets:
             self._protected(entry)
             if name in FILES:
                 require(stat.S_ISREG(entry.st_mode), "Expected generated configuration file.")
-            elif name == "livy-build" or RUN.fullmatch(name):
+            elif name == "livy-build" or name in CLIENT_FILES or RUN.fullmatch(name):
                 require(stat.S_ISDIR(entry.st_mode), "Expected generated runtime directory.")
             else:
                 raise ValueError("Unknown runtime asset; cleanup refused: " + name)
             self._tree(self.fd, name, info.st_dev, self.root + "/" + name, mounts)
             result[name] = identity(entry)
+            if name in CLIENT_FILES:
+                result[name] = (identity(entry), self._client_inventory(name, entry))
         return result
 
     def _delete(self, parent, name, device):
