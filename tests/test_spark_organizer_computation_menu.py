@@ -127,7 +127,7 @@ workshop_ui_prompt() { :; }
 big_data_spark_computation_test() { printf '%s\n' "$1" >> "$RECORD"; }
 run_big_data_spark_menu
 '''
-            result=subprocess.run(['bash','-c',script],env=env,input='9\n10\n0\n',text=True,capture_output=True)
+            result=subprocess.run(['bash','-c',script],env=env,input='4\n4\n5\n0\n0\n',text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(record.read_text().splitlines(),['direct','livy'])
 

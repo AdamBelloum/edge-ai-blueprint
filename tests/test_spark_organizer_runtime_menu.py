@@ -114,7 +114,7 @@ big_data_spark_runtime_action() { printf '%s\n' "$1" >> "$TEST_RECORD"; }
 run_big_data_spark_menu
 '''
         result = subprocess.run(["bash", "-c", script], env=env,
-                                input="6\n7\n8\n0\n", text=True, capture_output=True)
+                                input="4\n1\n2\n3\n0\n0\n", text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.record.read_text().splitlines(), ["prepare", "build", "start"])
 

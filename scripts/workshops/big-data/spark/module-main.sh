@@ -241,53 +241,72 @@ sys.exit(0 if valid else 2)
   fi
 )
 
+
+# Secondary tools retain their existing confirmations and runtime safeguards.
+big_data_spark_maintenance_menu() {
+  local choice
+  while true; do
+    workshop_ui_heading "Spark / Maintenance and organiser tests"
+    printf '%s\n' 'Organiser tools only; these do not establish participant readiness.'
+    workshop_ui_section "RUNTIME TOOLS"
+    workshop_ui_option 1 "Prepare Spark/Livy pilot assets"
+    workshop_ui_option 2 "Build staged Livy image"
+    workshop_ui_option 3 "Start staged Spark/Livy pilot"
+    workshop_ui_section "COMPUTATION TESTS"
+    workshop_ui_option 4 "Test Step 1 - direct Spark"
+    workshop_ui_option 5 "Test Step 2 - Livy"
+    workshop_ui_section "WORKSPACE RECOVERY"
+    workshop_ui_option 6 "Republish Beginner workspace"
+    printf '\n'
+    workshop_ui_option 0 "Back to Spark"
+    workshop_ui_prompt
+    read -r choice || return 0
+    case "$choice" in
+      1) big_data_spark_runtime_action prepare ||
+           printf 'Spark/Livy runtime preparation did not complete.\n' >&2 ;;
+      2) big_data_spark_runtime_action build ||
+           printf 'Livy image build did not complete.\n' >&2 ;;
+      3) big_data_spark_runtime_action start ||
+           printf 'Spark/Livy startup did not complete; inspect before retrying.\n' >&2 ;;
+      4) big_data_spark_computation_test direct ||
+           printf 'Direct Spark test did not complete; inspect before retrying.\n' >&2 ;;
+      5) big_data_spark_computation_test livy ||
+           printf 'Livy test did not complete; inspect before retrying.\n' >&2 ;;
+      6) big_data_spark_activate_selected_mode beginner ||
+           printf 'Spark beginner publication did not complete.\n' >&2 ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 6.\n' >&2 ;;
+    esac
+  done
+}
+
 run_big_data_spark_menu() {
   local choice
   while true; do
-    workshop_ui_heading "Big Data / Spark Beginner"
-    workshop_ui_section "PREPARATION"
-    workshop_ui_option 1 "Prepare teaching assets: no activation or runtime startup"
-    workshop_ui_section "CHECKS"
-    workshop_ui_option 2 "Show workshop selection status: not asset-delivery or execution validation"
-    workshop_ui_section "PUBLICATION"
-    workshop_ui_option 3 "Publish Beginner workshop: reconciles JupyterHub for new spawns; execution not validated"
-    workshop_ui_option 4 "Publish Advanced workshop: TODO - not implemented"
-    workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 5 "Release advanced reference solutions - TODO: not implemented"
-    workshop_ui_section "ORGANISER RUNTIME — NOT PARTICIPANT SUBMISSION"
-    workshop_ui_option 6 "Prepare Spark/Livy pilot assets: one worker per VM; no startup"
-    workshop_ui_option 7 "Build staged locked Livy image: no startup"
-    workshop_ui_option 8 "Start staged Spark/Livy pilot: participant execution not validated"
-    workshop_ui_section "ORGANISER COMPUTATION TESTS — ONE VM AT A TIME"
-    workshop_ui_option 9 "Test Step 1 direct Spark: organiser-only; verify results and cleanup"
-    workshop_ui_option 10 "Test Step 2 Livy: organiser-only; verify results and owned-session cleanup"
+    workshop_ui_heading "Big Data / Spark Beginner - work-in-progress"
+    workshop_ui_section "PREPARE WORKSHOP"
+    workshop_ui_option 1 "Prepare Step 1 - work-in-progress"
+    workshop_ui_option 2 "Prepare Step 2 - work-in-progress"
+    printf '\n%s\n' \
+      'Step 1 currently publishes the workspace and reconciles JupyterHub; it does not start services.' \
+      'Step 2 integrated preparation is not implemented; selecting it performs no changes.'
+    workshop_ui_section "STATUS AND TOOLS"
+    workshop_ui_option 3 "Show workshop status"
+    workshop_ui_option 4 "Maintenance and organiser tests"
     printf '\n'
     workshop_ui_option 0 "Back to Big Data"
     workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
-      1) big_data_spark_prepare_workspace ||
-           printf 'Spark asset preparation did not complete.\n' >&2 ;;
-      3) big_data_spark_activate_selected_mode beginner ||
-           printf 'Spark beginner publication did not complete.\n' >&2 ;;
-      4) big_data_spark_activate_selected_mode advanced ||
-           printf 'Spark advanced publication was not performed.\n' >&2 ;;
-      5) big_data_spark_release_solutions ||
-           printf 'Spark solution release was not performed.\n' >&2 ;;
-      2) big_data_spark_show_status ||
+      1) big_data_spark_activate_selected_mode beginner ||
+           printf 'Spark Step 1 workspace preparation did not complete.\n' >&2 ;;
+      2) big_data_spark_future_unavailable 'Step 2 integrated preparation' ||
+           printf 'Spark Step 2 preparation is work-in-progress; no changes performed.\n' >&2 ;;
+      3) big_data_spark_show_status ||
            printf 'Workshop selection status could not be retrieved.\n' >&2 ;;
-      6) big_data_spark_runtime_action prepare ||
-           printf 'Spark/Livy runtime preparation did not complete.\n' >&2 ;;
-      7) big_data_spark_runtime_action build ||
-           printf 'Livy image build did not complete.\n' >&2 ;;
-      8) big_data_spark_runtime_action start ||
-           printf 'Spark/Livy startup did not complete; inspect before retrying.\n' >&2 ;;
-      9) big_data_spark_computation_test direct ||
-           printf 'Direct Spark test did not complete; inspect before retrying.\n' >&2 ;;
-      10) big_data_spark_computation_test livy ||
-           printf 'Livy test did not complete; inspect before retrying.\n' >&2 ;;
+      4) big_data_spark_maintenance_menu ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 10.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 4.\n' >&2 ;;
     esac
   done
 }
