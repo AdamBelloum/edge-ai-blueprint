@@ -17,6 +17,7 @@ OWNERSHIP = {
 }
 SERVICES = {
     "spark-master", "spark-worker-1", "spark-worker-2", "spark-livy", "spark-client",
+    "spark-livy-access",
 }
 DATA_MOUNT = (
     "/opt/digitafrica/big-data/spark/data", "/opt/spark-data/data",
@@ -133,13 +134,29 @@ PARTICIPANT_MOUNTS = {
 }
 
 
-def validate_participant_service(container):
-    """Validate the assessed SSH supervisor, not an organiser test client."""
+LIVY_ACCESS_CMD = PARTICIPANT_CMD + [
+    "-o", "AllowTcpForwarding=local",
+    "-o", "AllowStreamLocalForwarding=no",
+    "-o", "PermitOpen=spark-livy:8998",
+    "-o", "PermitListen=none",
+    "-o", "MaxSessions=0",
+    "-o", "AllowAgentForwarding=no",
+    "-o", "PermitTunnel=no",
+    "-o", "GatewayPorts=no",
+    "-o", "X11Forwarding=no",
+    "-o", "PermitTTY=no",
+]
+
+
+def validate_participant_service(container, *, livy_access=False):
+    """Validate direct SSH or the assessed forwarding-only Livy supervisor."""
+    expected_command = LIVY_ACCESS_CMD if livy_access else PARTICIPANT_CMD
+    expected_memory = 134217728 if livy_access else 1073741824
     config = container.get("Config") or {}
     host = container.get("HostConfig") or {}
     require(config.get("Image") == PARTICIPANT_IMAGE
             and config.get("User") == "root"
-            and config.get("Cmd") == PARTICIPANT_CMD,
+            and config.get("Cmd") == expected_command,
             "Participant client runtime configuration mismatch.")
     require(isinstance(container.get("Image"), str)
             and re.fullmatch(r"sha256:[0-9a-f]{64}", container["Image"]),
@@ -160,9 +177,12 @@ def validate_participant_service(container):
             and not host.get("Devices")
             and not host.get("DeviceRequests")
             and host.get("SecurityOpt") == ["no-new-privileges:true"]
-            and host.get("Memory") == 1073741824
+            and host.get("Memory") == expected_memory
             and (host.get("RestartPolicy") or {}).get("Name") == "no",
             "Unsafe participant client host configuration.")
+    if livy_access:
+        require(host.get("NanoCpus") == 250000000,
+                "Unexpected Livy access gateway CPU limit.")
     bindings = host.get("PortBindings") or {}
     require(isinstance(bindings, dict)
             and set(bindings) == {"2222/tcp"},
@@ -244,9 +264,11 @@ def validate_snapshot(containers, networks, volumes, *,
         expected_mounts = {DATA_MOUNT}
         if service == "spark-livy":
             expected_mounts |= LIVY_MOUNTS
-        elif service == "spark-client":
-            validate_participant_service(container)
-            expected_mounts |= PARTICIPANT_MOUNTS
+        elif service in {"spark-client", "spark-livy-access"}:
+            livy_access = service == "spark-livy-access"
+            validate_participant_service(container, livy_access=livy_access)
+            expected_mounts = (set(PARTICIPANT_MOUNTS) if livy_access
+                               else expected_mounts | PARTICIPANT_MOUNTS)
             participant_ids.add(identifier)
             client_ids.add(identifier)
         actual_mounts = set()
@@ -265,7 +287,7 @@ def validate_snapshot(containers, networks, volumes, *,
         attached = container["NetworkSettings"].get("Networks") or {}
         require(
             set(attached) <= (
-                {NETWORK, ACCESS_NETWORK} if service == "spark-client"
+                {NETWORK, ACCESS_NETWORK} if service in {"spark-client", "spark-livy-access"}
                 else {NETWORK}
             ),
             "Container is attached to an unexpected network.",
