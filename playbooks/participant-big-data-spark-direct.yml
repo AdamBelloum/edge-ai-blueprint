@@ -62,6 +62,9 @@
         that: direct_active.stdout | trim == ''
         fail_msg: Stop the existing Big Data runtime explicitly before restaging;
           no automatic deletion is performed.
+    - name: Stage the canonical participant assets and dataset before runtime preparation
+      ansible.builtin.include_role:
+        name: big_data_workspace
     - name: Stage existing Spark and optional Livy assets plus client
       ansible.builtin.include_role:
         name: big_data_spark_runtime
@@ -186,6 +189,30 @@
   - name: Start the staged Step 1 runtime only
     when: big_data_direct_action == 'start'
     block:
+    - name: Inspect required dataset paths before runtime startup
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+        get_checksum: false
+      loop:
+      - /opt/digitafrica/big-data/spark/data
+      - /opt/digitafrica/big-data/spark/data/Bank_Personal_Loan_Modelling.csv
+      register: direct_dataset_paths
+      changed_when: false
+    - name: Require the staged dataset before any startup operation
+      ansible.builtin.assert:
+        that:
+        - direct_dataset_paths.results[0].stat.isdir | default(false)
+        - not (direct_dataset_paths.results[0].stat.islnk | default(true))
+        - direct_dataset_paths.results[0].stat.xoth | default(false)
+        - direct_dataset_paths.results[1].stat.isreg | default(false)
+        - not (direct_dataset_paths.results[1].stat.islnk | default(true))
+        - (direct_dataset_paths.results[1].stat.size | default(0) | int) > 0
+        - direct_dataset_paths.results[1].stat.roth | default(false)
+        fail_msg: >-
+          Required Spark dataset is missing, empty, symlinked or inaccessible
+          to the container user. Run Stage 1 preparation (option 2) first;
+          startup will not create placeholder data.
     - name: Read staged client-profile configuration
       ansible.builtin.command:
         argv:

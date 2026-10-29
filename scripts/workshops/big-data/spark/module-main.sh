@@ -56,6 +56,17 @@ big_data_spark_prepare_workspace() {
   "$BIG_DATA_SPARK_WORKSPACE_HELPER"
 }
 
+# Forward context to the child without assigning/exporting readonly parent variables.
+# The child retains its existing release-record validation.
+big_data_spark_credentials_with_context() {
+  env \
+    DIGITAFRICA_INVENTORY="${DIGITAFRICA_INVENTORY:?Missing inventory}" \
+    DIGITAFRICA_DEPLOYMENT_GROUP="${DIGITAFRICA_DEPLOYMENT_GROUP:?Missing control-plane group}" \
+    DIGITAFRICA_DEPLOYMENT_WORKER_GROUP="${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP:?Missing worker group}" \
+    DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:?Missing namespace}" \
+    "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" "$@"
+}
+
 big_data_spark_activate_selected_mode() {
   local mode="$1"
 
@@ -79,7 +90,7 @@ big_data_spark_activate_selected_mode() {
     return 2
   }
   # Fresh active-client/export/Secret validation; a successful plan is insufficient.
-  "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" verify || return $?
+  big_data_spark_credentials_with_context verify || return $?
 
   printf '%s\n' \
     'Publish the beginner Spark workspace and reconcile JupyterHub.' \
@@ -392,8 +403,8 @@ big_data_spark_stage1_action() {
       ;;
     credentials)
       # A failed plan prevents apply. Apply repeats validation and owns confirmation.
-      "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" plan || return $?
-      if "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" apply; then
+      big_data_spark_credentials_with_context plan || return $?
+      if big_data_spark_credentials_with_context apply; then
         printf '%s\n' 'Credential staging completed; publication and participant validation are still required.'
       else
         rc=$?
