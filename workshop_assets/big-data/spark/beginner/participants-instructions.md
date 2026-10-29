@@ -6,7 +6,7 @@
 
 1. Read `README.md`.
 2. Open `01_spark_basics.ipynb` and read the Step 1 guide.
-3. Use the organiser-approved terminal submission path for `01_spark_basics.py`.
+3. Read `STEP1-REMOTE.md`; after organiser permission, use `python3 spark_remote.py test`, then `python3 spark_remote.py analyse` in the prepared terminal environment.
 4. Check the results and cleanup before continuing.
 5. Open `02_spark_via_livy.ipynb` and read the Step 2 guide.
 6. Use the approved Step 2 terminal submission path and check its results and cleanup.
@@ -21,7 +21,7 @@ Do not install dependencies, manage Docker, change ports, guess settings, substi
 
 Open the assigned Spark workspace in JupyterLab. Confirm that both guides, both scripts and `data/Bank_Personal_Loan_Modelling.csv` are present. Open a terminal when the organiser confirms execution readiness.
 
-**The exact launch commands are not yet established by this documentation update.** Obtain them from the organiser. Do not assume that running a script with the terminal's default Python reproduces the validated container path.
+**The managed Step 1 commands are documented in `STEP1-REMOTE.md`, but actual participant execution remains unvalidated.** Use them only after organiser permission and confirmation of your prepared Python environment. Do not run the analysis script directly in JupyterLab. Step 2 still requires its own separately approved launch command.
 
 Run one exercise at a time. After interruption or uncertain cleanup, ask the organiser to inspect the application/session before retrying.
 
@@ -29,11 +29,35 @@ Run one exercise at a time. After interruption or uncertain cleanup, ask the org
 
 ### Read, submit and observe
 
-Read `01_spark_basics.ipynb`, then use the exact Step 1 terminal command supplied by the organiser. It must run `01_spark_basics.py` in the prepared environment. The script performs all stages automatically; the notebook explains what to observe.
+Read `01_spark_basics.ipynb` for the analysis explanation and `STEP1-REMOTE.md`
+for the current launch procedure. The notebook is Markdown-only. In a terminal:
 
-The application's driver runs in that submission environment, not in the Markdown notebook. Workers launch executors, and executors need to connect back to the driver. Reaching the master alone is insufficient.
+```bash
+cd ~/Big-Data/Spark
+# Submit only after organiser permission; run one command at a time.
+python3 spark_remote.py test
+# Continue only after the test has finished successfully and analysis is approved.
+python3 spark_remote.py analyse
+```
 
-Prepared settings include `SPARK_MASTER_URL`, `SPARK_DATA_PATH` and `SPARK_DRIVER_HOST`, with optional `SPARK_DRIVER_PORT` and `SPARK_BLOCK_MANAGER_PORT` when needed. Local preview and distributed read paths may differ but must identify the same supplied snapshot.
+The launcher uses your group's managed credentials under `~/.ssh/spark-direct/`
+and verifies the organiser-pinned SSH host key. Do not create an `.access`
+folder, transfer credentials manually, guess addresses or change security checks.
+
+JupyterHub transports commands and files. The driver runs in the assigned
+client container, not in JupyterLab or the reading guide. The prepared client
+supplies Spark connection settings and dataset paths; workers launch executors
+that need to connect back to that driver. Reaching the master alone is
+insufficient. This is a VM-local one-worker pilot, not a cross-VM Spark cluster.
+
+`test` submits SparkPi. `analyse` uploads and submits the existing
+`01_spark_basics.py`; it performs the analysis automatically. Commands use real
+`spark-submit`, one executor core, 512 MB driver/executor memory, and remote
+timeouts of 120 seconds for the test and 300 seconds for analysis.
+
+**One active submission per group/client.** Group members share remote script
+and output filenames; the launcher does not enforce a concurrency lock.
+Unique local download directories do not prevent remote job collisions.
 
 ### Analysis checks
 
@@ -52,13 +76,34 @@ Check units and code meanings against source documentation. The dataset has 52 n
 
 ### Output and cleanup
 
-The script writes `outputs/filtered_preview.csv` relative to its own directory. It contains the `Age,Income,Family` header and at most ten rows. An empty result produces a header-only file. Rerunning replaces the preview; retain earlier results first if needed.
+The analysis writes `outputs/filtered_preview.csv` in the assigned remote
+client. It has the `Age,Income,Family` header and at most ten rows; an empty
+filter result produces a header-only file. It is a bounded preview, not a full
+distributed CSV export. Do not remove the row limit.
 
-Use the printed `Saved:` path and approved output retrieval method. Container-local paths are not automatically visible in JupyterLab. This is a bounded preview, not a full distributed CSV export. Do not remove the row limit.
+After a successful remote analysis, the launcher downloads the preview to a
+new local `outputs/remote-<unique-id>/filtered_preview.csv` directory beside
+the submitted script. In the default workspace this is beneath
+`~/Big-Data/Spark`. Follow the printed `Downloaded preview:` path in JupyterLab.
+Each download uses a new directory, while a remote rerun replaces the shared
+remote preview. If retrieval fails after `Remote exit status: 0`, report the
+retrieval error rather than automatically resubmitting the Spark job.
 
-Once it obtains a Spark session, the script attempts `spark.stop()` in a `finally` block after success or an analysis error. Normal completion prints `Spark session stopped.` and `Analysis completed successfully.` Shared cluster containers remain running.
+After obtaining a Spark session, the analysis attempts `spark.stop()` in a
+`finally` block. Normal completion prints `Spark session stopped.`,
+`Analysis completed successfully.` and `Remote exit status: 0`. Shared runtime
+containers remain running. Check successful output download separately.
 
-Cleanup may fail or be interrupted. A closed terminal is not proof of application termination. Follow any additional runner checks and report uncertainty before proceeding.
+After a timeout, disconnection, interruption or cleanup warning, ask the
+organiser to inspect the remote driver/application before retrying or allowing
+another group member to submit. A closed terminal or SSH connection does not
+prove remote termination. Do not stop shared containers or expose credentials
+in error reports.
+
+Participant validation and non-destructive stopping are not automated yet.
+Publication, organiser-only tests and a successful SparkPi run do not alone
+establish all-group readiness, data access, output retrieval, isolation or
+cleanup. Do not continue to Step 2 until its separate launch path is approved.
 
 ## Step 2 — Spark through Livy
 

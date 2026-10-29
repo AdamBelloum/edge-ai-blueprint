@@ -32,7 +32,7 @@ SPARK_ENV = "DIGITAFRICA_SPARK_WORKSPACE_ROLE"
 GROUP_NODES = {"group_01": "inventory-worker-a", "group_02": "inventory-worker-b"}
 
 
-def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module5=False, neutral=False):
+def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module5=False, neutral=False, credentials=False):
     marker = "    10-digitafrica-group-workspace: |\n"
     if marker not in source:
         raise RuntimeError("Group-workspace extraConfig block was not found.")
@@ -56,6 +56,7 @@ def load_hook(source, enabled=False, oidc=True, hpc=False, runtime=False, module
         hpc_runtime_enabled=runtime,
         cloud_module5_delivery_enabled=module5,
         workshop_reset_neutral=neutral,
+        big_data_spark_credentials_enabled=credentials,
         digitafrica_deployment={"digitafrica_namespace": "test-workshop"},
     )
     namespace = {"c": SimpleNamespace(KubeSpawner=SimpleNamespace())}

@@ -74,12 +74,18 @@ big_data_spark_activate_selected_mode() {
   "$BIG_DATA_COHORT_WORKFLOW" require-complete || return $?
   ensure_workshop_activation_allowed big-data || return $?
 
+  [[ -x "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" ]] || {
+    printf 'Spark publication blocked: credential verification helper is missing.\n' >&2
+    return 2
+  }
+  # Fresh active-client/export/Secret validation; a successful plan is insufficient.
+  "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" verify || return $?
+
   printf '%s\n' \
     'Publish the beginner Spark workspace and reconcile JupyterHub.' \
     'This does not start Spark or establish notebook/submission readiness.' \
     'Existing participant servers are not automatically updated.'
-  if ! "${ASSUME_YES:-false}" &&
-    ! confirm "Publish the Spark beginner workspace for subsequent participant spawns"; then
+  if ! DIGITAFRICA_ASSUME_YES=false confirm "Publish the Spark beginner workspace for subsequent participant spawns"; then
     log 'No Spark workspace publication was performed.'
     return 0
   fi
@@ -285,10 +291,10 @@ run_big_data_spark_menu() {
   while true; do
     workshop_ui_heading "Big Data / Spark Beginner - work-in-progress"
     workshop_ui_section "PREPARE WORKSHOP"
-    workshop_ui_option 1 "Prepare Step 1 - work-in-progress"
+    workshop_ui_option 1 "Stage 1 - direct submission workflow"
     workshop_ui_option 2 "Prepare Step 2 - work-in-progress"
     printf '\n%s\n' \
-      'Step 1 currently publishes the workspace and reconciles JupyterHub; it does not start services.' \
+      'Step 1 opens the ordered workflow and requires staged-credential verification; publication alone is not workshop readiness.' \
       'Step 2 integrated preparation is not implemented; selecting it performs no changes.'
     workshop_ui_section "STATUS AND TOOLS"
     workshop_ui_option 3 "Show workshop status"
@@ -298,8 +304,8 @@ run_big_data_spark_menu() {
     workshop_ui_prompt
     read -r choice || return 0
     case "$choice" in
-      1) big_data_spark_activate_selected_mode beginner ||
-           printf 'Spark Step 1 workspace preparation did not complete.\n' >&2 ;;
+      1) big_data_spark_stage1_menu ||
+           printf 'Spark Stage 1 workflow did not complete.\n' >&2 ;;
       2) big_data_spark_future_unavailable 'Step 2 integrated preparation' ||
            printf 'Spark Step 2 preparation is work-in-progress; no changes performed.\n' >&2 ;;
       3) big_data_spark_show_status ||
@@ -307,6 +313,133 @@ run_big_data_spark_menu() {
       4) big_data_spark_maintenance_menu ;;
       0) return 0 ;;
       *) printf 'Choose a value from 0 through 4.\n' >&2 ;;
+    esac
+  done
+}
+
+
+# Stage 1 integration only. Legacy maintenance actions remain unchanged.
+# Primary option 1 delegates here; mutating actions retain helper confirmations.
+big_data_spark_stage1_preflight() {
+  local name value helper
+  for name in DIGITAFRICA_INVENTORY DIGITAFRICA_DEPLOYMENT_GROUP \
+              DIGITAFRICA_DEPLOYMENT_WORKER_GROUP DIGITAFRICA_NAMESPACE; do
+    value="${!name:-}"
+    [[ -n "$value" ]] || {
+      printf 'Stage 1 blocked: missing %s in the selected context.\n' "$name" >&2
+      return 2
+    }
+  done
+  for name in DIGITAFRICA_DEPLOYMENT_GROUP DIGITAFRICA_DEPLOYMENT_WORKER_GROUP; do
+    value="${!name}"
+    [[ "$value" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || {
+      printf 'Stage 1 blocked: invalid inventory group in %s.\n' "$name" >&2
+      return 2
+    }
+  done
+  [[ ${#DIGITAFRICA_NAMESPACE} -le 63 &&
+     "$DIGITAFRICA_NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || {
+    printf 'Stage 1 blocked: invalid namespace.\n' >&2
+    return 2
+  }
+  command -v ansible-playbook >/dev/null 2>&1 || {
+    printf 'Stage 1 blocked: ansible-playbook is required.\n' >&2
+    return 2
+  }
+  for helper in "$BIG_DATA_COHORT_WORKFLOW" \
+                "$BIG_DATA_SPARK_MODULE_DIR/participant-direct-runtime.sh" \
+                "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh"; do
+    [[ -x "$helper" ]] || {
+      printf 'Stage 1 blocked: missing executable helper: %s\n' "$helper" >&2
+      return 2
+    }
+  done
+  ensure_workshop_activation_allowed big-data || return $?
+  "$BIG_DATA_COHORT_WORKFLOW" require-complete || return $?
+  printf 'Stage 1 context/cohort checks passed: namespace=%s, control-group=%s, worker-group=%s\n' \
+    "$DIGITAFRICA_NAMESPACE" "$DIGITAFRICA_DEPLOYMENT_GROUP" \
+    "$DIGITAFRICA_DEPLOYMENT_WORKER_GROUP"
+  printf '%s\n' 'This does not verify bind addresses, host capacity or participant execution.'
+}
+
+big_data_spark_stage1_action() {
+  local action="${1:-}" rc
+  case "$action" in
+    check|prepare|start|credentials) ;;
+    publish)
+      # Canonical publisher owns cohort checks, verification and confirmation.
+      big_data_spark_activate_selected_mode beginner
+      return $? ;;
+    validate)
+      printf '%s\n' 'Participant validation is not integrated yet; organiser-only tests do not establish readiness.' >&2
+      return 2 ;;
+    *) printf 'Unsupported Stage 1 action: %s\n' "$action" >&2; return 2 ;;
+  esac
+
+  big_data_spark_stage1_preflight || return $?
+  case "$action" in
+    check) return 0 ;;
+    prepare|start)
+      # The standalone helper owns explicit confirmation and startup policy apply.
+      if "$BIG_DATA_SPARK_MODULE_DIR/participant-direct-runtime.sh" "$action"; then
+        printf 'Stage 1 %s helper completed; participant readiness remains unverified.\n' "$action"
+      else
+        rc=$?
+        printf 'Stage 1 %s failed/cancelled (status %s). Inspect current state before retrying.\n' \
+          "$action" "$rc" >&2
+        return "$rc"
+      fi
+      ;;
+    credentials)
+      # A failed plan prevents apply. Apply repeats validation and owns confirmation.
+      "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" plan || return $?
+      if "$BIG_DATA_SPARK_MODULE_DIR/participant-credentials.sh" apply; then
+        printf '%s\n' 'Credential staging completed; publication and participant validation are still required.'
+      else
+        rc=$?
+        printf 'Credential staging failed/cancelled (status %s); no readiness claim.\n' "$rc" >&2
+        return "$rc"
+      fi
+      ;;
+  esac
+}
+
+big_data_spark_stage1_menu() {
+  local choice
+  while true; do
+    workshop_ui_heading 'Spark / Stage 1 - Direct submission'
+    printf 'Target: control=%s | workers=%s | namespace=%s\n' \
+      "${DIGITAFRICA_DEPLOYMENT_GROUP:-unset}" \
+      "${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP:-unset}" \
+      "${DIGITAFRICA_NAMESPACE:-unset}"
+    printf '%s\n' \
+      'Integration in progress. Participant readiness is NOT validated.' \
+      'Follow the numbered order. Reopening this menu does not prove prior completion.'
+    workshop_ui_section 'ORDERED STEP 1 WORKFLOW'
+    workshop_ui_option 1 'Check selected context and participant cohort'
+    workshop_ui_option 2 'Prepare direct runtime and credential exports'
+    workshop_ui_option 3 'Start direct runtime and apply network access'
+    workshop_ui_option 4 'Plan, confirm and stage participant credentials'
+    workshop_ui_option 5 'Publish Step 1 after credential verification'
+    workshop_ui_option 6 'Validate participant execution - not integrated yet'
+    workshop_ui_section 'INSPECTION'
+    workshop_ui_option 7 'Show existing workshop selection status (not readiness)'
+    printf '%s\n' \
+      'Safe non-destructive stop is not integrated; teardown is not a normal stop.' \
+      'Stage 2 is outside this workflow; no Livy actions are executed here.'
+    workshop_ui_option 0 'Back to Spark'
+    workshop_ui_prompt
+    read -r choice || return 0
+    case "$choice" in
+      1) big_data_spark_stage1_action check || printf 'Stage 1 preflight did not complete.\n' >&2 ;;
+      2) big_data_spark_stage1_action prepare || printf 'Stage 1 preparation did not complete.\n' >&2 ;;
+      3) big_data_spark_stage1_action start || printf 'Stage 1 startup did not complete.\n' >&2 ;;
+      4) big_data_spark_stage1_action credentials || printf 'Stage 1 credential staging did not complete.\n' >&2 ;;
+      5) big_data_spark_stage1_action publish || printf 'Stage 1 publication did not complete; inspect selection and reconciliation state.\n' >&2 ;;
+      6) big_data_spark_stage1_action validate || printf 'Participant readiness remains unverified.\n' >&2 ;;
+      7) big_data_spark_show_status || printf 'Selection status could not be read.\n' >&2 ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 7.\n' >&2 ;;
     esac
   done
 }

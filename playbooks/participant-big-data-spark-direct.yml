@@ -15,6 +15,14 @@
     big_data_livy_image: digitafrica/livy:0.9.0-incubating-spark3.5.3
     big_data_spark_client_port: 2222
   tasks:
+  - name: Resolve the Spark client address from the selected worker inventory
+    ansible.builtin.set_fact:
+      big_data_spark_client_bind_ip: >-
+        {{
+          big_data_spark_client_bind_ip | default('', true)
+          or ansible_host | default('')
+          or (ansible_default_ipv4 | default({})).get('address', '')
+        }}
   - name: Validate action and explicit VM address
     ansible.builtin.assert:
       that:

@@ -13,11 +13,11 @@ The notebook and script are complementary: the notebook explains the exercise; t
 | 01 — Direct Spark submission | Analyse the CSV with a driver in the prepared submission environment. | `01_spark_basics.ipynb` | `01_spark_basics.py` |
 | 02 — Spark through Livy | Repeat the analysis through the prepared Livy service, with a remote driver. | `02_spark_via_livy.ipynb` | `02_spark_via_livy.py` |
 
-Wait for the organiser's exact launch command. Do not assume that JupyterLab's default terminal Python has the correct dependencies or access. The administrator's Ansible environment is not the participant runtime.
+For the managed Step 1 launch path, read `STEP1-REMOTE.md` before submitting. In the organiser-prepared participant terminal environment, use `python3 spark_remote.py test`, then `python3 spark_remote.py analyse` after permission and successful completion of the test. Do not run `01_spark_basics.py` directly in JupyterLab. These commands are documented, but participant execution remains unvalidated. Step 2 still requires a separately approved launch path; the administrator's Ansible environment is not the participant runtime.
 
 Complete Step 1 and confirm its cleanup before Step 2. Do not submit multiple copies while an earlier application or session may remain active.
 
-Step 1 writes `outputs/filtered_preview.csv`; Step 2 writes `outputs/02_filtered_preview.csv`, relative to the analysis script's directory. A rerun replaces that step's preview. The organiser must explain how container-local results are mapped or retrieved into your workspace.
+Step 1 writes `outputs/filtered_preview.csv` on the assigned remote client. After successful analysis, the launcher downloads it to a new local `outputs/remote-<unique-id>/filtered_preview.csv` directory beside the submitted script and prints `Downloaded preview:`. A rerun replaces the shared remote preview, not earlier unique local downloads. Submit one job per group at a time; unique download directories do not prevent remote concurrency conflicts. Step 2 writes `outputs/02_filtered_preview.csv` relative to its analysis script; its output path remains subject to the separately approved Step 2 procedure.
 
 Do not install software, change ports, manage containers or use organiser-only runtime test scripts as participant commands.
 
@@ -29,23 +29,33 @@ Do not install software, change ports, manage containers or use organiser-only r
 - `02_spark_via_livy.py`: Step 2 analysis script and reusable Livy helpers.
 - `data/Bank_Personal_Loan_Modelling.csv`: the supplied input snapshot; see the provenance and permission limitations below.
 - `docs/spark-DA.pdf`: conceptual/historical teaching material.
+- `STEP1-REMOTE.md`: current managed Step 1 launch, credentials, result retrieval and safety instructions.
+- `spark_remote.py`: existing SSH/SFTP launcher; it submits real `spark-submit` commands in the assigned client.
 - `participants-instructions.md`: shared guidance for reading the notebooks and executing separately.
-- `outputs/`: created by analysis execution for bounded preview files, with visibility depending on the prepared output mapping.
+- `outputs/`: contains bounded previews; managed Step 1 downloads use separate `remote-<unique-id>/` subdirectories.
 
 The organiser provisions Spark separately using the managed runtime configuration. The legacy `docker-compose.yml` is not delivered to participant workspaces and is not used for managed provisioning.
 
 ## Prepared connection — Step 1
 
-The execution environment must provide compatible PySpark/Java and the organiser's settings:
+Open `~/Big-Data/Spark` in a JupyterLab terminal. The organiser prepares Python
+with Paramiko and stages the group's credentials for participant startup under
+`~/.ssh/spark-direct/`. The launcher reads `login_key` and `known_hosts` there
+and derives the endpoint from its single organiser-pinned host record.
+Do not transfer keys manually, guess addresses or disable host-key checks.
 
-- `SPARK_MASTER_URL`: the assigned Spark master address.
-- `SPARK_DATA_PATH`: the CSV path accessible to the driver and executors.
-- `SPARK_DRIVER_HOST`: the driver address reachable from workers.
-- `SPARK_DRIVER_PORT` and `SPARK_BLOCK_MANAGER_PORT`, when fixed ports are required.
+JupyterHub is the transport environment, not the Spark driver. The assigned
+client container supplies Java/PySpark, `SPARK_MASTER_URL`, `SPARK_DATA_PATH`,
+`SPARK_DRIVER_HOST` and the dataset link. The driver runs in that client;
+executors run in the assigned VM's worker and must connect back to the driver.
+Participants do not export those settings in JupyterLab or install software.
 
-The driver belongs to the running application, not the Markdown guide. Reaching the master alone is insufficient; executor-to-driver connectivity also matters. Local preview and distributed input paths can differ but must identify the same supplied dataset.
-
-Report missing configuration, dependencies or connectivity to the organiser. Do not substitute guessed settings or local Spark.
+Read `STEP1-REMOTE.md` for the test, analysis, downloaded-result and failure
+checks. One active submission per group/client is required; the launcher has
+no concurrency lock. Missing dependencies, credentials, connectivity or remote
+data access require organiser inspection, not guessed settings or local Spark.
+The menu's automated participant validation and non-destructive stop remain
+unfinished. Publication and organiser-only tests do not establish readiness.
 
 ## Prepared connection — Step 2
 

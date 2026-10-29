@@ -1,0 +1,167 @@
+- name: Plan, apply or remove Spark direct-access NetworkPolicies
+  hosts: '{{ big_data_control_group }}'
+  become: true
+  gather_facts: false
+  vars:
+    big_data_network_policy_action: plan
+    big_data_network_policy_port: 2222
+    spark_policy_selector: digitafrica.eu/managed-by=organiser,digitafrica.eu/module=spark,digitafrica.eu/workshop=big-data
+  tasks:
+  - name: Require one control host and explicit policy context
+    ansible.builtin.assert:
+      that:
+      - ansible_play_hosts_all | length == 1
+      - big_data_network_policy_namespace is defined
+      - big_data_network_policy_namespace is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+      - big_data_network_policy_action in ['plan', 'apply', 'remove']
+      - big_data_network_policy_action == 'remove' or big_data_worker_group is defined
+      fail_msg: Select one control host, a namespace, plan/apply/remove, and (except for remove) a worker group.
+
+  - name: Discover the post-DNAT destination of every group client
+    when: big_data_network_policy_action != 'remove'
+    block:
+    - name: Resolve the same ordered worker topology as the credential stage
+      ansible.builtin.include_role:
+        name: fl_workshop_topology
+      vars:
+        fl_workshop_client_group: '{{ big_data_worker_group }}'
+    - name: Read each worker's published client listener
+      ansible.builtin.command:
+        argv:
+        - ss
+        - -H
+        - -ltn
+        - 'sport = :{{ big_data_network_policy_port }}'
+      loop: '{{ fl_workshop_client_hosts }}'
+      delegate_to: '{{ item }}'
+      register: spark_policy_listeners
+      changed_when: false
+    - name: Require exactly one published listener per worker
+      ansible.builtin.assert:
+        that:
+        - spark_policy_listeners.results | map(attribute='stdout_lines') | map('length') | select('ne', 1) | list | length == 0
+        fail_msg: Each worker must have exactly one listener on the client port. Start the Spark client runtime first.
+    - name: Read the Docker NAT rules for the client port on each worker
+      ansible.builtin.shell: iptables-save -t nat | grep -F -e '--dport {{ big_data_network_policy_port }}' || true
+      loop: '{{ fl_workshop_client_hosts }}'
+      delegate_to: '{{ item }}'
+      register: spark_policy_nat
+      changed_when: false
+    - name: Start the discovery request
+      ansible.builtin.set_fact:
+        spark_policy_groups: []
+    - name: Add one discovery entry per ordered group and worker
+      ansible.builtin.set_fact:
+        spark_policy_groups: "{{ spark_policy_groups + [{
+          'group_id': 'group_%02d' | format(ansible_loop.index),
+          'worker': nat_result.item,
+          'bind_ip': (spark_policy_listeners.results[ansible_loop.index0].stdout_lines | first).split()[3].rsplit(':', 1)[0],
+          'nat_text': nat_result.stdout}] }}"
+      loop: '{{ spark_policy_nat.results }}'
+      loop_control:
+        loop_var: nat_result
+        extended: true
+        label: '{{ nat_result.item }}'
+    - name: Build validated policies from the discovered destinations
+      ansible.builtin.command:
+        argv:
+        - '{{ ansible_playbook_python }}'
+        - '{{ playbook_dir }}/../scripts/workshops/big-data/spark/spark_network_policy.py'
+        stdin: "{{ {'namespace': big_data_network_policy_namespace,
+          'port': big_data_network_policy_port | int,
+          'groups': spark_policy_groups} | to_json }}"
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+        ansible_python_interpreter: '{{ ansible_playbook_python }}'
+      register: spark_policy_plan
+      changed_when: false
+    - name: Keep the validated plan
+      ansible.builtin.set_fact:
+        spark_policy_desired: '{{ spark_policy_plan.stdout | from_json }}'
+    - name: Report the discovered destinations
+      ansible.builtin.debug:
+        msg: '{{ spark_policy_desired.summary }}'
+
+  - name: Read the complete public NetworkPolicy snapshot
+    ansible.builtin.command:
+      argv:
+      - k3s
+      - kubectl
+      - -n
+      - '{{ big_data_network_policy_namespace }}'
+      - get
+      - networkpolicy
+      - -o
+      - json
+    register: spark_policy_all
+    changed_when: false
+
+  - name: Validate ownership before planning any policy mutation
+    ansible.builtin.command:
+      argv:
+      - '{{ ansible_playbook_python }}'
+      - '{{ playbook_dir }}/../scripts/workshops/big-data/spark/plan_network_policy_changes.py'
+      stdin: "{{ {'namespace': big_data_network_policy_namespace,
+        'action': big_data_network_policy_action,
+        'current': spark_policy_all.stdout | from_json,
+        'desired': (spark_policy_desired.policies if big_data_network_policy_action != 'remove' else [])} | to_json }}"
+    delegate_to: localhost
+    become: false
+    vars:
+      ansible_become: false
+      ansible_python_interpreter: '{{ ansible_playbook_python }}'
+    register: spark_policy_ownership
+    changed_when: false
+
+  - name: Keep the ownership-checked policy plan
+    ansible.builtin.set_fact:
+      spark_policy_desired_names: '{{ (spark_policy_ownership.stdout | from_json).create_or_update }}'
+      spark_policy_delete_names: '{{ (spark_policy_ownership.stdout | from_json).delete }}'
+
+  - name: Report the ownership-checked plan and preserved legacy objects
+    ansible.builtin.debug:
+      msg: '{{ spark_policy_ownership.stdout | from_json }}'
+
+  - name: Report reconciliation concurrency boundary
+    ansible.builtin.debug:
+      msg: >-
+        Ownership preflight validates a snapshot, not an atomic transaction.
+        Exclude concurrent policy writers during reconciliation.
+        Unverified legacy objects listed in preserve_unverified_legacy are left untouched.
+
+  - name: Apply discovered policies before removing stale ones
+    ansible.builtin.command:
+      argv:
+      - k3s
+      - kubectl
+      - apply
+      - -f
+      - '-'
+      stdin: "{{ {'apiVersion': 'v1', 'kind': 'List', 'items': spark_policy_desired.policies} | to_json }}"
+    register: spark_policy_apply
+    changed_when: "' configured' in spark_policy_apply.stdout or ' created' in spark_policy_apply.stdout"
+    when: big_data_network_policy_action == 'apply'
+  - name: Delete stale ownership-checked policies
+    ansible.builtin.command: >-
+      k3s kubectl -n {{ big_data_network_policy_namespace }} delete networkpolicy
+      {{ spark_policy_delete_names | join(' ') }} --ignore-not-found
+    register: spark_policy_delete
+    changed_when: "'deleted' in spark_policy_delete.stdout"
+    when:
+    - big_data_network_policy_action in ['apply', 'remove']
+    - spark_policy_delete_names | length > 0
+  - name: Read the final managed policy set
+    ansible.builtin.command: >-
+      k3s kubectl -n {{ big_data_network_policy_namespace }} get networkpolicy
+      -l {{ spark_policy_selector }} -o name
+    register: spark_policy_final
+    changed_when: false
+    when: big_data_network_policy_action in ['apply', 'remove']
+  - name: Verify the final managed policy set
+    ansible.builtin.assert:
+      that:
+      - (spark_policy_final.stdout_lines | map('regex_replace', '^.*/', '') | sort | list) == (spark_policy_desired_names | sort | list)
+      fail_msg: Final managed NetworkPolicy set does not match the plan.
+    when: big_data_network_policy_action in ['apply', 'remove']

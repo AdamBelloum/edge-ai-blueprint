@@ -23,6 +23,10 @@ workshop_notebook_runtime_profiles:
     configmap_name: digitafrica-runtime-introduction-to-ai
     requirements_source: workshop_assets/introduction-to-ai/runtime/requirements.lock
 
+  big-data:
+    configmap_name: digitafrica-runtime-big-data
+    requirements_source: workshop_assets/big-data/spark/runtime/requirements.lock
+
 # Opt-in HPC runtime staging and pod integration; preserves other workshops.
 hpc_runtime_enabled: false
 

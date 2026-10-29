@@ -9,8 +9,10 @@ usage() {
     '--syntax-check: parse the teardown playbook without executing tasks.' \
     '--execute: remove ownership-verified Spark containers and networks on worker VMs.' \
     '' \
-    'Preserves images, datasets, staged runtime assets and participant accounts.' \
+    'Removes verified locked image references, generated runtime assets and staged Spark seed/data.' \
+    'Preserves participant accounts, unrelated image references and coordination locks.' \
     'Requires administrative control of Docker during execution.' \
+    'After a successful --execute, also removes the managed Spark NetworkPolicies.' \
     'Failures may leave partial cleanup; protected evidence supports retry.' \
     'This does not verify neutral JupyterHub state or complete workshop reset.'
 }
@@ -67,8 +69,14 @@ playbook="${WORKSHOP_CONTEXT_REPOSITORY_ROOT}/playbooks/teardown-big-data-spark-
 printf 'Spark teardown: mode=%s, worker-group=%s\n' \
   "$1" "$DIGITAFRICA_DEPLOYMENT_WORKER_GROUP"
 
-exec ansible-playbook \
+ansible-playbook \
   -i "$DIGITAFRICA_INVENTORY" \
   "$playbook" \
   --extra-vars "big_data_worker_group=${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP}" \
   "${options[@]}"
+
+# The containers are gone, so their network-policy allowances are obsolete.
+if [[ "$1" == --execute ]]; then
+  printf '%s\n' 'Runtime removed: deleting the managed Spark network policies.'
+  bash "${SCRIPT_DIR}/reconcile-network-policy.sh" remove
+fi

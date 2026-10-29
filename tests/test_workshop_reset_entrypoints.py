@@ -13,9 +13,16 @@ CASES = (
     ("big-data", "spark/teardown-runtime.sh",
      ["--runtime-only", "--module", "spark"], "--execute"),
 )
+# Second-stage helpers that a workshop reset must also run, in order.
+COMPANIONS = {"big-data": ("spark/cleanup-credentials.sh",
+                            "spark/cleanup-local-exports.sh")}
+PREFLIGHT_CALLS = {"big-data": ["exports --check"]}
+COMPANION_CALLS = {"big-data": ["credentials --execute", "exports --execute"]}
 
 
-def run_wrapper(workshop, helper_path, arguments, status=0, missing=False):
+def run_wrapper(workshop, helper_path, arguments, status=0, missing=False,
+                credentials_status=0, omit_companions=False,
+                exports_check_status=0, exports_status=0, omit_exports=False):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         wrapper = directory / "reset-workshop.sh"
@@ -37,10 +44,34 @@ def run_wrapper(workshop, helper_path, arguments, status=0, missing=False):
                 'exit "$MOCK_STATUS"\n'
             )
             helper.chmod(0o700)
+            for companion in ((() if omit_companions
+                               else COMPANIONS.get(workshop, ()))):
+                if omit_exports and companion.endswith("cleanup-local-exports.sh"):
+                    continue
+                extra = directory / companion
+                extra.parent.mkdir(parents=True, exist_ok=True)
+                extra.write_text(
+                    '#!/bin/sh\n'
+                    'printf "credentials %s\\n" "$*" >> "$MOCK_LOG"\n'
+                    'exit "$MOCK_CREDENTIALS_STATUS"\n'
+                )
+                if companion.endswith("cleanup-local-exports.sh"):
+                    extra.write_text(
+                        '#!/bin/sh\n'
+                        'printf "exports %s\\n" "$*" >> "$MOCK_LOG"\n'
+                        'if [ "$1" = "--check" ]; then exit "$MOCK_EXPORT_CHECK_STATUS"; fi\n'
+                        'exit "$MOCK_EXPORT_STATUS"\n'
+                    )
+                extra.chmod(0o700)
         environment = os.environ.copy()
         for name in ("BASH_ENV", "ENV"):
             environment.pop(name, None)
-        environment.update(MOCK_LOG=str(log), MOCK_STATUS=str(status))
+        environment.update(
+            MOCK_LOG=str(log), MOCK_STATUS=str(status),
+            MOCK_CREDENTIALS_STATUS=str(credentials_status),
+            MOCK_EXPORT_CHECK_STATUS=str(exports_check_status),
+            MOCK_EXPORT_STATUS=str(exports_status),
+        )
         result = subprocess.run(
             ["bash", str(wrapper), *arguments],
             env=environment, capture_output=True, text=True, timeout=10,
@@ -55,7 +86,10 @@ class ResetEntrypointTests(unittest.TestCase):
             with self.subTest(workshop=workshop):
                 result, calls = run_wrapper(workshop, helper, arguments)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(calls, [expected])
+                self.assertEqual(
+                    calls, [*PREFLIGHT_CALLS.get(workshop, []), expected,
+                            *COMPANION_CALLS.get(workshop, [])]
+                )
                 self.assertIn("NOT verified", result.stdout)
 
     def test_helper_failure_propagates(self):
@@ -65,8 +99,56 @@ class ResetEntrypointTests(unittest.TestCase):
                     workshop, helper, arguments, status=7
                 )
                 self.assertEqual(result.returncode, 7)
-                self.assertEqual(calls, [expected])
+                self.assertEqual(calls, [*PREFLIGHT_CALLS.get(workshop, []), expected])
                 self.assertIn("cleanup remains unverified", result.stderr)
+
+    def test_big_data_credential_cleanup_failure_propagates(self):
+        result, calls = run_wrapper(
+            "big-data", "spark/teardown-runtime.sh",
+            ["--runtime-only", "--module", "spark"], credentials_status=9,
+        )
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(calls, ["exports --check", "--execute", "credentials --execute"])
+        self.assertIn("Spark credential cleanup failed", result.stderr)
+        self.assertIn("cleanup remains unverified", result.stderr)
+
+    def test_big_data_missing_credential_helper_blocks_before_teardown(self):
+        result, calls = run_wrapper(
+            "big-data", "spark/teardown-runtime.sh",
+            ["--runtime-only", "--module", "spark"], omit_companions=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(calls, [])
+        self.assertIn("credential cleanup helper", result.stderr)
+
+    def test_big_data_missing_export_helper_blocks_before_teardown(self):
+        result, calls = run_wrapper(
+            "big-data", "spark/teardown-runtime.sh",
+            ["--runtime-only", "--module", "spark"], omit_exports=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(calls, [])
+        self.assertIn("local-export cleanup helper", result.stderr)
+
+    def test_big_data_export_preflight_failure_blocks_before_teardown(self):
+        result, calls = run_wrapper(
+            "big-data", "spark/teardown-runtime.sh",
+            ["--runtime-only", "--module", "spark"], exports_check_status=13,
+        )
+        self.assertEqual(result.returncode, 13)
+        self.assertEqual(calls, ["exports --check"])
+        self.assertIn("runtime teardown was not started", result.stderr)
+
+    def test_big_data_export_cleanup_failure_propagates(self):
+        result, calls = run_wrapper(
+            "big-data", "spark/teardown-runtime.sh",
+            ["--runtime-only", "--module", "spark"], exports_status=11,
+        )
+        self.assertEqual(result.returncode, 11)
+        self.assertEqual(calls, ["exports --check", "--execute",
+                                 "credentials --execute", "exports --execute"])
+        self.assertIn("Spark local-export cleanup failed", result.stderr)
+        self.assertIn("cleanup remains unverified", result.stderr)
 
     def test_missing_helper_blocks_execution(self):
         for workshop, helper, arguments, _ in CASES:

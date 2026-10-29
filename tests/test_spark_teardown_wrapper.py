@@ -30,8 +30,8 @@ class WrapperTests(unittest.TestCase):
             "#!" + sys.executable + "\n"
             "import json, os, sys\n"
             "from pathlib import Path\n"
-            "Path(os.environ['MOCK_ANSIBLE_LOG']).write_text("
-            "json.dumps(sys.argv[1:]))\n"
+            "with open(os.environ['MOCK_ANSIBLE_LOG'], 'a') as handle:\n"
+            "    handle.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             "sys.exit(int(os.environ.get('MOCK_ANSIBLE_EXIT', '0')))\n"
         )
         executable.chmod(0o755)
@@ -69,8 +69,12 @@ class WrapperTests(unittest.TestCase):
             env=self.env, capture_output=True, text=True, timeout=20,
         )
 
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
     def arguments(self):
-        return json.loads(self.log.read_text())
+        """Return the first recorded call: the teardown playbook."""
+        return self.calls()[0]
 
     def expected_prefix(self):
         return [
@@ -84,6 +88,7 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(
             self.arguments(), self.expected_prefix() + ["--syntax-check"]
         )
+        self.assertEqual(len(self.calls()), 1)
 
     def test_execute_authorizes_only_selected_worker_group(self):
         result = self.invoke("--execute")
@@ -94,6 +99,15 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(json.loads(arguments[-1]), {
             "big_data_spark_teardown_execute": True,
         })
+        calls = self.calls()
+        self.assertEqual(len(calls), 2)
+        policy = calls[1]
+        self.assertEqual(policy[:2], ["-i", str(self.inventory)])
+        self.assertTrue(policy[2].endswith(
+            "playbooks/reconcile-big-data-spark-network-policy.yml"))
+        self.assertIn("big_data_network_policy_action=remove", policy)
+        self.assertIn("big_data_worker_group=selected_workers", policy)
+        self.assertIn("big_data_control_group=selected_control", policy)
 
     def test_help_and_invalid_arguments_never_invoke_ansible(self):
         cases = [
@@ -119,6 +133,7 @@ class WrapperTests(unittest.TestCase):
         result = self.invoke("--execute")
         self.assertEqual(result.returncode, 7)
         self.assertTrue(self.log.exists())
+        self.assertEqual(len(self.calls()), 1)
 
 
 if __name__ == "__main__":

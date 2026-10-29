@@ -18,6 +18,10 @@ big_data_spark_future_unavailable() {
   printf 'CALL_UNAVAILABLE:%s\n' "$1"
   return 2
 }
+big_data_spark_stage1_menu() {
+  printf 'CALL_STAGE1\n'
+  return "${MOCK_PREPARE_RC:-0}"
+}
 big_data_spark_show_status() { printf 'CALL_STATUS\n'; }
 big_data_spark_runtime_action() { printf 'CALL_RUNTIME:%s\n' "$1"; }
 big_data_spark_computation_test() { printf 'CALL_TEST:%s\n' "$1"; }
@@ -35,19 +39,20 @@ class SparkMenuSimplificationTests(unittest.TestCase):
 
     def test_primary_menu_has_four_choices_and_explicit_wip_limits(self):
         text = self.run_menu("0\n")
-        self.assertIn("OPTION:1:Prepare Step 1 - work-in-progress", text)
+        self.assertIn("OPTION:1:Stage 1 - direct submission workflow", text)
         self.assertIn("OPTION:2:Prepare Step 2 - work-in-progress", text)
         self.assertIn("OPTION:3:Show workshop status", text)
         self.assertIn("OPTION:4:Maintenance and organiser tests", text)
-        self.assertIn("does not start services", text)
+        self.assertIn("publication alone is not workshop readiness", text)
         self.assertIn("selecting it performs no changes", text)
         self.assertNotIn("OPTION:5:", text)
         self.assertNotIn("Advanced", text)
         self.assertNotIn("CALL_", text)
 
-    def test_step1_retains_workspace_only_action(self):
+    def test_step1_opens_workflow_without_direct_publication(self):
         text = self.run_menu("1\n0\n")
-        self.assertEqual(text.count("CALL_WORKSPACE:beginner"), 1)
+        self.assertEqual(text.count("CALL_STAGE1"), 1)
+        self.assertNotIn("CALL_WORKSPACE", text)
         self.assertNotIn("CALL_RUNTIME", text)
         self.assertNotIn("CALL_TEST", text)
 
@@ -93,9 +98,10 @@ class SparkMenuSimplificationTests(unittest.TestCase):
         text = self.run_menu("")
         self.assertNotIn("CALL_", text)
 
-    def test_failed_workspace_action_is_not_reported_as_complete(self):
+    def test_failed_stage1_workflow_is_not_reported_as_complete(self):
         text = self.run_menu("1\n0\n", prepare_rc=7)
-        self.assertIn("Spark Step 1 workspace preparation did not complete.", text)
+        self.assertIn("Spark Stage 1 workflow did not complete.", text)
+        self.assertNotIn("CALL_WORKSPACE", text)
         self.assertNotIn("CALL_RUNTIME", text)
 
 

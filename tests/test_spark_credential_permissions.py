@@ -122,6 +122,37 @@ class SparkCredentialPermissionTests(unittest.TestCase):
         self.assertNotEqual(self.run_hook(uid=os.getuid() + 1).returncode, 0)
         self.assert_unmodified_permissions()
 
+    def test_rendered_include_boundary_is_valid_with_whitespace_trimming(self):
+        template = (ROOT / "roles/k8s_apps/templates/jhub-values.yaml.j2").read_text()
+        lines = template.splitlines()
+        matches = [
+            i for i, line in enumerate(lines)
+            if "include '" + HOOK_NAME + "'" in line
+        ]
+        self.assertEqual(len(matches), 1)
+        i = matches[0]
+        fragment = "\n".join(lines[i:i + 2]) + "\n"
+        self.assertIn("big_data_source=/seed/big-data/spark", fragment)
+
+        for lstrip_blocks in (False, True):
+            with self.subTest(lstrip_blocks=lstrip_blocks):
+                env = Environment(
+                    loader=FileSystemLoader(str(ROOT / "roles/k8s_apps/templates")),
+                    undefined=StrictUndefined,
+                    trim_blocks=True,
+                    lstrip_blocks=lstrip_blocks,
+                    keep_trailing_newline=False,
+                )
+                rendered = env.from_string(fragment).render()
+                self.assertRegex(
+                    rendered,
+                    r"\bfi[ \t]*\n[ \t]*big_data_source=/seed/big-data/spark",
+                )
+                result = subprocess.run(
+                    ["sh", "-n"], input=rendered, text=True, capture_output=True
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_hook_is_scoped_to_spark_participant_seed_branch(self):
         template = (ROOT / "roles/k8s_apps/templates/jhub-values.yaml.j2").read_text()
         spark = template.split("          # Spark: preserve participant edits on subsequent spawns.\n", 1)[1]
