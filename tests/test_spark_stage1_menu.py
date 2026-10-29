@@ -161,12 +161,13 @@ big_data_spark_computation_test() { printf 'UNEXPECTED_ORGANISER_TEST\n' >> "$TE
         self.assertNotIn('helper completed', result.stdout)
         self.assertIn('Inspect current state', result.stderr)
 
-    def test_unimplemented_and_invalid_actions_are_blocked_without_side_effects(self):
+    def test_removed_and_invalid_actions_are_blocked_without_side_effects(self):
         for action in ('validate', 'unexpected'):
             with self.subTest(action=action):
                 result, calls = self.invoke('big_data_spark_stage1_action ' + action)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(calls, [])
+                self.assertIn('Unsupported Stage 1 action', result.stderr)
 
     def test_menu_displays_workflow_order_without_actions(self):
         result, calls = self.invoke('big_data_spark_stage1_menu', input_text='0\n')
@@ -177,16 +178,17 @@ big_data_spark_computation_test() { printf 'UNEXPECTED_ORGANISER_TEST\n' >> "$TE
             'OPTION:3:Start direct runtime and apply network access',
             'OPTION:4:Plan, confirm and stage participant credentials',
             'OPTION:5:Publish Step 1 after credential verification',
-            'OPTION:6:Validate participant execution - not integrated yet',
+            'OPTION:7:Show existing workshop selection status (not readiness)',
         ]
         positions = [result.stdout.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('OPTION:6:', result.stdout)
         self.assertIn('Participant readiness is NOT validated', result.stdout)
         self.assertIn('teardown is not a normal stop', result.stdout)
         self.assertEqual(calls, [])
 
     def test_menu_routes_actions_and_verifies_before_publication_without_livy(self):
-        result, calls = self.invoke('big_data_spark_stage1_menu', input_text='1\n2\n3\n4\n5\n6\n7\n0\n')
+        result, calls = self.invoke('big_data_spark_stage1_menu', input_text='1\n2\n3\n4\n5\n7\n0\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, [
             'guard:big-data', 'cohort:require-complete',
@@ -198,7 +200,14 @@ big_data_spark_computation_test() { printf 'UNEXPECTED_ORGANISER_TEST\n' >> "$TE
             'selection-status',
         ])
         self.assertIn('execution readiness remain unverified', result.stdout)
-        self.assertIn('Participant readiness remains unverified', result.stderr)
+        self.assertEqual(result.stderr, '')
+
+    def test_removed_menu_option_is_rejected_without_helpers(self):
+        result, calls = self.invoke('big_data_spark_stage1_menu', input_text='6\n0\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertNotIn('OPTION:6:', result.stdout)
+        self.assertIn('Choose 0, 1, 2, 3, 4, 5 or 7.', result.stderr)
 
     def test_failed_verification_blocks_publication_before_confirmation(self):
         result, calls = self.invoke('big_data_spark_stage1_action publish', MOCK_VERIFY_RC='2')

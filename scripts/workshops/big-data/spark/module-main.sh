@@ -381,9 +381,6 @@ big_data_spark_stage1_action() {
       # Canonical publisher owns cohort checks, verification and confirmation.
       big_data_spark_activate_selected_mode beginner
       return $? ;;
-    validate)
-      printf '%s\n' 'Participant validation is not integrated yet; organiser-only tests do not establish readiness.' >&2
-      return 2 ;;
     *) printf 'Unsupported Stage 1 action: %s\n' "$action" >&2; return 2 ;;
   esac
 
@@ -432,7 +429,6 @@ big_data_spark_stage1_menu() {
     workshop_ui_option 3 'Start direct runtime and apply network access'
     workshop_ui_option 4 'Plan, confirm and stage participant credentials'
     workshop_ui_option 5 'Publish Step 1 after credential verification'
-    workshop_ui_option 6 'Validate participant execution - not integrated yet'
     workshop_ui_section 'INSPECTION'
     workshop_ui_option 7 'Show existing workshop selection status (not readiness)'
     printf '%s\n' \
@@ -447,10 +443,9 @@ big_data_spark_stage1_menu() {
       3) big_data_spark_stage1_action start || printf 'Stage 1 startup did not complete.\n' >&2 ;;
       4) big_data_spark_stage1_action credentials || printf 'Stage 1 credential staging did not complete.\n' >&2 ;;
       5) big_data_spark_stage1_action publish || printf 'Stage 1 publication did not complete; inspect selection and reconciliation state.\n' >&2 ;;
-      6) big_data_spark_stage1_action validate || printf 'Participant readiness remains unverified.\n' >&2 ;;
       7) big_data_spark_show_status || printf 'Selection status could not be read.\n' >&2 ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 7.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, 4, 5 or 7.\n' >&2 ;;
     esac
   done
 }
