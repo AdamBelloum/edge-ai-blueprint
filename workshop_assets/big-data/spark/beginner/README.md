@@ -36,7 +36,25 @@ the participant runtime.
 
 Complete Step 1 and confirm its cleanup before Step 2. Do not submit multiple copies while an earlier application or session may remain active.
 
-Step 1 writes `outputs/filtered_preview.csv` on the assigned remote client. After successful analysis, the launcher downloads it to a new local `outputs/remote-<unique-id>/filtered_preview.csv` directory beside the submitted script and prints `Downloaded preview:`. A rerun replaces the shared remote preview, not earlier unique local downloads. Submit one job per group at a time; unique download directories do not prevent remote concurrency conflicts. Step 2 writes `outputs/02_filtered_preview.csv` relative to its analysis script; its output path remains subject to the separately approved Step 2 procedure.
+For Step 2, wait for separate organiser approval, then **follow the five numbered
+activities** in `02_spark_via_livy.ipynb` using the same cycle:
+**read → predict → run → observe → record → reflect**. Use the prepared JupyterLab
+terminal and copy only one command at a time:
+
+| Activity | Step 2 command to copy individually |
+|---|---|
+| 1 — Load and inspect | `python3 02_spark_via_livy.py --activity 1` |
+| 2 — Select columns | `python3 02_spark_via_livy.py --activity 2` |
+| 3 — Filter rows | `python3 02_spark_via_livy.py --activity 3` |
+| 4 — Count categories | `python3 02_spark_via_livy.py --activity 4` |
+| 5 — Export and retrieve | `python3 02_spark_via_livy.py --activity 5` |
+
+Each command owns a fresh Livy session. Only activity 5 writes the Step 2 preview;
+activities 1–4 do not. The no-option `python3 02_spark_via_livy.py` command is an
+**optional organiser-requested reference**, not an additional required submission.
+Guided participant execution remains unvalidated.
+
+Step 1 writes `outputs/filtered_preview.csv` on the assigned remote client. After successful analysis, the launcher downloads it to a new local `outputs/remote-<unique-id>/filtered_preview.csv` directory beside the submitted script and prints `Downloaded preview:`. A rerun replaces the shared remote preview, not earlier unique local downloads. Submit one job per group at a time; unique download directories do not prevent remote concurrency conflicts. Only Step 2 activity 5 or full analysis writes `outputs/02_filtered_preview.csv` relative to its client script. An exporting rerun replaces that participant-local preview; it does not replace Step 1 downloads or the input. Follow the printed `Saved:` path and the separately approved Step 2 procedure.
 
 Do not install software, change ports, manage containers or use organiser-only runtime test scripts as participant commands.
 
@@ -45,7 +63,8 @@ Do not install software, change ports, manage containers or use organiser-only r
 - `01_spark_basics.ipynb`: Markdown-only guide to direct Spark submission and analysis.
 - `01_spark_basics.py`: Step 1 analysis script for the approved execution environment.
 - `02_spark_via_livy.ipynb`: Markdown-only guide to Livy submission and remote analysis.
-- `02_spark_via_livy.py`: Step 2 analysis script and reusable Livy helpers.
+- `02_spark_via_livy.py`: Step 2 HTTP client supporting five guided activities and optional full analysis.
+- `spark_livy_access.py`: existing managed loopback-forwarding, dataset-verification and owned-session cleanup helper.
 - `data/Bank_Personal_Loan_Modelling.csv`: the supplied input snapshot; see the provenance and permission limitations below.
 - `docs/spark-DA.pdf`: conceptual/historical teaching material.
 - `STEP1-DIRECT-SUBMISSION.md`: current managed Step 1 launch, credentials, result retrieval and safety instructions.
@@ -78,11 +97,35 @@ unfinished. Publication and organiser-only tests do not establish readiness.
 
 ## Prepared connection — Step 2
 
-Run `python 02_spark_via_livy.py` with the organiser-prepared interpreter. With neither Livy variable set, it automatically uses the managed group SSH credentials to open loopback-only forwarding and verify the supplied CSV on the driver and an executor. No manual tunnel or exported Livy settings are needed. Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain supported; partial overrides are rejected. The remote path identifies the same CSV accessible to the Livy-side driver and executors; it need not equal the local path or Step 1's `SPARK_DATA_PATH`.
+After separate organiser approval, use `02_spark_via_livy.ipynb` as the guided
+learning sequence and run its individual activity commands with the prepared
+interpreter. Do not execute notebook snippets or use organiser-only runtime tests
+as participant commands. Use matching updated notebook, client and helper copies.
 
-The running client sends requests to prepared Livy. The driver runs on the Livy side, so Step 1's participant-driver callback settings are not reused. The Markdown guide does not import helpers or create a session.
+With neither `LIVY_URL` nor `LIVY_DATA_PATH` set, the existing helper uses the
+managed group credentials under `~/.ssh/spark-direct/` for temporary loopback-only
+SSH forwarding to the assigned private Livy service. Host-key pinning is mandatory.
+It verifies the participant-local CSV's SHA-256 on the Livy driver and one executor
+before analysis. No manual tunnel, exported settings or participant installation
+is needed. Verification is repeated for each independent activity command and
+checks that supplied snapshot, not multi-worker capacity.
 
-The current helper assumes organiser-approved access without additional API authentication. JupyterHub login does not automatically protect Livy. Do not expose an unauthenticated Livy endpoint publicly or disable TLS verification.
+Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain
+supported; partial overrides fail. Automatic managed dataset verification is not
+performed in that explicit path, so the organiser must validate it separately.
+The remote data path need not match the local CSV path or Step 1's Spark path.
+Participants must not choose overrides or guess endpoints.
+
+The HTTP client runs in the participant terminal; the driver runs on the Livy
+side. Step 1's participant-driver callback settings are not reused. Variables
+persist between statements within one command's session, not between separate
+commands. Each command uses the returned owned session and statement IDs.
+
+JupyterHub login does not automatically protect Livy's API. The existing access
+path does not add API authentication; do not expose an unauthenticated endpoint,
+disable TLS verification, replace SSH pins, or exchange group private keys.
+**One active submission per group; take turns.** There is no client concurrency
+lock, and fresh sessions are not proof of concurrent capacity.
 
 ## Validation and integration status
 
@@ -90,7 +133,9 @@ The separate organiser-controlled client tests completed on both Tier-2 VMs. The
 
 These are educational one-worker pilots within each VM's runtime, not evidence of a Spark cluster spanning both VMs. Participant terminal access, concurrent capacity, isolation and failure-path recovery remain unvalidated.
 
-The tested Step 2 runner applies explicit resource limits and verifies cleanup. The standalone participant script does not send that same bounded session payload; it requests session deletion but does not verify completed teardown. The organiser must approve the participant submission path before use.
+The tested Step 2 organiser runner applies explicit resource limits and independently checks application inactivity and owned-client removal. The participant client retains its existing `{'kind': 'pyspark'}` session payload; guided activities add no resource limits. It deletes only the returned owned session ID and polls until GET returns **HTTP 404** before reporting removal. This confirms owned session-resource disappearance, not independent proof that every Spark application or executor has terminated. The organiser must approve the participant submission path and existing resource configuration before use.
+
+The new five-activity path has offline regression checks only. Prior full-analysis container tests do not validate the guided participant commands, access, concurrent capacity or failure recovery. Guided participant execution remains unvalidated.
 
 Repository changes do not automatically update delivered workspaces or running services. Existing participant files must not be overwritten without an explicit, reviewed update procedure.
 
