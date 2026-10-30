@@ -1,9 +1,37 @@
 ---
 hpc_workspace_source: "{{ playbook_dir }}/../workshop_assets/hpc"
 hpc_workspace_host_path: /opt/digitafrica/hpc
+hpc_workspace_directories:
+  - ""
+  - "OpenMP"
+  - "OpenMP/helpers"
+  - "OpenMP/exercises"
+  - "OpenMP/exercises/code1"
+  - "OpenMP/exercises/code2"
+  - "OpenMP/exercises/code3"
+  - "OpenMP/exercises/code4"
+  - "MPI"
 hpc_workspace_files:
   - README.md
   - LICENSE
-  - openmp-01-basics/01-beginner/hello.c
-  - openmp-01-basics/02-intermediate/pi_serial.c
   - PROVENANCE.md
+  - OpenMP/README.md
+  - OpenMP/01-openmp-debugging.ipynb
+  - OpenMP/helpers/openmp_start
+  - OpenMP/exercises/code1/code.c
+  - OpenMP/exercises/code1/problem.md
+  - OpenMP/exercises/code1/solution.c
+  - OpenMP/exercises/code1/solution.md
+  - OpenMP/exercises/code2/code.c
+  - OpenMP/exercises/code2/problem.md
+  - OpenMP/exercises/code2/solution.c
+  - OpenMP/exercises/code2/solution.md
+  - OpenMP/exercises/code3/code.c
+  - OpenMP/exercises/code3/problem.md
+  - OpenMP/exercises/code3/solution.c
+  - OpenMP/exercises/code3/solution.md
+  - OpenMP/exercises/code4/code.c
+  - OpenMP/exercises/code4/problem.md
+  - OpenMP/exercises/code4/solution.c
+  - OpenMP/exercises/code4/solution.md
+  - MPI/README.md

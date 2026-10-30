@@ -6,10 +6,7 @@
     owner: root
     group: root
     mode: "0755"
-  loop:
-    - ""
-    - openmp-01-basics/01-beginner
-    - openmp-01-basics/02-intermediate
+  loop: "{{ hpc_workspace_directories }}"
 
 - name: Stage explicitly allowlisted HPC participant files
   ansible.builtin.copy:
@@ -17,5 +14,5 @@
     dest: "{{ hpc_workspace_host_path }}/{{ item }}"
     owner: root
     group: root
-    mode: "0644"
+    mode: "{{ '0755' if item == 'OpenMP/helpers/openmp_start' else '0644' }}"
   loop: "{{ hpc_workspace_files }}"

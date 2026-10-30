@@ -874,14 +874,17 @@ singleuser:
                 hpc_source=/seed/hpc
                 hpc_workspace=/home/jovyan/HPC
 
-                mkdir -p \
-                  "$hpc_workspace/openmp-01-basics/01-beginner" \
-                  "$hpc_workspace/openmp-01-basics/02-intermediate"
                 for directory in \
                   "$hpc_workspace" \
-                  "$hpc_workspace/openmp-01-basics" \
-                  "$hpc_workspace/openmp-01-basics/01-beginner" \
-                  "$hpc_workspace/openmp-01-basics/02-intermediate"; do
+                  "$hpc_workspace/OpenMP" \
+                  "$hpc_workspace/OpenMP/helpers" \
+                  "$hpc_workspace/OpenMP/exercises" \
+                  "$hpc_workspace/OpenMP/exercises/code1" \
+                  "$hpc_workspace/OpenMP/exercises/code2" \
+                  "$hpc_workspace/OpenMP/exercises/code3" \
+                  "$hpc_workspace/OpenMP/exercises/code4" \
+                  "$hpc_workspace/MPI"; do
+                  mkdir -p "$directory"
                   chown 1000:100 "$directory"
                   chmod 0755 "$directory"
                 done
@@ -890,15 +893,36 @@ singleuser:
                   README.md \
                   LICENSE \
                   PROVENANCE.md \
-                  openmp-01-basics/01-beginner/hello.c \
-                  openmp-01-basics/02-intermediate/pi_serial.c; do
+                  OpenMP/README.md \
+                  OpenMP/01-openmp-debugging.ipynb \
+                  OpenMP/helpers/openmp_start \
+                  OpenMP/exercises/code1/code.c \
+                  OpenMP/exercises/code1/problem.md \
+                  OpenMP/exercises/code1/solution.c \
+                  OpenMP/exercises/code1/solution.md \
+                  OpenMP/exercises/code2/code.c \
+                  OpenMP/exercises/code2/problem.md \
+                  OpenMP/exercises/code2/solution.c \
+                  OpenMP/exercises/code2/solution.md \
+                  OpenMP/exercises/code3/code.c \
+                  OpenMP/exercises/code3/problem.md \
+                  OpenMP/exercises/code3/solution.c \
+                  OpenMP/exercises/code3/solution.md \
+                  OpenMP/exercises/code4/code.c \
+                  OpenMP/exercises/code4/problem.md \
+                  OpenMP/exercises/code4/solution.c \
+                  OpenMP/exercises/code4/solution.md \
+                  MPI/README.md; do
                   copy_seed_file "$hpc_source/$filename" "$hpc_workspace/$filename" false
                 done
+
+                # The generic copy helper sets 0644; this command must be executable.
+                chmod 0755 "$hpc_workspace/OpenMP/helpers/openmp_start"
 
                 # Delivery receipt only, not proof of runtime readiness.
                 write_receipt_if_absent \
                   "$hpc_workspace/HPC_SEED_RECEIPT.txt" \
-                  "HPC OpenMP basics source files, licence and provenance"
+                  "OpenMP debugging notebook, exercises and references; MPI placeholder"
                 ;;
               *)
                 echo "[seed] ERROR: HPC source delivery is not enabled; reconcile workshop applications before participant startup." >&2
