@@ -1,0 +1,190 @@
+---
+# Organiser-only direct computation test after read-only runtime preflight.
+# Creates one owned driver container and retains evidence; never starts/stops cluster services.
+- name: Test one bounded organiser-controlled direct Spark computation
+  hosts: "{{ big_data_worker_group }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  vars_files:
+    - ../roles/big_data_spark_runtime/defaults/main.yml
+  tasks:
+    - name: Require the reviewed platform and runtime inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+          - ansible_architecture == 'x86_64'
+          - (ansible_processor_vcpus | int) >= 4
+          - (ansible_memtotal_mb | int) >= 7168
+          - big_data_spark_project_name == 'digitafrica-spark'
+          - big_data_spark_runtime_host_path == '/opt/digitafrica/big-data/runtime/spark'
+          - big_data_spark_image == 'apache/spark@sha256:d0f5d63bfbbffdbec08debb4911554ba671a2fa7398374db8db314d80328f576'
+        fail_msg: Direct execution requires the reviewed Linux x86_64 pilot and pinned Spark image.
+
+    - name: Inspect the private Spark runtime without submitting work
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json
+            import pathlib
+            import stat
+            import subprocess
+            import sys
+
+            image, runtime, project = sys.argv[1:]
+
+            def require(condition, message):
+                if not condition:
+                    raise RuntimeError(message)
+
+            def run(args):
+                return subprocess.check_output(args, text=True, timeout=30)
+
+            def inspect(kind, value):
+                return json.loads(run(['docker', kind, 'inspect', value]))[0]
+
+            root = pathlib.Path(runtime)
+            root_stat = root.lstat()
+            require(stat.S_ISDIR(root_stat.st_mode) and root_stat.st_uid == 0,
+                    'Runtime path must be a root-owned directory, not a symlink')
+            compose_path = root / 'compose.yaml'
+            compose_stat = compose_path.lstat()
+            require(stat.S_ISREG(compose_stat.st_mode)
+                    and compose_stat.st_uid == 0 and compose_stat.st_gid == 0
+                    and stat.S_IMODE(compose_stat.st_mode) == 0o640,
+                    'Compose file must be a root-owned regular file with mode 0640')
+            compose = ['docker', 'compose', '--project-name', project,
+                       '--file', str(compose_path)]
+            config = json.loads(run(compose + ['config', '--format', 'json']))
+            services = config['services']
+            worker_names = sorted(name for name in services
+                                  if name in ('spark-worker-1', 'spark-worker-2'))
+            require(len(worker_names) in (1, 2) and 'spark-master' in services,
+                    'Expected one or two staged Spark workers and a master')
+            require(set(services) <= {'spark-master', 'spark-worker-1',
+                                     'spark-worker-2', 'spark-livy'},
+                    'Unexpected staged service; review before direct execution')
+            base = inspect('image', image)
+            require(base['Os'] == 'linux' and base['Architecture'] == 'amd64'
+                    and image in base.get('RepoDigests', []),
+                    'Pinned linux/amd64 Spark image must already be present')
+            net_config = config['networks']['spark-private']
+            require(net_config.get('internal') is True,
+                    'Staged Spark network must be internal')
+            network = inspect('network', net_config['name'])
+            labels = network.get('Labels') or {}
+            require(network.get('Internal') is True
+                    and network.get('Driver') == 'bridge'
+                    and labels.get('com.docker.compose.project') == project
+                    and labels.get('com.docker.compose.network') == 'spark-private',
+                    'Running network must be the organiser project private bridge')
+            dataset = pathlib.Path('/opt/digitafrica/big-data/spark/data')
+            require(stat.S_ISDIR(dataset.lstat().st_mode),
+                    'Dataset directory must exist and not be a symlink')
+            csv_file = dataset / 'Bank_Personal_Loan_Modelling.csv'
+            require(stat.S_ISREG(csv_file.lstat().st_mode),
+                    'Expected CSV must be a regular file, not a symlink')
+            running = {}
+            for service in ['spark-master'] + worker_names:
+                require(services[service]['image'] == image,
+                        'Staged Spark service uses an unexpected image')
+                ids = run(['docker', 'ps', '--quiet', '--filter',
+                           'label=com.docker.compose.project=' + project,
+                           '--filter', 'label=com.docker.compose.service=' + service]).split()
+                require(len(ids) == 1, 'Expected exactly one running ' + service)
+                container = inspect('container', ids[0])
+                require(container['State']['Running'] and container['Image'] == base['Id'],
+                        'Running Spark service image differs from the pinned base')
+                require(network['Name'] in container['NetworkSettings']['Networks'],
+                        'Spark service is not on the private network')
+                require(container['HostConfig']['NetworkMode'] != 'host',
+                        'Host networking is not allowed')
+                expected_memory = 536870912 if service == 'spark-master' else 2147483648
+                require(container['HostConfig']['Memory'] == expected_memory,
+                        'Spark service memory limit differs from the reviewed pilot')
+                if service != 'spark-master':
+                    require(not container['HostConfig'].get('PortBindings'),
+                            'Worker ports must not be published')
+                mounts = container.get('Mounts', [])
+                require(any(m.get('Type') == 'bind' and m.get('Source') == str(dataset)
+                            and m.get('Destination') == '/opt/spark-data/data'
+                            and m.get('RW') is False for m in mounts),
+                        'Spark service is missing the shared read-only dataset mount')
+                running[service] = ids[0]
+            probe = ('import json, urllib.request; '
+                     'r=urllib.request.urlopen("http://spark-master:8080/json/", timeout=5); '
+                     'print(json.dumps(json.load(r)))')
+            master = json.loads(run(['docker', 'exec', running['spark-master'],
+                                     'python3', '-c', probe]))
+            workers = master.get('workers', [])
+            require(len(workers) == len(worker_names)
+                    and all(w.get('state') == 'ALIVE' for w in workers),
+                    'Master must report the expected number of live workers')
+            require('activeapps' in master and not master['activeapps'],
+                    'Expected no active Spark applications before the organiser test')
+            memory = {}
+            for line in pathlib.Path('/proc/meminfo').read_text().splitlines():
+                fields = line.split()
+                if fields[0] in ('MemTotal:', 'MemAvailable:'):
+                    memory[fields[0].rstrip(':')] = int(fields[1]) // 1024
+            require(memory.get('MemAvailable', 0) >= 2048,
+                    'Require at least 2 GiB available RAM before adding a driver; no resources reserved')
+            print(json.dumps({
+                'status': 'preflight_passed',
+                'network': network['Name'],
+                'spark_image_id': base['Id'],
+                'spark_image_default_user': base.get('Config', {}).get('User'),
+                'spark_image_working_directory': base.get('Config', {}).get('WorkingDir'),
+                'running_spark_containers': running,
+                'live_workers': len(workers),
+                'active_applications': len(master['activeapps']),
+                'dataset_bytes': csv_file.stat().st_size,
+                'memory_mib_snapshot': memory,
+                'scope': 'read-only snapshot; no computation, reservation or participant access tested'
+            }))
+          - "{{ big_data_spark_image }}"
+          - "{{ big_data_spark_runtime_host_path }}"
+          - "{{ big_data_spark_project_name }}"
+      register: spark_direct_preflight
+      changed_when: false
+
+    - name: Display direct execution preflight evidence
+      ansible.builtin.debug:
+        msg:
+          inventory_host: "{{ inventory_hostname }}"
+          evidence: "{{ spark_direct_preflight.stdout | from_json }}"
+          next_gate: Preflight passed; the next task runs one owned driver container.
+
+
+    - name: Execute one bounded direct Spark computation
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../scripts/workshops/big-data/spark/step1-direct/container-runner.py') }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../workshop_assets/big-data/spark/beginner/01_spark_basics.py') }}"
+      register: spark_direct_result
+      changed_when: (spark_direct_result.stdout | default('{}', true) | from_json).get('container_created', false)
+      failed_when: false
+
+    - name: Display computation output and owned-container cleanup evidence
+      ansible.builtin.debug:
+        msg:
+          inventory_host: "{{ inventory_hostname }}"
+          return_code: "{{ spark_direct_result.rc }}"
+          stdout: "{{ spark_direct_result.stdout_lines }}"
+          stderr: "{{ spark_direct_result.stderr_lines }}"
+
+    - name: Require successful computation and confirmed owned-resource cleanup
+      ansible.builtin.assert:
+        that:
+          - spark_direct_result.rc == 0
+          - (spark_direct_result.stdout | from_json).get('status') == 'computation_passed'
+          - (spark_direct_result.stdout | from_json).get('container_removed', false)
+          - (spark_direct_result.stdout | from_json).get('application_no_longer_active', false)
+        fail_msg: >-
+          Direct execution or cleanup failed. Inspect the reported owned container,
+          application ID and evidence directory before retrying. Do not remove
+          unrelated containers, applications or Livy sessions.

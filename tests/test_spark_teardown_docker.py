@@ -23,12 +23,14 @@ class DockerAdapterTests(unittest.TestCase):
         self.assertEqual(self.docker.snapshot(), ([], [], []))
         expected = [
             ["container", "ls", "--all", "--quiet", "--no-trunc",
-             "--filter", adapter.FILTER],
+             "--filter", resource_filter]
+            for resource_filter in adapter.CONTAINER_FILTERS
+        ] + [
             ["network", "ls", "--quiet", "--no-trunc",
              "--filter", adapter.FILTER],
             ["volume", "ls", "--quiet", "--filter", adapter.FILTER],
         ]
-        self.assertEqual(self.run.call_count, 3)
+        self.assertEqual(self.run.call_count, len(expected))
         for call, arguments in zip(self.run.call_args_list, expected):
             self.assertEqual(call.args[0], adapter.PREFIX + arguments)
             self.assertEqual(call.kwargs, {

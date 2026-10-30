@@ -1,0 +1,35 @@
+---
+- name: Validate explicit client exposure on an address owned by this VM
+  ansible.builtin.assert:
+    that:
+      - big_data_spark_client_image == 'digitafrica/spark-client:3.5.3-ssh-v1'
+      - big_data_spark_client_bind_ip in ansible_all_ipv4_addresses
+      - big_data_spark_client_bind_ip not in ['0.0.0.0', '127.0.0.1']
+      - (big_data_spark_client_port | int) >= 1024
+      - (big_data_spark_client_port | int) <= 65535
+      - big_data_spark_client_container_memory == '1024m'
+    fail_msg: Supply an explicit VM-owned participant-reachable IPv4 address; wildcard binding is prohibited.
+
+- name: Create the protected client build directory
+  ansible.builtin.file:
+    path: "{{ big_data_spark_runtime_host_path }}/client-build"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Stage the client Dockerfile
+  ansible.builtin.template:
+    src: client.Dockerfile.j2
+    dest: "{{ big_data_spark_runtime_host_path }}/client-build/Dockerfile"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Restrict client image build context
+  ansible.builtin.copy:
+    dest: "{{ big_data_spark_runtime_host_path }}/client-build/.dockerignore"
+    content: "*\n!Dockerfile\n"
+    owner: root
+    group: root
+    mode: '0600'

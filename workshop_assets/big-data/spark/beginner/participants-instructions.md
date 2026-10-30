@@ -1,167 +1,171 @@
 # Spark participant instructions — managed workshop
 
-> **Pilot status:** do not run either interface until the organiser confirms that
-> the runtime, dataset access, cluster connection and driver networking are ready.
-> These instructions describe the intended workflow, not a validated deployment.
+> **Pilot status:** organiser-controlled container tests have passed on both Tier-2 VMs, but participant execution is not yet validated. Read the guides now; submit work only after the organiser confirms your assigned runtime, launch command, data access, network path and output retrieval.
 
 ## Learning path
 
-Read `README.md` first. Complete 01 — Spark basics and stop its Spark session.
-Then complete 02 — Spark via Livy. Choose the notebook or Python alternative
-for each exercise; the script is not an extra exercise or advanced solution.
-The organiser confirms readiness separately. Live Livy validation is pending.
+1. Read `README.md`.
+2. Open `01_spark_basics.ipynb` and read the Step 1 guide.
+3. Read `STEP1-REMOTE.md`; after organiser permission, use `python3 spark_remote.py test`, then `python3 spark_remote.py analyse` in the prepared terminal environment.
+4. Check the results and cleanup before continuing.
+5. Open `02_spark_via_livy.ipynb` and read the Step 2 guide.
+6. Use the approved Step 2 terminal submission path and check its results and cleanup.
+
+Both notebooks contain **Markdown cells only**. They serve as participant manuals. There are no code cells to execute, no required kernel selection and no notebook/script alternatives to choose between. The scripts perform the exercises described by the guides.
 
 ## Responsibilities and preparation
 
-The organiser provides the compatible Python/PySpark/Java environment, Spark
-cluster, dataset and connection settings. Do not install dependencies, manage
-Docker containers, change ports, guess settings or substitute local Spark.
-You may inspect the files, run prepared exercises and save your own results.
+The organiser provides infrastructure, the approved execution environment, dataset access, connection settings, resource controls and result retrieval. Participants read the guides, use approved submission commands, inspect results and report problems.
 
-Open the organiser-provided Spark workspace in JupyterLab. Confirm the CSV exists
-under `data/`. Use the organiser-designated notebook kernel or terminal interpreter.
-Selecting a notebook kernel does not select the terminal's Python. The administrator's
-Ansible environment is not automatically the participant runtime.
+Do not install dependencies, manage Docker, change ports, guess settings, substitute local Spark or use organiser-only test scripts as participant commands. JupyterHub login alone does not establish access to Spark or Livy.
 
-Use one interface at a time. Stop Exercise 1's Spark session before switching,
-particularly with fixed callback ports. Delete Exercise 2's Livy session before
-switching. Alternatives share an output file within each exercise; the two
-exercises use separate preview filenames.
+Open the assigned Spark workspace in JupyterLab. Confirm that both guides, both scripts and `data/Bank_Personal_Loan_Modelling.csv` are present. Open a terminal when the organiser confirms execution readiness.
 
-## Exercise 1 — Spark basics
+**The managed Step 1 commands are documented in `STEP1-REMOTE.md`, but actual participant execution remains unvalidated.** Use them only after organiser permission and confirmation of your prepared Python environment. Do not run the analysis script directly in JupyterLab. Step 2 still requires its own separately approved launch command.
 
-### Option A: guided notebook
+Run one exercise at a time. After interruption or uncertain cleanup, ask the organiser to inspect the application/session before retrying.
 
-1. Open `01_spark_basics.ipynb` from the Spark workspace directory.
-2. Select the organiser-prepared Python kernel.
-3. Read the explanations and run cells in order using **Shift+Enter**.
-4. Wait for each cell to finish before running dependent cells.
-5. Find your preview under `outputs/` and run the final cleanup cell.
+## Step 1 — Direct Spark submission
 
-After an error, do not continue dependent cells. If a usable `spark` session exists,
-run the final cleanup cell. After stopping Spark, restart the kernel and begin
-again from the first cell if you want to repeat the exercises.
+### Read, submit and observe
 
-### Option B: terminal Python script
-
-Open a JupyterLab terminal in the Spark workspace. Run the following only if the
-organiser confirms that `python` selects the prepared interpreter; otherwise use
-the exact interpreter command supplied by the organiser:
+Read `01_spark_basics.ipynb` for the analysis explanation and `STEP1-REMOTE.md`
+for the current launch procedure. The notebook is Markdown-only. In a terminal:
 
 ```bash
-python 01_spark_basics.py
+cd ~/Big-Data/Spark
+# Submit only after organiser permission; run one command at a time.
+python3 spark_remote.py test
+# Continue only after the test has finished successfully and analysis is approved.
+python3 spark_remote.py analyse
 ```
 
-The script resolves local paths relative to its own location and performs the
-same analysis activities as the notebook. Once it obtains a Spark session, it
-attempts to stop it after success or an analysis/export failure.
+The launcher uses your group's managed credentials under `~/.ssh/spark-direct/`
+and verifies the organiser-pinned SSH host key. Do not create an `.access`
+folder, transfer credentials manually, guess addresses or change security checks.
 
-Successful completion prints the saved path and `Analysis completed successfully.`
-An error and nonzero exit status mean the run did not complete successfully.
+JupyterHub transports commands and files. The driver runs in the assigned
+client container, not in JupyterLab or the reading guide. The prepared client
+supplies Spark connection settings and dataset paths; workers launch executors
+that need to connect back to that driver. Reaching the master alone is
+insufficient. This is a VM-local one-worker pilot, not a cross-VM Spark cluster.
 
-### Prepared connection
+`test` submits SparkPi. `analyse` uploads and submits the existing
+`01_spark_basics.py`; it performs the analysis automatically. Commands use real
+`spark-submit`, one executor core, 512 MB driver/executor memory, and remote
+timeouts of 120 seconds for the test and 300 seconds for analysis.
 
-The organiser supplies `SPARK_MASTER_URL`, `SPARK_DATA_PATH` and `SPARK_DRIVER_HOST`,
-plus optional `SPARK_DRIVER_PORT` and `SPARK_BLOCK_MANAGER_PORT` when required.
-Workers/executors need to connect back to the driver; reaching the master alone
-is insufficient. The local preview and distributed read must use the same supplied
-dataset, even when their paths differ. Do not guess replacement values.
+**One active submission per group/client.** Group members share remote script
+and output filenames; the launcher does not enforce a concurrency lock.
+Unique local download directories do not prevent remote job collisions.
 
-### Analysis and expected outcomes
+### Analysis checks
 
-Both routes preview up to five local records, connect to Spark, inspect the schema
-and count the complete input. The supplied local CSV contains **5,000 records**.
-They select `Age`, `Income` and `Family`, retain `Age > 30`, display up to ten matches
-and count all matches. `Age == 30` is excluded. For the bundled snapshot, the
-expected matching count is **4,376**. The observed `Personal Loan` codes are `0`
-(**4,520 records**) and `1` (**480 records**); their meanings remain unverified.
-These counts were checked locally; live Spark confirmation remains pending.
+Observe the local preview, Spark version/master, inferred schema, five-row data preview, full count, strict age filter and grouped category counts.
 
-Check field meanings, units and category definitions against the dataset source
-and teaching material. This is descriptive analysis, not predictive modelling.
-Neither interface cleans or modifies the input. There are **52 negative
-`Experience` values**; investigate them rather than silently changing the data.
-See the README's dataset section for the snapshot fingerprint, observations and
-unresolved provenance, units and licensing. Session creation alone does not
-prove successful distributed processing or that every available worker ran tasks.
+| Check for the supplied snapshot | Expected result |
+|---|---:|
+| Input records | 5,000 |
+| Records with Age > 30 | 4,376 |
+| Personal Loan raw code 0 | 4,520 |
+| Personal Loan raw code 1 | 480 |
 
-### Export and cleanup
+Age exactly 30 is excluded. Preview rows are not explicitly ordered. Category counts sum to the input count. These counts were checked locally and observed in the organiser-controlled Tier-2 Livy tests; participant execution is a separate readiness check.
 
-`outputs/filtered_preview.csv` has the `Age`, `Income` and `Family` header and at
-most ten data rows. An empty filtered result produces a header-only CSV.
-Re-running either interface replaces it; rename or download earlier results first.
-Rows are not explicitly ordered, so previews can differ between runs.
+Check units and code meanings against source documentation. The dataset has 52 negative `Experience` values; discuss them rather than changing the input. Consult the README for the fingerprint and unresolved provenance, category definitions and permissions.
 
-This bounded local collection is not a full export or Spark's distributed CSV
-output directory. Do not remove the limit to collect an arbitrarily large dataset.
-Shared worker input is not modified. Stopping your session releases application
-resources; it does not stop the organiser's cluster containers.
+### Output and cleanup
 
-### Troubleshooting
+The analysis writes `outputs/filtered_preview.csv` in the assigned remote
+client. It has the `Age,Income,Family` header and at most ten rows; an empty
+filter result produces a header-only file. It is a bounded preview, not a full
+distributed CSV export. Do not remove the row limit.
 
-- **Missing local CSV:** check the workspace location; ask the organiser to verify delivery.
-- **Missing configuration:** report the named settings; do not invent values.
-- **Missing PySpark / Java startup error:** ask the organiser to check the kernel/interpreter.
-- **Timeout or refused connection:** interrupt a blocked notebook cell and report the error;
-  do not change ports or start containers.
-- **Spark input path unavailable:** ask the organiser to check driver/executor dataset access.
-- **Output permission error:** report the path and error; do not change shared permissions.
+After a successful remote analysis, the launcher downloads the preview to a
+new local `outputs/remote-<unique-id>/filtered_preview.csv` directory beside
+the submitted script. In the default workspace this is beneath
+`~/Big-Data/Spark`. Follow the printed `Downloaded preview:` path in JupyterLab.
+Each download uses a new directory, while a remote rerun replaces the shared
+remote preview. If retrieval fails after `Remote exit status: 0`, report the
+retrieval error rather than automatically resubmitting the Spark job.
 
-Report the interface, failing activity and error text. Do not continue after failure
-or install software to work around it.
+After obtaining a Spark session, the analysis attempts `spark.stop()` in a
+`finally` block. Normal completion prints `Spark session stopped.`,
+`Analysis completed successfully.` and `Remote exit status: 0`. Shared runtime
+containers remain running. Check successful output download separately.
 
-## Exercise 2 — Spark via Livy
+After a timeout, disconnection, interruption or cleanup warning, ask the
+organiser to inspect the remote driver/application before retrying or allowing
+another group member to submit. A closed terminal or SSH connection does not
+prove remote termination. Do not stop shared containers or expose credentials
+in error reports.
 
-Repeat Exercise 1's analysis through pre-deployed Livy. Your workspace runs
-the HTTP client; the driver runs on the Livy side.
+Participant validation and non-destructive stopping are not automated yet.
+Publication, organiser-only tests and a successful SparkPi run do not alone
+establish all-group readiness, data access, output retrieval, isolation or
+cleanup. Do not continue to Step 2 until its separate launch path is approved.
 
-### Choose one interface
+## Step 2 — Spark through Livy
 
-- Notebook: open `02_spark_via_livy.ipynb` and run cells in order.
-  Keep `02_spark_via_livy.py` beside it for the shared helpers.
-- Python alternative: use the organiser-prepared terminal interpreter:
+### Read, submit and understand the new path
 
-    python 02_spark_via_livy.py
+After Step 1 cleanup, read `02_spark_via_livy.ipynb`. Use the organiser's exact approved terminal command for the Step 2 analysis or bounded wrapper. The guide contains no imports or executable statements.
 
-### Connection and activities
+The prepared client sends requests over HTTP; the driver runs on the Livy side and executors run on Spark workers. Run `python 02_spark_via_livy.py` with the organiser-prepared interpreter. With neither Livy variable set, it automatically uses the managed group SSH credentials to open loopback-only forwarding and verify the supplied CSV on the driver and an executor. No manual tunnel or exported Livy settings are needed. Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain supported; partial overrides are rejected. Do not reuse Step 1 callback settings or guess addresses.
 
-The organiser supplies `LIVY_URL` and `LIVY_DATA_PATH`. The remote path must
-identify the supplied CSV accessible to the Livy-side driver and executors.
-Do not guess addresses or substitute participant-driver callback settings.
+The current helper assumes approved access without additional API authentication. JupyterHub authentication does not itself secure Livy. Do not expose the service publicly or disable TLS verification.
+
+### Observe session readiness and results
 
 1. Preview the local CSV.
-2. Create a PySpark session and wait for readiness.
-3. Submit Exercise 1's read, filter and category-count analysis.
-4. Retrieve results using the session and statement IDs returned by Livy.
-5. Transfer at most ten rows to `outputs/02_filtered_preview.csv` locally.
-6. Request deletion of your own Livy session.
+2. Create a PySpark session and wait until it is ready.
+3. Submit the read, filter and grouped-count activities.
+4. Retrieve output using returned session and statement IDs.
+5. Transfer at most ten filtered rows to the local Step 2 preview.
+6. Request deletion of this exercise's session.
 
-Creation and execution are asynchronous. Helpers poll with bounded waits and
-report remote errors. Compare counts with Exercise 1 for the same dataset;
-preview ordering need not match.
+Creation and execution are asynchronous. Helpers poll with bounded waits and report errors. Keep the printed session ID and assigned service for reporting; IDs are local to each Livy service. Do not assume zero or use another participant's session ID.
 
-### Export, cleanup and errors
+Compare the schema and counts with Step 1 for the same snapshot. Preview ordering need not match. Both organiser-controlled Tier-2 Livy tests returned the counts listed above.
 
-Re-running either alternative replaces Exercise 2's preview, not Exercise 1's
-output. The input CSV remains unchanged.
+### Output and cleanup limits
 
-The script attempts deletion in a finally block. In the notebook, run Section 7
-after success or a failed cell if a session ID was obtained. Deletion affects
-your session, not shared containers. Acceptance does not verify finished teardown.
+The script writes `outputs/02_filtered_preview.csv` relative to its own directory. Rerunning replaces this preview, not Step 1's output or the source CSV. Follow the approved result retrieval instructions.
 
-If creation times out before returning an ID, ask the organiser to check for an
-orphan session before retrying. Restarting the kernel does not delete a remote
-session. Report HTTP, authentication, TLS, data-path or cleanup errors.
-Do not disable TLS verification, guess settings or manage containers.
+The standalone script attempts session deletion in a `finally` block after obtaining an ID. `Session deletion requested; cluster containers remain running.` means a request was accepted, not that teardown has finished.
+
+The tested organiser runner additionally applies explicit session resource limits and checks session disappearance, application inactivity and owned-client removal. The standalone script does not perform those same resource and teardown checks. Do not bypass the organiser-approved launch path.
+
+If creation times out without returning an ID, an orphan session may exist. Ask the organiser to inspect it before retrying. Closing the terminal, notebook or JupyterHub server does not guarantee remote session deletion. Never delete other sessions or stop shared containers.
+
+## Troubleshooting
+
+Stop after an error and report the command, failing stage, error text, assigned service, relevant paths and any session/application ID. Do not repeatedly submit work while cleanup is uncertain.
+
+| Problem | Participant action |
+|---|---|
+| Missing local CSV or script | Report the workspace/path and ask for a delivery check. |
+| Missing configuration | Report the named setting; do not invent a value. |
+| Missing PySpark, Java or other dependencies | Ask for a prepared-runtime check; do not install software. |
+| Refused connection or timeout | Report the error; do not change ports or start services. |
+| Remote data path unavailable | Ask the organiser to check driver/executor access. |
+| Output permission or visibility issue | Report the printed path; do not change shared permissions. |
+| HTTP, authentication or TLS error | Report it; do not disable security checks. |
+| Interruption or cleanup warning | Ask for application/session inspection before retrying. |
+
+## Completion checklist
+
+- [ ] I read both Markdown-only guides in order.
+- [ ] I used only organiser-approved submission commands.
+- [ ] I explained the difference between direct submission and Livy submission.
+- [ ] I checked the input, filtered and category counts.
+- [ ] I located both bounded previews and understood overwrite behaviour.
+- [ ] I checked cleanup and reported any uncertainty before retrying.
 
 ## References and historical material
 
-Use `README.md`, the guided notebook and the documented Python script for the
-managed workflow. `docs/spark-DA.pdf` is conceptual/historical background.
-Its text-only review identified legacy examples and apparent code problems; do
-not copy its local/streaming setup into the managed workshop. Visual checks and
-slide revisions remain pending. Use the prepared notebook or script instead.
+Use `README.md`, the two Markdown-only notebook guides and these instructions for the managed workflow. The Python scripts are execution assets, not alternative notebook interfaces.
 
-The original Docker tutorial is archived in the source repository at
-`docs/archive/spark-standalone-docker-tutorial.md`, outside the participant bundle.
-Its commands are not current participant instructions or managed provisioning.
+`docs/spark-DA.pdf` is conceptual/historical background. Its text-only review identified legacy examples and apparent code problems; do not copy its local/streaming setup into this workshop. Visual checks and slide revisions remain pending.
+
+The original Docker tutorial is archived at `docs/archive/spark-standalone-docker-tutorial.md` in the source repository, outside the participant bundle. Its commands are not current participant instructions or managed provisioning.

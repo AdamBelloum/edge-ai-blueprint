@@ -712,6 +712,43 @@
   tags:
     - workshop_application_reconciliation
 
+# Credential delivery follows cluster state, so ordinary reconciliations keep it.
+# It is enabled only for an active Spark workshop after the organiser has staged
+# the helper ConfigMap and one Secret for every inventory-derived group.
+- name: Detect staged Spark participant credentials
+  ansible.builtin.command:
+    cmd: >-
+      k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} get
+      configmap/digitafrica-spark-credential-code
+      {% for _worker in fl_workshop_client_hosts %}secret/digitafrica-spark-direct-group-{{ '%02d' | format(loop.index) }} {% endfor %}
+      --ignore-not-found -o name
+  register: spark_staged_resources
+  changed_when: false
+  when:
+    - big_data_workspace_enabled | default(false) | bool
+    - not (workshop_reset_neutral | default(false) | bool)
+  tags:
+    - workshop_seed
+    - workshop_application_reconciliation
+
+- name: Select Spark participant credential delivery
+  ansible.builtin.set_fact:
+    big_data_spark_credentials_enabled: >-
+      {{ (big_data_workspace_enabled | default(false) | bool)
+         and not (workshop_reset_neutral | default(false) | bool)
+         and ((spark_staged_resources.stdout_lines | default([])) | length)
+             == ((fl_workshop_client_hosts | length) + 1) }}
+  tags:
+    - workshop_seed
+    - workshop_application_reconciliation
+
+- name: Report Spark participant credential delivery state
+  ansible.builtin.debug:
+    msg: "Spark participant credential delivery enabled: {{ big_data_spark_credentials_enabled }}"
+  tags:
+    - workshop_seed
+    - workshop_application_reconciliation
+
 - name: Render JupyterHub Helm values
   ansible.builtin.template:
     src: jhub-values.yaml.j2

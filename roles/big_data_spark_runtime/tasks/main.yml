@@ -94,6 +94,10 @@
   ansible.builtin.include_tasks: livy.yml
   when: big_data_livy_enabled | bool
 
+- name: Stage opt-in participant client assets without starting services
+  ansible.builtin.include_tasks: client.yml
+  when: big_data_spark_client_enabled | bool
+
 - name: Stage the organiser-managed private Spark Compose configuration
   ansible.builtin.template:
     src: compose.yaml.j2

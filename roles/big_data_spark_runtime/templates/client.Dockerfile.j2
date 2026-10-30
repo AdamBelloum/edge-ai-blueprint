@@ -1,0 +1,41 @@
+FROM {{ big_data_spark_image }}
+USER root
+# The Spark base is digest pinned. APT packages are distro-signed but are NOT
+# version/checksum locked. Record the built image ID before workshop use.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -f /etc/ssh/ssh_host_* \
+ && groupadd --gid 10001 workshop \
+ && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash workshop \
+ && passwd -d workshop \
+ && mkdir -p /run/sshd /home/workshop/work \
+ && ln -s /opt/spark-data/data /home/workshop/work/data \
+ && chown 10001:10001 /home/workshop/work \
+ && chmod 0755 /run/sshd \
+ && printf '%s\n' \
+ 'Port 2222' \
+ 'ListenAddress 0.0.0.0' \
+ 'HostKey /etc/ssh/workshop_host_key' \
+ 'PidFile /run/sshd/workshop.pid' \
+ 'AuthorizedKeysFile /etc/ssh/workshop_authorized_keys' \
+ 'PubkeyAuthentication yes' \
+ 'PasswordAuthentication no' \
+ 'PermitEmptyPasswords no' \
+ 'ChallengeResponseAuthentication no' \
+ 'UsePAM no' \
+ 'PermitRootLogin no' \
+ 'AllowUsers workshop' \
+ 'AllowTcpForwarding no' \
+ 'AllowAgentForwarding no' \
+ 'X11Forwarding no' \
+ 'PermitTunnel no' \
+ 'PermitUserEnvironment no' \
+ 'SetEnv JAVA_HOME=/opt/java/openjdk SPARK_HOME=/opt/spark PYSPARK_PYTHON=python3 PYSPARK_DRIVER_PYTHON=python3 SPARK_MASTER_URL=spark://spark-master:7077 SPARK_DRIVER_HOST=spark-client SPARK_DATA_PATH=/opt/spark-data/data/Bank_Personal_Loan_Modelling.csv PATH=/opt/java/openjdk/bin:/opt/spark/bin:/usr/local/bin:/usr/bin:/bin' \
+ 'StrictModes yes' \
+ 'Subsystem sftp internal-sftp' \
+ 'LogLevel VERBOSE' > /etc/ssh/workshop_sshd_config
+ENV JAVA_HOME=/opt/java/openjdk SPARK_HOME=/opt/spark PYSPARK_PYTHON=python3 PYSPARK_DRIVER_PYTHON=python3 SPARK_MASTER_URL=spark://spark-master:7077 SPARK_DRIVER_HOST=spark-client SPARK_DATA_PATH=/opt/spark-data/data/Bank_Personal_Loan_Modelling.csv PATH=/opt/java/openjdk/bin:/opt/spark/bin:/usr/local/bin:/usr/bin:/bin
+WORKDIR /home/workshop/work
+EXPOSE 2222
+CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/workshop_sshd_config"]

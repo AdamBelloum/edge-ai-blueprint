@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # Workshop-owned Big Data reset entry point.
-# Currently delegates verified Spark/Livy runtime teardown only.
+# Delegates worker runtime, Kubernetes credentials and local SSH export cleanup.
 set -euo pipefail
 
 usage() {
   cat <<'USAGE'
 Usage: reset-workshop.sh --runtime-only --module spark
 
-Remove ownership-verified Spark/Livy containers and the private network through
-the existing teardown helper. Requires administrative control of Docker.
+Remove ownership-verified Spark/Livy containers, the private network,
+generated runtime files and the staged worker-side Spark seed/data bundle.
+Requires administrative control of Docker and stopped participant servers.
+No concurrent credential generation, staging or workshop preparation.
+Removes reviewed SSH exports for selected inventory workers on the organiser host.
+Preserves other worker exports, bind configuration and unrelated secrets.
 
-Preserves images, source datasets, staged runtime assets and participant
-workspaces/accounts. This stage does not verify full workshop reset.
+Deletes generated runtime files, including submission logs, reports and outputs.
+Deletes the staged participant seed/data bundle and verified locked Spark/Livy image references.
+No forced image removal, Docker prune or unrelated image-reference deletion.
+The global reset handles participant workspaces and its selected account option.
+This local stage does not verify full workshop reset.
 USAGE
 }
 
@@ -33,19 +40,66 @@ fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 teardown="$SCRIPT_DIR/spark/teardown-runtime.sh"
+credentials="$SCRIPT_DIR/spark/cleanup-credentials.sh"
+exports="$SCRIPT_DIR/spark/cleanup-local-exports.sh"
 
 [[ -x "$teardown" ]] || {
   printf 'ERROR: Missing executable Spark teardown helper: %s\n' "$teardown" >&2
   exit 2
 }
+[[ -x "$credentials" ]] || {
+  printf 'ERROR: Missing executable Spark credential cleanup helper: %s\n' "$credentials" >&2
+  exit 2
+}
+
+[[ -x "$exports" ]] || {
+  printf 'ERROR: Missing executable Spark local-export cleanup helper: %s\n' "$exports" >&2
+  exit 2
+}
+
+printf '%s\n' 'Big Data reset: validating local SSH exports without deletion.'
+if "$exports" --check; then
+  printf '%s\n' 'Big Data local-export preflight passed; no export files deleted.'
+else
+  status=$?
+  printf '%s\n' 'ERROR: Spark local-export preflight failed; runtime teardown was not started.' >&2
+  exit "$status"
+fi
 
 printf '%s\n' 'Big Data reset: tearing down the verified Spark/Livy runtime.'
 if "$teardown" --execute; then
   printf '%s\n' \
-    'Spark/Livy container and network cleanup verified.' \
-    'Staged-file cleanup and full workshop reset are NOT verified.'
+    'Big Data worker cleanup verified: containers, networks, locked image references, runtime files and staged seed/data.' \
+    'Full workshop reset is NOT verified by this local helper; the global reset handles participant workspaces, account options and neutral reconciliation.'
 else
   status=$?
   printf '%s\n' 'ERROR: Spark/Livy teardown failed; cleanup remains unverified.' >&2
+  exit "$status"
+fi
+
+printf '%s\n' 'Big Data reset: removing organiser-staged Spark participant credentials.'
+if "$credentials" --execute; then
+  printf '%s\n' 'Big Data credential cleanup verified: no labelled Spark credential Secret or ConfigMap remains.'
+  printf '%s\n' \
+    'NOTE: Participant homes keep their existing ~/.ssh/spark-direct credentials; this runtime-only reset does not touch them.' \
+    'Unmodified credentials with a valid organiser marker can rotate at the next server start after new credentials are staged; conflicts block startup.' \
+    'Init:CrashLoopBackOff on digitafrica-spark-credentials is a startup failure, not a unique credential diagnosis.' \
+    'Possible causes include missing staged resources, group/node binding mismatch, filesystem errors or conflicting credentials.' \
+    'Inspect the sanitised init-container status/reason and group/node binding first; never log credential payloads.' \
+    'Do not automatically delete ~/.ssh/spark-direct or reset participant workspaces; use reviewed recovery after confirming the cause.'
+else
+  status=$?
+  printf '%s\n' 'ERROR: Spark credential cleanup failed; cleanup remains unverified.' >&2
+  exit "$status"
+fi
+
+printf '%s\n' 'Big Data reset: removing selected worker SSH exports on the organiser host.'
+if "$exports" --execute; then
+  printf '%s\n' \
+    'Big Data local-export cleanup verified: selected worker SSH export directories are absent.' \
+    'Full workshop reset is NOT verified by this local helper.'
+else
+  status=$?
+  printf '%s\n' 'ERROR: Spark local-export cleanup failed; cleanup remains unverified.' >&2
   exit "$status"
 fi

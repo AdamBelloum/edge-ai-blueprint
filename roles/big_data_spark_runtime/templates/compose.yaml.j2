@@ -124,6 +124,104 @@ services:
         bind:
           create_host_path: false
 {% endif %}
+{% if big_data_spark_client_enabled | default(false) | bool %}
+  # Explicit profile prevents ordinary Compose startup from launching SSH.
+  # sshd's supervisor runs as root in this container only. Login shells
+  # run as UID 10001. No Docker socket or host accounts are exposed.
+  spark-client:
+    <<: *spark-common
+    image: "{{ big_data_spark_client_image }}"
+    profiles: [participant-direct]
+    hostname: spark-client
+    cpus: 1.0
+    mem_limit: "{{ big_data_spark_client_container_memory }}"
+    cap_add: [SETUID, SETGID, SYS_CHROOT]
+    depends_on: [spark-master]
+    networks: [spark-private, spark-access]
+    environment:
+      SPARK_HOME: /opt/spark
+      PYSPARK_PYTHON: python3
+    ports:
+      - "{{ big_data_spark_client_bind_ip }}:{{ big_data_spark_client_port }}:2222"
+    volumes:
+      - type: bind
+        source: /opt/digitafrica/big-data/spark/data
+        target: /opt/spark-data/data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/client-access/host_key"
+        target: /etc/ssh/workshop_host_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/client-access/login_key.pub"
+        target: /etc/ssh/workshop_authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+{% endif %}
+
+{% if big_data_livy_access_enabled | default(false) | bool %}
+  # Step 2 access only: no shell, SFTP or Spark driver in this service.
+  # Keep Livy's unauthenticated REST port off the host.
+  # Reuses the direct endpoint and host key; never run alongside spark-client.
+  # Explicit profile prevents ordinary pilot startup from launching this service.
+  spark-livy-access:
+    <<: *spark-common
+    image: "{{ big_data_spark_client_image }}"
+    profiles: [participant-livy]
+    hostname: spark-livy-access
+    cpus: 0.25
+    mem_limit: "128m"
+    cap_add: [SETUID, SETGID, SYS_CHROOT]
+    depends_on: [spark-livy]
+    networks: [spark-private, spark-access]
+    command:
+      - /usr/sbin/sshd
+      - -D
+      - -e
+      - -f
+      - /etc/ssh/workshop_sshd_config
+      - -o
+      - AllowTcpForwarding=local
+      - -o
+      - AllowStreamLocalForwarding=no
+      - -o
+      - PermitOpen=spark-livy:8998
+      - -o
+      - PermitListen=none
+      - -o
+      - MaxSessions=0
+      - -o
+      - AllowAgentForwarding=no
+      - -o
+      - PermitTunnel=no
+      - -o
+      - GatewayPorts=no
+      - -o
+      - X11Forwarding=no
+      - -o
+      - PermitTTY=no
+    ports:
+      - "{{ big_data_spark_client_bind_ip }}:{{ big_data_spark_client_port }}:2222"
+    volumes:
+      # Replace inherited dataset mounts: this gateway runs no analysis.
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/client-access/host_key"
+        target: /etc/ssh/workshop_host_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ big_data_spark_runtime_host_path }}/client-access/login_key.pub"
+        target: /etc/ssh/workshop_authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+{% endif %}
 
 networks:
   spark-private:
@@ -133,3 +231,13 @@ networks:
       org.digitafrica.workshop: big-data
       org.digitafrica.module: spark
       org.digitafrica.managed-by: organiser
+{% if (big_data_spark_client_enabled | default(false) | bool) or (big_data_livy_access_enabled | default(false) | bool) %}
+  # SSH endpoint access for the direct client or forwarding-only Livy gateway.
+  spark-access:
+    driver: bridge
+    internal: false
+    labels:
+      org.digitafrica.workshop: big-data
+      org.digitafrica.module: spark
+      org.digitafrica.managed-by: organiser
+{% endif %}

@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Workshop-local SSH/SFTP transport, not a replacement Spark submission API.
+
+Use the organiser-prepared Python environment; do not install software here.
+From the prepared participant workspace:
+    python3 spark_remote.py test
+    python3 spark_remote.py analyse
+
+Credentials default to ~/.ssh/spark-direct/login_key and known_hosts.
+The endpoint defaults to the single organiser-pinned known_hosts record.
+Explicit --host/--port/--key/--known-hosts options remain supported.
+The updated client image must be prepared and started before execution.
+
+SSH keys/known_hosts are supplied separately by the organiser for your VM.
+Host-key verification is mandatory. No auto-trust or password fallback.
+"""
+import argparse
+import re
+from pathlib import Path
+import shlex
+import sys
+import time
+import uuid
+import paramiko
+
+
+def sparkpi_command():
+    return (
+        'set -eu; cd /home/workshop/work; '
+        ': "${SPARK_HOME:?Missing organiser SPARK_HOME}"; '
+        ': "${SPARK_MASTER_URL:?Missing organiser SPARK_MASTER_URL}"; '
+        ': "${SPARK_DRIVER_HOST:?Missing organiser SPARK_DRIVER_HOST}"; '
+        'set -- "$SPARK_HOME"/examples/jars/spark-examples_*.jar; '
+        'test -f "$1"; '
+        'timeout 120 spark-submit '
+        '--master "$SPARK_MASTER_URL" '
+        '--deploy-mode client '
+        '--total-executor-cores 1 '
+        '--executor-memory 512m '
+        '--driver-memory 512m '
+        '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
+        '--conf spark.driver.bindAddress=0.0.0.0 '
+        '--class org.apache.spark.examples.SparkPi "$1" 2'
+    )
+
+
+def analysis_command(filename):
+    return (
+        'set -eu; cd /home/workshop/work; '
+        ': "${SPARK_MASTER_URL:?Missing organiser SPARK_MASTER_URL}"; '
+        ': "${SPARK_DRIVER_HOST:?Missing organiser SPARK_DRIVER_HOST}"; '
+        ': "${SPARK_DATA_PATH:?Missing organiser SPARK_DATA_PATH}"; '
+        'timeout 300 spark-submit '
+        '--master "$SPARK_MASTER_URL" '
+        '--deploy-mode client '
+        '--total-executor-cores 1 '
+        '--executor-memory 512m '
+        '--driver-memory 512m '
+        '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
+        '--conf spark.driver.bindAddress=0.0.0.0 '
+        + shlex.quote(filename)
+    )
+
+
+def resolve_endpoint(args, parser, client):
+    if args.host is None:
+        entries = list(client.get_host_keys().keys())
+        if len(entries) != 1:
+            parser.error(
+                'Expected one pinned endpoint; supply --host/--port explicitly.'
+            )
+        match = re.fullmatch(r'\[([^\]]+)\]:(\d+)', entries[0])
+        if match is None:
+            parser.error(
+                'Expected a pinned [host]:port record; supply --host/--port.'
+            )
+        args.host = match.group(1)
+        if args.port is None:
+            args.port = int(match.group(2))
+    if args.port is None:
+        args.port = 2222
+    if not args.host or not 1 <= args.port <= 65535:
+        parser.error('Supply a nonempty host and valid SSH port.')
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    credentials = Path.home() / '.ssh' / 'spark-direct'
+    p.add_argument('--host')
+    p.add_argument('--port', type=int)
+    p.add_argument('--key', type=Path, default=credentials / 'login_key')
+    p.add_argument('--known-hosts', type=Path, default=credentials / 'known_hosts')
+    sub = p.add_subparsers(dest='operation', required=True)
+    put = sub.add_parser('put', help='Upload a script to your group client workspace')
+    put.add_argument('local', type=Path)
+    get = sub.add_parser('get', help='Retrieve a file beneath the group workspace')
+    get.add_argument('remote')
+    get.add_argument('local', type=Path)
+    run = sub.add_parser('run', help='Run the visible command after -- in the client workspace')
+    run.add_argument('command', nargs=argparse.REMAINDER)
+    sub.add_parser('test', help='Submit SparkPi to the prepared cluster')
+    analyse = sub.add_parser('analyse', help='Run the existing bank analysis')
+    analyse.add_argument(
+        'local', type=Path, nargs='?',
+        default=Path(__file__).resolve().with_name('01_spark_basics.py'),
+    )
+    args = p.parse_args()
+    if not args.key.is_file() or args.key.stat().st_mode & 0o077:
+        p.error('Private key must exist with mode 0600 or more restrictive.')
+    if not args.known_hosts.is_file():
+        p.error('Organiser-supplied known_hosts file is required.')
+    client = paramiko.SSHClient()
+    client.load_host_keys(str(args.known_hosts))
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    resolve_endpoint(args, p, client)
+    try:
+        client.connect(args.host, args.port, username='workshop',
+                       key_filename=str(args.key), allow_agent=False,
+                       look_for_keys=False, timeout=15, auth_timeout=15,
+                       banner_timeout=15)
+        if args.operation in ('put', 'analyse'):
+            if not args.local.is_file():
+                p.error('Upload source must be a regular file.')
+            with client.open_sftp() as sftp:
+                sftp.put(str(args.local), '/home/workshop/work/' + args.local.name)
+            print('Uploaded:', args.local.name, flush=True)
+            if args.operation == 'put':
+                return 0
+        if args.operation == 'get':
+            rel = Path(args.remote)
+            if rel.is_absolute() or '..' in rel.parts:
+                p.error('Retrieve a relative file beneath the group workspace.')
+            with client.open_sftp() as sftp:
+                sftp.get('/home/workshop/work/' + str(rel), str(args.local))
+            print('Retrieved:', args.local)
+        else:
+            if args.operation == 'test':
+                remote = sparkpi_command()
+            elif args.operation == 'analyse':
+                remote = analysis_command(args.local.name)
+            else:
+                cmd = args.command
+                if cmd and cmd[0] == '--':
+                    cmd = cmd[1:]
+                if not cmd:
+                    p.error('Supply a command after run --.')
+                remote = 'cd /home/workshop/work && ' + shlex.join(cmd)
+            print('Remote command:', remote, flush=True)
+            # Drain both streams concurrently to avoid SSH flow-control deadlock.
+            transport = client.get_transport()
+            channel = transport.open_session(timeout=15)
+            channel.exec_command(remote)
+            try:
+                while True:
+                    while channel.recv_ready():
+                        sys.stdout.buffer.write(channel.recv(32768)); sys.stdout.buffer.flush()
+                    while channel.recv_stderr_ready():
+                        sys.stderr.buffer.write(channel.recv_stderr(32768)); sys.stderr.buffer.flush()
+                    if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                        break
+                    time.sleep(0.05)
+                status = channel.recv_exit_status()
+                print('Remote exit status:', status, flush=True)
+                if status == 0 and args.operation == 'analyse':
+                    output_dir = (
+                        args.local.resolve().parent / 'outputs'
+                        / ('remote-' + uuid.uuid4().hex[:12])
+                    )
+                    output_dir.mkdir(parents=True, exist_ok=False)
+                    output_file = output_dir / 'filtered_preview.csv'
+                    with client.open_sftp() as sftp:
+                        sftp.get(
+                            '/home/workshop/work/outputs/filtered_preview.csv',
+                            str(output_file),
+                        )
+                    print('Downloaded preview:', output_file, flush=True)
+                return status
+            finally:
+                channel.close()
+        return 0
+    finally:
+        client.close()
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (OSError, paramiko.SSHException) as exc:
+        print('SSH/SFTP failed: ' + str(exc), file=sys.stderr)
+        raise SystemExit(1)
+    except KeyboardInterrupt:
+        print('Connection interrupted. Remote Spark cleanup is not guaranteed; ask the organiser before retrying.', file=sys.stderr)
+        raise SystemExit(130)

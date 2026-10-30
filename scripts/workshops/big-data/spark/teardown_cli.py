@@ -10,8 +10,11 @@ from teardown_runner import run_teardown
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=(
-            "Remove ownership-verified managed Spark containers and networks. "
-            "Preserves images, datasets and staged runtime assets. "
+            "Remove ownership-verified Spark containers, networks and generated "
+            "runtime files without archiving submission evidence. "
+            "Also delete the reviewed staged worker-side Spark seed/data bundle. "
+            "Remove verified locked Spark/Livy image references without force or prune. "
+            "Global reset handles participant workspaces and identity options. "
             "Requires root and exclusive administrative control of Docker."
         )
     )
@@ -32,9 +35,15 @@ def main(argv=None):
 
     print(json.dumps({
         "cleanup_verified": True,
-        "changed": bool(result["container_ids"] or result["network_ids"]),
+        "changed": bool(result["container_ids"] or result["network_ids"]
+                        or result.get("removed_asset_paths")
+                        or result.get("removed_image_references")
+                        or result.get("retry_evidence_removed")),
         "removed_container_ids": result["container_ids"],
         "removed_network_ids": result["network_ids"],
+        "removed_asset_paths": result.get("removed_asset_paths", []),
+        "removed_image_references": result.get("removed_image_references", []),
+        "retry_evidence_removed": bool(result.get("retry_evidence_removed")),
     }, sort_keys=True))
     return 0
 

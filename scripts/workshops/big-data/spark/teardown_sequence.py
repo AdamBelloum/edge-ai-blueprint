@@ -18,7 +18,14 @@ def teardown(*, snapshot, load_evidence, save_evidence,
 
     # Durable evidence must exist before the first container removal.
     save_evidence(evidence)
-    for identifier in initial["container_ids"]:
+    # Remove owned submission clients before their supporting services.
+    # Full initial validation and durable evidence still precede all removal.
+    client_ids = set(initial["client_container_ids"])
+    removal_order = initial["client_container_ids"] + [
+        identifier for identifier in initial["container_ids"]
+        if identifier not in client_ids
+    ]
+    for identifier in removal_order:
         remove_container(identifier)
 
     # Revalidate current ownership and endpoints before removing networks.

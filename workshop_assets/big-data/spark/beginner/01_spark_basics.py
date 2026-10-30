@@ -1,51 +1,48 @@
-"""Run the Spark beginner workshop without opening the Jupyter notebook.
+"""Bank-data analysis for the organiser-prepared Spark submission runtime.
 
-Role
-----
-This is the terminal-based alternative to ``01_spark_basics.ipynb``.
-It follows the same activities: preview the local CSV, connect to the prepared
-Spark cluster, inspect the schema, filter records, count loan-outcome categories,
-and export a small preview. It is not a Docker deployment or installation tool.
+Role and managed participant usage
+----------------------------------
+This script performs the activities explained by the Markdown-only
+01_spark_basics.ipynb guide. It is the analysis payload, not a notebook
+alternative that should be run directly in a JupyterLab terminal.
 
-Prerequisites and usage
------------------------
-The organiser must first validate the compatible Python/PySpark/Java environment,
-cluster connection and worker-to-driver networking. In a participant terminal,
-run this script using that prepared Python interpreter::
+Read STEP1-REMOTE.md. From ~/Big-Data/Spark in the organiser-prepared participant
+Python environment, and only after organiser permission, use::
 
-    python 01_spark_basics.py
+    python3 spark_remote.py test
+    python3 spark_remote.py analyse
 
-Here, ``python`` must refer to the organiser-prepared interpreter, not an
-arbitrary system Python or the administrator's Ansible virtual environment.
-Selecting a notebook kernel does not necessarily select the terminal interpreter.
-Do not install packages, start Docker containers or invent connection settings.
-The script is an alternative entry point, not a workaround for an unready runtime.
+The launcher uploads this script and submits it using real spark-submit in the
+assigned client container. JupyterHub provides SSH/SFTP transport with Paramiko;
+Java/PySpark and the Spark driver belong to the prepared remote client.
+Participants do not install software, manage Docker or invent settings.
+Participant execution remains unvalidated until actual group runs are checked.
+One active submission per group/client is required; the launcher has no lock.
 
-The organiser supplies these environment variables:
+Prepared connection and input
+-----------------------------
+The client supplies SPARK_MASTER_URL, SPARK_DATA_PATH and SPARK_DRIVER_HOST.
+Optional SPARK_DRIVER_PORT and SPARK_BLOCK_MANAGER_PORT remain organiser
+configuration. Executors must be able to connect back to the driver.
 
-* SPARK_MASTER_URL: Spark master URL for the assigned workshop cluster.
-* SPARK_DATA_PATH: CSV path accessible to the Spark driver and executors.
-* SPARK_DRIVER_HOST: notebook/terminal driver address reachable from the workers.
-* SPARK_DRIVER_PORT: optional fixed driver port required by the network setup.
-* SPARK_BLOCK_MANAGER_PORT: optional fixed block-manager port.
+The first preview reads data/Bank_Personal_Loan_Modelling.csv relative to this
+script in the remote client. The image supplies the dataset link. Spark reads
+SPARK_DATA_PATH, which must identify the same supplied snapshot. Participants
+do not create links or export these settings in JupyterLab. The source values
+are retained; consult README.md for field/provenance/permission limitations.
 
-Input and output
-----------------
-The local preview reads ``data/Bank_Personal_Loan_Modelling.csv`` relative to this
-script. Spark reads SPARK_DATA_PATH, which must refer to the same supplied dataset
-in the prepared execution environment. The supplied dataset has 5,000 records;
-column meanings, units and category coding must be checked against its source.
-The script retains the source values and does not clean or repair the dataset.
+Output and cleanup
+------------------
+The analysis collects at most ten filtered rows to the driver and writes the
+remote outputs/filtered_preview.csv. A rerun replaces that shared remote file.
+After successful analysis, spark_remote.py downloads it to a new local
+outputs/remote-<unique-id>/filtered_preview.csv directory and prints its path.
+Unique downloads do not make concurrent remote submissions safe.
 
-The output is ``outputs/filtered_preview.csv`` beside this script. At most ten
-filtered rows are collected to the driver and written as a single local CSV.
-Re-running replaces that file, including any preview previously exported by the
-notebook. Without an explicit ordering, the selected rows need not be identical
-between runs. This bounded preview is not a full distributed result export.
-
-The Spark session is stopped after the analysis, including if an analysis or
-export step fails. Successful completion prints the output path. If preparation
-or execution fails, stop and share the error with the organiser.
+After obtaining a Spark session, this script attempts spark.stop() in finally.
+Shared containers remain running. Interruption, timeout or connection closure
+does not prove cleanup; ask the organiser to inspect the remote application
+before retrying. Execution success and successful retrieval are separate checks.
 """
 
 import csv
@@ -174,9 +171,10 @@ def export_preview(result_df, output_dir: Path) -> Path:
     Returns:
         Path of the CSV written, including its header row.
 
-    The existing filtered_preview.csv is replaced. This deliberately matches
-    the notebook and differs from Spark's distributed CSV writer, which creates
-    an output directory with part files. No shared worker directory is modified.
+    The existing filtered_preview.csv is replaced. A remote rerun replaces the
+    group's preview; the launcher retrieves it into a new local download directory.
+    This differs from Spark's distributed CSV writer, which creates a directory
+    with part files. No shared worker directory is modified.
     """
     # Collect the bounded result before opening the output file, so a failed
     # Spark action does not truncate an existing preview.
@@ -237,7 +235,7 @@ def analyse_dataset(spark, settings: dict, workspace: Path) -> Path:
 
 
 def main() -> None:
-    """Run the complete terminal alternative and release its Spark session.
+    """Run analysis in the prepared submission runtime and release its session.
 
     Workspace paths are resolved relative to this script, so running it from
     another working directory does not change the local input/output locations.

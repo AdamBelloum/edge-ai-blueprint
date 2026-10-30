@@ -1,5 +1,5 @@
 ---
-# Explicit scoped runtime removal; does not reset accounts or participant data.
+# Big Data worker cleanup; global reset handles accounts and participant workspaces.
 - name: Tear down ownership-verified Spark runtimes on selected worker VMs
   hosts: "{{ big_data_worker_group }}"
   become: true
@@ -42,6 +42,9 @@
             group: root
             mode: '0600'
           loop:
+            - teardown_assets.py
+            - teardown_seed.py
+            - teardown_images.py
             - teardown_cli.py
             - teardown_directory.py
             - teardown_docker.py
@@ -60,7 +63,9 @@
               - "{{ spark_teardown_stage.path }}/teardown_cli.py"
               - --execute
           register: spark_teardown_result
-          changed_when: (spark_teardown_result.stdout | from_json).changed | bool
+          changed_when: >-
+            (spark_teardown_result.rc == 0) and
+            ((spark_teardown_result.stdout | from_json).changed | bool)
 
         - name: Require verified absence of managed Spark runtime resources
           ansible.builtin.assert:

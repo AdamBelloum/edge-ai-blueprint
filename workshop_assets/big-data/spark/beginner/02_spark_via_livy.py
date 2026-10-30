@@ -8,9 +8,13 @@ first and stop its Spark session before proceeding.
 Use the organiser-prepared interpreter:
     python 02_spark_via_livy.py
 
-The organiser supplies LIVY_URL and LIVY_DATA_PATH. The latter must identify the
-same supplied CSV at a path accessible to the Livy-side driver AND executors;
-it need not equal the participant's local CSV path or SPARK_DATA_PATH.
+With neither LIVY_URL nor LIVY_DATA_PATH set, the shipped access helper uses
+managed SSH credentials to open temporary loopback-only Livy forwarding.
+It verifies the supplied CSV bytes on the driver and an executor before
+analysis. No manual tunnel, Livy variables or software installation is needed.
+
+Complete explicit organiser LIVY_URL and LIVY_DATA_PATH overrides remain
+supported. Partial overrides fail; explicit paths remain organiser-validated.
 
 This client creates/deletes its own Livy session, not infrastructure. It does
 not install software, start containers or create a local SparkSession. Livy
@@ -29,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
 HTTP_TIMEOUT = 15
 WAIT_TIMEOUT = 120
@@ -80,7 +84,11 @@ def livy_request(base_url: str, method: str, path: str, payload=None):
     headers = {"Accept": "application/json", "Content-Type": "application/json",
                "X-Requested-By": "digitafrica-spark-exercise-2"}
     request = Request(base_url + path, data=body, headers=headers, method=method)
-    with urlopen(request, timeout=HTTP_TIMEOUT) as response:
+    # Loopback forwarding must never route through an HTTP proxy.
+    open_url = (build_opener(ProxyHandler({})).open
+                if urlsplit(base_url).hostname in ('127.0.0.1', 'localhost')
+                else urlopen)
+    with open_url(request, timeout=HTTP_TIMEOUT) as response:
         content = response.read()
     return json.loads(content) if content.strip() else {}
 
@@ -182,37 +190,45 @@ def export_preview(base_url: str, session_id: int, output_dir: Path) -> Path:
 
 
 def main() -> None:
-    """Run the terminal alternative and attempt cleanup on success or failure."""
+    """Run the existing analysis with scoped access and owned-session cleanup."""
+    from spark_livy_access import managed_connection, verify_dataset, delete_owned_session
     workspace = Path(__file__).resolve().parent
-    preview_local_dataset(workspace / "data" / "Bank_Personal_Loan_Modelling.csv")
-    settings = read_connection_settings()
-    base_url = settings["LIVY_URL"]
-    print("\n--- 2. Connect through the prepared Livy service ---")
-    session_id = response_id(livy_request(base_url, "POST", "/sessions", {"kind": "pyspark"}))
-    print("Created Livy session:", session_id)
-    cleanup_ok = False
-    try:
-        wait_for_session(base_url, session_id)
-        print(run_statement(base_url, session_id,
-                            "print('Spark version:', spark.version)\n"
-                            "print('Spark master:', spark.sparkContext.master)"))
-        for heading, code in analysis_steps(settings["LIVY_DATA_PATH"]):
-            print(f"\n--- {heading} ---")
-            print(run_statement(base_url, session_id, code))
-        print("\n--- 6. Export a small local preview ---")
-        print("Saved:", export_preview(base_url, session_id, workspace / "outputs"))
-    finally:
-        print("\n--- 7. Delete this exercise's Livy session ---")
+    local_csv = workspace / 'data' / 'Bank_Personal_Loan_Modelling.csv'
+    preview_local_dataset(local_csv)
+    with managed_connection(read_connection_settings) as settings:
+        base_url = settings['LIVY_URL']
+        print("\n--- 2. Connect through the prepared Livy service ---")
+        session_id = response_id(livy_request(base_url, 'POST', '/sessions', {'kind': 'pyspark'}))
+        print('Created Livy session:', session_id)
+        analysis_error = None
         try:
-            livy_request(base_url, "DELETE", f"/sessions/{session_id}")
-            cleanup_ok = True
-            print("Session deletion requested; cluster containers remain running.")
-        except Exception as error:
-            print(f"WARNING: Could not delete session {session_id}: {error}. "
-                  "Ask the organiser to check cleanup.", file=sys.stderr)
-    if not cleanup_ok:
-        raise RuntimeError("Analysis finished, but Livy session cleanup could not be requested.")
-    print("Analysis completed successfully.")
+            print('Waiting for the Livy PySpark session...')
+            wait_for_session(base_url, session_id)
+            print(run_statement(base_url, session_id,
+                                "print('Spark version:', spark.version)\n"
+                                "print('Spark master:', spark.sparkContext.master)"))
+            data_path = settings['LIVY_DATA_PATH']
+            if settings['VERIFY_DATASET']:
+                data_path = verify_dataset(run_statement, base_url, session_id, data_path, local_csv)
+            for heading, code in analysis_steps(data_path):
+                print(f'\n--- {heading} ---')
+                print(run_statement(base_url, session_id, code))
+            print('\n--- 6. Export a small local preview ---')
+            print('Saved:', export_preview(base_url, session_id, workspace / 'outputs'))
+        except BaseException as error:
+            analysis_error = error
+            raise
+        finally:
+            print("\n--- 7. Delete this exercise's Livy session ---")
+            try:
+                delete_owned_session(livy_request, base_url, session_id)
+                print('Owned-session removal confirmed; cluster containers remain running.')
+            except Exception as error:
+                print(f'WARNING: Cleanup of owned session {session_id} is unconfirmed: {error}. '
+                      'Report the assigned service and this session ID to the organiser.', file=sys.stderr)
+                if analysis_error is None:
+                    raise
+    print('Analysis completed successfully; temporary managed forwarding has closed.')
 
 
 if __name__ == "__main__":

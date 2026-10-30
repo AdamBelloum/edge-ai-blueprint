@@ -49,6 +49,9 @@ class CliTests(unittest.TestCase):
             "changed": True,
             "removed_container_ids": result["container_ids"],
             "removed_network_ids": result["network_ids"],
+            "removed_asset_paths": [],
+            "removed_image_references": [],
+            "retry_evidence_removed": False,
         })
 
     def test_already_clean_reports_no_change(self):
@@ -75,6 +78,28 @@ class CliTests(unittest.TestCase):
                     self.assertEqual(cli.main(["--execute"]), 1)
                 self.assertEqual(output.getvalue(), "")
                 self.assertIn("cleanup is not verified", diagnostic.getvalue())
+
+
+    def test_file_only_or_record_only_cleanup_reports_changed(self):
+        for extra in ({"removed_asset_paths": ["/generated"]}, {"retry_evidence_removed": True}):
+            output = io.StringIO()
+            with self.subTest(extra=extra), \
+                 patch.object(cli, "run_teardown", return_value={
+                     "container_ids": [], "network_ids": [], **extra,
+                 }), redirect_stdout(output):
+                self.assertEqual(cli.main(["--execute"]), 0)
+            self.assertTrue(json.loads(output.getvalue())["changed"])
+
+
+    def test_image_only_cleanup_reports_change(self):
+        output = io.StringIO()
+        with patch.object(cli, "run_teardown", return_value={
+            "container_ids": [], "network_ids": [], "removed_image_references": ["locked-ref"],
+        }), redirect_stdout(output):
+            self.assertEqual(cli.main(["--execute"]), 0)
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["changed"])
+        self.assertEqual(report["removed_image_references"], ["locked-ref"])
 
 
 if __name__ == "__main__":

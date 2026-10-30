@@ -6,6 +6,13 @@ import subprocess
 PROJECT = "digitafrica-spark"
 PREFIX = ["docker", "--host", "unix:///var/run/docker.sock"]
 FILTER = "label=com.docker.compose.project=" + PROJECT
+# Separate queries implement OR discovery. Inspect and validate the union:
+# neither run-label presence nor a name prefix alone authorises removal.
+CONTAINER_FILTERS = (
+    FILTER,
+    "label=org.digitafrica.direct-run-id",
+    "label=org.digitafrica.livy-client-run-id",
+)
 
 
 def full_id(value):
@@ -47,10 +54,14 @@ class Docker:
         return records
 
     def snapshot(self):
-        containers = self.command(
-            "container", "ls", "--all", "--quiet", "--no-trunc",
-            "--filter", FILTER,
-        ).split()
+        container_ids = set()
+        for resource_filter in CONTAINER_FILTERS:
+            found = self.command(
+                "container", "ls", "--all", "--quiet", "--no-trunc",
+                "--filter", resource_filter,
+            ).split()
+            container_ids.update(full_id(identifier) for identifier in found)
+        containers = sorted(container_ids)
         networks = self.command(
             "network", "ls", "--quiet", "--no-trunc", "--filter", FILTER,
         ).split()

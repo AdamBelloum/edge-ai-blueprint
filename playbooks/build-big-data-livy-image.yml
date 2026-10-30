@@ -10,6 +10,20 @@
   tasks:
     - name: Validate the staged Livy build inputs
       ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+      vars:
+        big_data_livy_build_only: true
+
+    - name: Check whether the local Livy image already exists
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - ls
+          - --quiet
+          - --no-trunc
+          - "{{ big_data_livy_image }}"
+      register: livy_image_before_build
+      changed_when: false
 
     - name: Build the explicit local Livy image without starting containers
       ansible.builtin.command:
@@ -30,6 +44,7 @@
           - "org.digitafrica.livy.spark-base={{ big_data_spark_image }}"
           - "{{ big_data_spark_runtime_host_path }}/livy-build"
       changed_when: true
+      when: (livy_image_before_build.stdout | trim) == ''
 
     - name: Validate the resulting Livy image
       ansible.builtin.import_tasks: tasks/big-data-livy-image-validation.yml
@@ -37,5 +52,5 @@
     - name: Report the verified local image identity
       ansible.builtin.debug:
         msg: >-
-          Built {{ big_data_livy_image }} as {{ (livy_built_image.stdout | from_json)[0].Id }}.
+          Verified {{ big_data_livy_image }} as {{ (livy_built_image.stdout | from_json)[0].Id }}.
           No services were started. Livy startup and execution readiness remain unverified.
