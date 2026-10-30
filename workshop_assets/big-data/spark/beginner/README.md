@@ -13,7 +13,26 @@ The notebook and script are complementary: the notebook explains the exercise; t
 | 01 — Direct Spark submission | Analyse the CSV with a driver in the prepared submission environment. | `01_spark_basics.ipynb` | `01_spark_basics.py` |
 | 02 — Spark through Livy | Repeat the analysis through the prepared Livy service, with a remote driver. | `02_spark_via_livy.ipynb` | `02_spark_via_livy.py` |
 
-For the managed Step 1 launch path, read `STEP1-REMOTE.md` before submitting. In the organiser-prepared participant terminal environment, use `python3 spark_remote.py test`, then `python3 spark_remote.py analyse` after permission and successful completion of the test. Do not run `01_spark_basics.py` directly in JupyterLab. These commands are documented, but participant execution remains unvalidated. Step 2 still requires a separately approved launch path; the administrator's Ansible environment is not the participant runtime.
+For the managed Step 1 launch path, read `STEP1-DIRECT-SUBMISSION.md` before
+submitting. In the organiser-prepared participant terminal environment, run
+`python3 spark_direct_submit.py test` only after permission. After successful
+test completion and organiser approval, **follow the five numbered activities**
+in `01_spark_basics.ipynb`, using the cycle:
+**read → predict → run → observe → record → reflect**.
+
+Copy each activity command from the notebook individually; for example,
+`python3 spark_direct_submit.py analyse --activity 1` runs activity 1. Continue
+through activities 2–5 only after checking completion and recording your answers.
+Do not paste command batches or run `01_spark_basics.py` directly in JupyterLab.
+Only activity 5 writes and downloads a bounded preview; activities 1–4 do not.
+
+The unchanged `python3 spark_direct_submit.py analyse` command is an
+**optional organiser-requested reference**, not an additional required
+submission in the guided exercise. It runs the complete analysis and downloads
+a bounded preview. Participant execution remains unvalidated; documented
+commands and offline tests do not establish readiness. Step 2 still requires a
+separately approved launch path; the administrator's Ansible environment is not
+the participant runtime.
 
 Complete Step 1 and confirm its cleanup before Step 2. Do not submit multiple copies while an earlier application or session may remain active.
 
@@ -29,8 +48,8 @@ Do not install software, change ports, manage containers or use organiser-only r
 - `02_spark_via_livy.py`: Step 2 analysis script and reusable Livy helpers.
 - `data/Bank_Personal_Loan_Modelling.csv`: the supplied input snapshot; see the provenance and permission limitations below.
 - `docs/spark-DA.pdf`: conceptual/historical teaching material.
-- `STEP1-REMOTE.md`: current managed Step 1 launch, credentials, result retrieval and safety instructions.
-- `spark_remote.py`: existing SSH/SFTP launcher; it submits real `spark-submit` commands in the assigned client.
+- `STEP1-DIRECT-SUBMISSION.md`: current managed Step 1 launch, credentials, result retrieval and safety instructions.
+- `spark_direct_submit.py`: existing SSH/SFTP launcher; it submits real `spark-submit` commands in the assigned client.
 - `participants-instructions.md`: shared guidance for reading the notebooks and executing separately.
 - `outputs/`: contains bounded previews; managed Step 1 downloads use separate `remote-<unique-id>/` subdirectories.
 
@@ -50,7 +69,7 @@ client container supplies Java/PySpark, `SPARK_MASTER_URL`, `SPARK_DATA_PATH`,
 executors run in the assigned VM's worker and must connect back to the driver.
 Participants do not export those settings in JupyterLab or install software.
 
-Read `STEP1-REMOTE.md` for the test, analysis, downloaded-result and failure
+Read `STEP1-DIRECT-SUBMISSION.md` for the test, analysis, downloaded-result and failure
 checks. One active submission per group/client is required; the launcher has
 no concurrency lock. Missing dependencies, credentials, connectivity or remote
 data access require organiser inspection, not guessed settings or local Spark.

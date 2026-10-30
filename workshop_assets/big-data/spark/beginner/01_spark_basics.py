@@ -6,16 +6,30 @@ This script performs the activities explained by the Markdown-only
 01_spark_basics.ipynb guide. It is the analysis payload, not a notebook
 alternative that should be run directly in a JupyterLab terminal.
 
-Read STEP1-REMOTE.md. From ~/Big-Data/Spark in the organiser-prepared participant
+Read STEP1-DIRECT-SUBMISSION.md. From ~/Big-Data/Spark in the organiser-prepared participant
 Python environment, and only after organiser permission, use::
 
-    python3 spark_remote.py test
-    python3 spark_remote.py analyse
+    python3 spark_direct_submit.py test
+
+After successful test completion and approval, follow the five numbered
+activities in the notebook: read, predict, submit one activity, inspect its
+output, record answers and reflect before continuing. For example::
+
+    python3 spark_direct_submit.py analyse --activity 1
+
+Use the corresponding --activity 2 through --activity 5 commands individually.
 
 The launcher uploads this script and submits it using real spark-submit in the
 assigned client container. JupyterHub provides SSH/SFTP transport with Paramiko;
 Java/PySpark and the Spark driver belong to the prepared remote client.
 Participants do not install software, manage Docker or invent settings.
+The payload accepts --activity 1 through --activity 5 for independent
+learning activities. This option belongs to the remotely submitted payload;
+participants must still use the managed launcher, not execute this file locally.
+Without the option, the existing full analysis runs. Only activity 5 and the
+full analysis produce the bounded preview. The managed launcher forwards
+activity selection to this payload. The no-option full analysis is an optional
+organiser-requested reference, not an additional required guided submission.
 Participant execution remains unvalidated until actual group runs are checked.
 One active submission per group/client is required; the launcher has no lock.
 
@@ -33,11 +47,13 @@ are retained; consult README.md for field/provenance/permission limitations.
 
 Output and cleanup
 ------------------
-The analysis collects at most ten filtered rows to the driver and writes the
-remote outputs/filtered_preview.csv. A rerun replaces that shared remote file.
-After successful analysis, spark_remote.py downloads it to a new local
+Only activity 5 or full analysis collects at most ten filtered rows to the
+driver and writes remote outputs/filtered_preview.csv. An exporting rerun
+replaces that shared remote file. After successful activity 5 or full analysis,
+spark_direct_submit.py downloads it to a new local
 outputs/remote-<unique-id>/filtered_preview.csv directory and prints its path.
-Unique downloads do not make concurrent remote submissions safe.
+Activities 1–4 neither write nor download a preview. Unique downloads do not
+make concurrent remote submissions safe.
 
 After obtaining a Spark session, this script attempts spark.stop() in finally.
 Shared containers remain running. Interruption, timeout or connection closure
@@ -45,10 +61,20 @@ does not prove cleanup; ask the organiser to inspect the remote application
 before retrying. Execution success and successful retrieval are separate checks.
 """
 
+import argparse
 import csv
 import os
 from pathlib import Path
 import sys
+
+
+ACTIVITY_NAMES = {
+    1: "Load CSV, inspect schema and count records",
+    2: "Select columns",
+    3: "Filter rows",
+    4: "Count Personal Loan categories",
+    5: "Export a bounded preview",
+}
 
 
 REQUIRED_SETTINGS = (
@@ -191,51 +217,92 @@ def export_preview(result_df, output_dir: Path) -> Path:
     return output_file
 
 
-def analyse_dataset(spark, settings: dict, workspace: Path) -> Path:
-    """Perform the notebook's Spark analysis and export its bounded preview.
-
-    Args:
-        spark: Prepared SparkSession.
-        settings: Organiser-provided connection and dataset settings.
-        workspace: Local directory containing this script and outputs/.
-
-    Returns:
-        Path to the exported local filtered preview.
-
-    Processing errors propagate to main(), which stops the Spark session.
-    Counts are computed from the actual input; no outcome totals are assumed.
-    """
-    print("\n--- 3. Read CSV and inspect schema ---")
-    # header uses the CSV column names; inferSchema infers their Spark types.
-    # The distributed read uses the prepared path, not the local preview path.
-    df = (
+def load_dataframe(spark, settings: dict):
+    """Read the prepared distributed CSV with a header and inferred types."""
+    return (
         spark.read.format("csv")
         .option("header", "true")
         .option("inferSchema", "true")
         .load(settings["SPARK_DATA_PATH"])
     )
+
+
+def inspect_schema(df) -> None:
+    """Activity 1: inspect types, display five records and count all records."""
     df.printSchema()
     df.show(5)
     print("Number of records:", df.count())
 
-    print("\n--- 4. Filter records where Age > 30 ---")
-    # select/filter build a lazy execution plan. show/count trigger Spark jobs.
-    # Age == 30 is excluded: the condition is strictly greater than 30.
-    result_df = df.select("Age", "Income", "Family").filter(df.Age > 30)
+
+def select_columns(df) -> None:
+    """Activity 2: select three columns without filtering any records."""
+    selected_df = df.select("Age", "Income", "Family")
+    selected_df.show(10)
+    print("Selected columns:", ", ".join(selected_df.columns))
+    print("Records after column selection:", selected_df.count())
+
+
+def filtered_dataframe(df):
+    """Build the strict Age > 30 filter used by activities 3 and 5."""
+    return df.select("Age", "Income", "Family").filter(df.Age > 30)
+
+
+def inspect_filter(result_df) -> None:
+    """Activity 3: display ten filtered records and count all matches."""
     result_df.show(10)
     print("Matching records:", result_df.count())
 
-    print("\n--- 5. Count Personal Loan categories ---")
-    # Display the source category codes. Consult the dataset documentation for
-    # their meaning; this exercise is aggregation, not predictive modelling.
+
+def count_categories(df) -> None:
+    """Activity 4: count raw Personal Loan codes and sort the summary."""
     df.groupBy("Personal Loan").count().orderBy("Personal Loan").show()
 
-    print("\n--- 6. Export a small local preview ---")
-    return export_preview(result_df, workspace / "outputs")
+
+def analyse_dataset(spark, settings: dict, workspace: Path, activity=None):
+    """Run the existing full analysis or a selected independent activity.
+
+    A selected activity loads its required DataFrame in its own submission.
+    Activities do not share Python variables or live Spark sessions. Activity 5
+    recreates the age filter before exporting it, so activity 3 need not have
+    run earlier. Only the full analysis and activity 5 produce a preview.
+    All processing errors propagate to main() and its existing finally cleanup.
+    """
+    if activity is not None and activity not in ACTIVITY_NAMES:
+        raise ValueError("Unknown activity: {}".format(activity))
+
+    if activity in (None, 1):
+        print("\n--- 3. Read CSV and inspect schema ---")
+    else:
+        print("\n--- Load required input for activity {} ---".format(activity))
+    df = load_dataframe(spark, settings)
+
+    if activity in (None, 1):
+        inspect_schema(df)
+
+    if activity == 2:
+        print("\n--- Select Age, Income and Family ---")
+        select_columns(df)
+
+    if activity in (None, 3):
+        print("\n--- 4. Filter records where Age > 30 ---")
+        result_df = filtered_dataframe(df)
+        inspect_filter(result_df)
+
+    if activity in (None, 4):
+        print("\n--- 5. Count Personal Loan categories ---")
+        count_categories(df)
+
+    if activity in (None, 5):
+        print("\n--- 6. Export a small local preview ---")
+        if activity == 5:
+            result_df = filtered_dataframe(df)
+        return export_preview(result_df, workspace / "outputs")
+
+    return None
 
 
-def main() -> None:
-    """Run analysis in the prepared submission runtime and release its session.
+def main(activity=None) -> None:
+    """Run full analysis or one activity and release its session.
 
     Workspace paths are resolved relative to this script, so running it from
     another working directory does not change the local input/output locations.
@@ -243,6 +310,8 @@ def main() -> None:
     analysis succeeds or fails. Startup failures are reported without claiming
     that a usable session was created.
     """
+    if activity is not None:
+        print("Activity {}: {}".format(activity, ACTIVITY_NAMES[activity]))
     workspace = Path(__file__).resolve().parent
     dataset = workspace / "data" / "Bank_Personal_Loan_Modelling.csv"
     preview_local_dataset(dataset)
@@ -253,8 +322,9 @@ def main() -> None:
     try:
         print("Spark version:", spark.version)
         print("Spark master:", spark.sparkContext.master)
-        output_file = analyse_dataset(spark, settings, workspace)
-        print("Saved:", output_file)
+        output_file = analyse_dataset(spark, settings, workspace, activity=activity)
+        if output_file is not None:
+            print("Saved:", output_file)
     finally:
         print("\n--- 7. Stop the Spark session ---")
         spark.stop()
@@ -264,8 +334,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Analysis payload for the prepared remote spark-submit runtime."
+    )
+    parser.add_argument(
+        "--activity", type=int, choices=sorted(ACTIVITY_NAMES),
+        help="Run one numbered learning activity; omit for the full analysis.",
+    )
+    args = parser.parse_args()
     try:
-        main()
+        main(activity=args.activity)
     except KeyboardInterrupt:
         print("\nAnalysis interrupted. Report any connection problems to the organiser.",
               file=sys.stderr)

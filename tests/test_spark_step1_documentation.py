@@ -18,7 +18,7 @@ class Step1DocumentationTests(unittest.TestCase):
     def setUp(self):
         self.notebook = json.loads((BASE / '01_spark_basics.ipynb').read_text())
         self.docs = {
-            'guide': (BASE / 'STEP1-REMOTE.md').read_text(),
+            'guide': (BASE / 'STEP1-DIRECT-SUBMISSION.md').read_text(),
             'readme': (BASE / 'README.md').read_text().split('## Prepared connection — Step 2')[0],
             'instructions': (BASE / 'participants-instructions.md').read_text().split('## Step 2 — Spark through Livy')[0],
             'notebook': '\n'.join(''.join(c['source']) for c in self.notebook['cells']),
@@ -26,14 +26,59 @@ class Step1DocumentationTests(unittest.TestCase):
         }
 
     def test_step1_notebook_remains_markdown_only(self):
-        self.assertEqual(len(self.notebook['cells']), 9)
+        self.assertEqual(len(self.notebook['cells']), 18)
         self.assertTrue(all(c['cell_type'] == 'markdown' for c in self.notebook['cells']))
+
+    def test_notebook_contains_five_guided_terminal_activities(self):
+        cells = self.notebook['cells']
+        for activity in range(1, 6):
+            with self.subTest(activity=activity):
+                activity_cells = [
+                    cell for cell in cells
+                    if cell.get('id') == f'step1-activity{activity}'
+                ]
+                self.assertEqual(len(activity_cells), 1)
+                text = ''.join(activity_cells[0]['source'])
+                self.assertIn(f'## Activity {activity} —', text)
+                self.assertIn('### Predict', text)
+                self.assertIn('### Copy to the terminal', text)
+                self.assertIn('### Observe', text)
+                self.assertIn('```python', text)
+                self.assertEqual(
+                    text.count(f'python3 spark_direct_submit.py analyse --activity {activity}'),
+                    1,
+                )
+                answer_cells = [
+                    cell for cell in cells
+                    if cell.get('id') == f'step1-activity{activity}-answers'
+                ]
+                self.assertEqual(len(answer_cells), 1)
+                self.assertEqual(answer_cells[0]['cell_type'], 'markdown')
+                self.assertIn('### Your answers', ''.join(answer_cells[0]['source']))
+
+    def test_entry_guides_direct_participants_to_numbered_activities(self):
+        from pathlib import Path
+        base = Path(__file__).resolve().parents[1] / 'workshop_assets/big-data/spark/beginner'
+        for name in ('README.md', 'participants-instructions.md'):
+            with self.subTest(document=name):
+                text = (base / name).read_text()
+                normalised = ' '.join(text.lower().split())
+                self.assertIn('follow the five numbered activities', normalised)
+                self.assertIn('read → predict → run → observe → record → reflect', normalised)
+                self.assertIn('optional organiser-requested reference', normalised)
+                self.assertIn('python3 spark_direct_submit.py analyse --activity', text)
+        participant_text = (base / 'participants-instructions.md').read_text()
+        for activity in range(1, 6):
+            self.assertEqual(
+                participant_text.count(f'python3 spark_direct_submit.py analyse --activity {activity}'),
+                1,
+            )
 
     def test_all_step1_documents_use_existing_launcher_commands(self):
         for name, text in self.docs.items():
             with self.subTest(document=name):
-                self.assertIn('python3 spark_remote.py test', text)
-                self.assertIn('python3 spark_remote.py analyse', text)
+                self.assertIn('python3 spark_direct_submit.py test', text)
+                self.assertIn('python3 spark_direct_submit.py analyse', text)
 
     def test_no_document_claims_participant_execution_is_validated(self):
         for name, text in self.docs.items():
@@ -52,7 +97,7 @@ class Step1DocumentationTests(unittest.TestCase):
                 self.assertIn('~/.ssh/spark-direct/', self.docs[name])
 
     def test_launcher_declares_documented_subcommands(self):
-        tree = ast.parse((BASE / 'spark_remote.py').read_text())
+        tree = ast.parse((BASE / 'spark_direct_submit.py').read_text())
         commands = {
             node.args[0].value for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -63,7 +108,7 @@ class Step1DocumentationTests(unittest.TestCase):
 
     def test_documented_remote_command_bounds_match_launcher(self):
         # Evaluate ONLY the pure command-string builders, not launcher main/imports.
-        tree = ast.parse((BASE / 'spark_remote.py').read_text())
+        tree = ast.parse((BASE / 'spark_direct_submit.py').read_text())
         builders = [node for node in tree.body if isinstance(node, ast.FunctionDef)
                     and node.name in ('sparkpi_command', 'analysis_command')]
         self.assertEqual(len(builders), 2)

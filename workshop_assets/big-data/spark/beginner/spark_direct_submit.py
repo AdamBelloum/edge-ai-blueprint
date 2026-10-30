@@ -3,8 +3,14 @@
 
 Use the organiser-prepared Python environment; do not install software here.
 From the prepared participant workspace:
-    python3 spark_remote.py test
-    python3 spark_remote.py analyse
+    python3 spark_direct_submit.py test
+    python3 spark_direct_submit.py analyse
+    python3 spark_direct_submit.py analyse --activity 1
+
+Activities: 1=schema/count, 2=selection, 3=filter, 4=aggregation, 5=export.
+Each activity is a separate submission with its own analysis session cleanup.
+Only full analysis/activity 5 retrieves the bounded preview. Use the supplied
+updated analysis payload; custom payloads must implement any selected activity.
 
 Credentials default to ~/.ssh/spark-direct/login_key and known_hosts.
 The endpoint defaults to the single organiser-pinned known_hosts record.
@@ -44,8 +50,12 @@ def sparkpi_command():
     )
 
 
-def analysis_command(filename):
-    return (
+def analysis_command(filename, activity=None):
+    if activity is not None and (
+        type(activity) is not int or activity not in range(1, 6)
+    ):
+        raise ValueError('Activity must be an integer from 1 to 5.')
+    command = (
         'set -eu; cd /home/workshop/work; '
         ': "${SPARK_MASTER_URL:?Missing organiser SPARK_MASTER_URL}"; '
         ': "${SPARK_DRIVER_HOST:?Missing organiser SPARK_DRIVER_HOST}"; '
@@ -60,6 +70,9 @@ def analysis_command(filename):
         '--conf spark.driver.bindAddress=0.0.0.0 '
         + shlex.quote(filename)
     )
+    if activity is not None:
+        command += ' ' + shlex.join(['--activity', str(activity)])
+    return command
 
 
 def resolve_endpoint(args, parser, client):
@@ -99,10 +112,14 @@ def main():
     run = sub.add_parser('run', help='Run the visible command after -- in the client workspace')
     run.add_argument('command', nargs=argparse.REMAINDER)
     sub.add_parser('test', help='Submit SparkPi to the prepared cluster')
-    analyse = sub.add_parser('analyse', help='Run the existing bank analysis')
+    analyse = sub.add_parser('analyse', help='Run full bank analysis or one learning activity')
     analyse.add_argument(
         'local', type=Path, nargs='?',
         default=Path(__file__).resolve().with_name('01_spark_basics.py'),
+    )
+    analyse.add_argument(
+        '--activity', type=int, choices=range(1, 6),
+        help='Run one independent activity (1-5); omit for the full analysis.',
     )
     args = p.parse_args()
     if not args.key.is_file() or args.key.stat().st_mode & 0o077:
@@ -137,7 +154,7 @@ def main():
             if args.operation == 'test':
                 remote = sparkpi_command()
             elif args.operation == 'analyse':
-                remote = analysis_command(args.local.name)
+                remote = analysis_command(args.local.name, activity=args.activity)
             else:
                 cmd = args.command
                 if cmd and cmd[0] == '--':
@@ -161,7 +178,10 @@ def main():
                     time.sleep(0.05)
                 status = channel.recv_exit_status()
                 print('Remote exit status:', status, flush=True)
-                if status == 0 and args.operation == 'analyse':
+                # Only full analysis/activity 5 produces a preview. Do not
+                # retrieve an older shared preview after activities 1-4.
+                if (status == 0 and args.operation == 'analyse'
+                        and args.activity in (None, 5)):
                     output_dir = (
                         args.local.resolve().parent / 'outputs'
                         / ('remote-' + uuid.uuid4().hex[:12])

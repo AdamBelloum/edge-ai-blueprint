@@ -18,7 +18,7 @@ The tested path was:
 
 ```text
 JupyterHub participant pod
-  → spark_remote.py
+  → spark_direct_submit.py
   → SSH to worker public IP, TCP 2222
   → Docker port forwarding to Spark client container
   → Spark driver in the client container
@@ -58,7 +58,7 @@ These values were observed during this incident. Re-discover them for a new coho
 | Participant | `group_01` |
 | Participant pod | `jupyter-group-01---fb8bc378` |
 | Notebook container | `notebook` |
-| Launcher | `/home/jovyan/Big-Data/Spark/spark_remote.py` |
+| Launcher | `/home/jovyan/Big-Data/Spark/spark_direct_submit.py` |
 | Assigned worker alias | `tier2-worker-1` |
 | Assigned Kubernetes node / worker FQDN | `ab-02.lab.uvalight.net` |
 | SSH public endpoint | `145.100.135.172:2222` |
@@ -209,7 +209,7 @@ If credentials are absent, use the organiser's protected delivery mechanism. The
 ```bash
 ansible -v -i inventories/workshop/tier2/hosts.ini tier2-server \
   -b -m ansible.builtin.command \
-  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_remote.py run -- printenv SPARK_HOME SPARK_MASTER_URL SPARK_DRIVER_HOST SPARK_DATA_PATH'
+  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_direct_submit.py run -- printenv SPARK_HOME SPARK_MASTER_URL SPARK_DRIVER_HOST SPARK_DATA_PATH'
 ```
 
 The successful incident output was:
@@ -315,7 +315,7 @@ Inspect the prepared launcher's supported interface if it differs from the incid
 ```bash
 ansible -v -i inventories/workshop/tier2/hosts.ini tier2-server \
   -b -m ansible.builtin.command \
-  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_remote.py --help'
+  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_direct_submit.py --help'
 ```
 
 The recorded launcher supported `put`, `get`, `run`, `test` and `analyse`.
@@ -325,7 +325,7 @@ The recorded launcher supported `put`, `get`, `run`, `test` and `analyse`.
 ```bash
 ansible -v -i inventories/workshop/tier2/hosts.ini tier2-server \
   -b -m ansible.builtin.command \
-  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_remote.py test'
+  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_direct_submit.py test'
 ```
 
 The incident evidence included:
@@ -350,7 +350,7 @@ This was one remote executor in the assigned VM's Spark deployment. It does not 
 ```bash
 ansible -v -i inventories/workshop/tier2/hosts.ini tier2-server \
   -b -m ansible.builtin.command \
-  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_remote.py analyse'
+  -a 'k3s kubectl -n digitafrica exec jupyter-group-01---fb8bc378 -c notebook -- python /home/jovyan/Big-Data/Spark/spark_direct_submit.py analyse'
 ```
 
 This invokes the existing bank-analysis workflow. Its outcome was not available in the recorded troubleshooting session.

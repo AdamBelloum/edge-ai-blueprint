@@ -120,7 +120,14 @@ class SeedTests(unittest.TestCase):
 
 
     def test_observed_extra_seed_paths_are_removed_with_current_bundle(self):
-        self.assertEqual(module.LEGACY_FILES, {"01-spark-beginner.ipynb", "data-analytics.py"})
+        # Populate the two renamed-away assets in this temporary seed fixture.
+        # The existing removal assertions below must cover every legacy file.
+        for name in ("STEP1-REMOTE.md", "spark_remote.py"):
+            (self.root / name).write_text("legacy Step 1 fixture\n")
+        self.assertEqual(module.LEGACY_FILES, {
+            "01-spark-beginner.ipynb", "data-analytics.py",
+            "STEP1-REMOTE.md", "spark_remote.py",
+        })
         # setUp stages all allowed files, including the two observed extras.
         removed = self.plan().remove()
         for name in module.LEGACY_FILES:
@@ -140,10 +147,10 @@ class SeedTests(unittest.TestCase):
             if not line.startswith("        - "):
                 break
             published.add(line[len("        - "):].strip())
-        self.assertEqual(len(published), 10)
+        self.assertEqual(len(published), 11)
         self.assertEqual(module.FILES - module.LEGACY_FILES, published)
         self.assertTrue(module.LEGACY_FILES.isdisjoint(published))
-        self.assertTrue({"spark_remote.py", "STEP1-REMOTE.md"}.issubset(published))
+        self.assertTrue({"spark_direct_submit.py", "STEP1-DIRECT-SUBMISSION.md"}.issubset(published))
 
         template = (root / "roles/k8s_apps/templates/jhub-values.yaml.j2").read_text()
         spark_section = template.split("big_data_source=/seed/big-data/spark\n", 1)[1]
@@ -157,6 +164,14 @@ class SeedTests(unittest.TestCase):
         for filename in published:
             source = root / "workshop_assets/big-data/spark/beginner" / filename
             self.assertTrue(source.is_file(), str(source))
+
+    def test_previous_step1_filenames_are_cleanup_only(self):
+        previous = {"STEP1-REMOTE.md", "spark_remote.py"}
+        current = {"STEP1-DIRECT-SUBMISSION.md", "spark_direct_submit.py"}
+        self.assertTrue(previous.issubset(module.LEGACY_FILES))
+        self.assertTrue(previous.isdisjoint(module.FILES - module.LEGACY_FILES))
+        self.assertTrue(current.issubset(module.FILES - module.LEGACY_FILES))
+        self.assertTrue(current.isdisjoint(module.LEGACY_FILES))
 
     def test_extra_seed_symlink_cannot_touch_an_external_file(self):
         target = self.other / "source.csv"

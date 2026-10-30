@@ -6,7 +6,7 @@
 
 1. Read `README.md`.
 2. Open `01_spark_basics.ipynb` and read the Step 1 guide.
-3. Read `STEP1-REMOTE.md`; after organiser permission, use `python3 spark_remote.py test`, then `python3 spark_remote.py analyse` in the prepared terminal environment.
+3. Read `STEP1-DIRECT-SUBMISSION.md`; after organiser permission, run `python3 spark_direct_submit.py test`. After successful completion and approval, follow the five numbered activities in the notebook, one submission at a time.
 4. Check the results and cleanup before continuing.
 5. Open `02_spark_via_livy.ipynb` and read the Step 2 guide.
 6. Use the approved Step 2 terminal submission path and check its results and cleanup.
@@ -21,7 +21,7 @@ Do not install dependencies, manage Docker, change ports, guess settings, substi
 
 Open the assigned Spark workspace in JupyterLab. Confirm that both guides, both scripts and `data/Bank_Personal_Loan_Modelling.csv` are present. Open a terminal when the organiser confirms execution readiness.
 
-**The managed Step 1 commands are documented in `STEP1-REMOTE.md`, but actual participant execution remains unvalidated.** Use them only after organiser permission and confirmation of your prepared Python environment. Do not run the analysis script directly in JupyterLab. Step 2 still requires its own separately approved launch command.
+**The managed Step 1 commands are documented in `STEP1-DIRECT-SUBMISSION.md`, but actual participant execution remains unvalidated.** Use them only after organiser permission and confirmation of your prepared Python environment. Do not run the analysis script directly in JupyterLab. Step 2 still requires its own separately approved launch command.
 
 Run one exercise at a time. After interruption or uncertain cleanup, ask the organiser to inspect the application/session before retrying.
 
@@ -29,16 +29,41 @@ Run one exercise at a time. After interruption or uncertain cleanup, ask the org
 
 ### Read, submit and observe
 
-Read `01_spark_basics.ipynb` for the analysis explanation and `STEP1-REMOTE.md`
-for the current launch procedure. The notebook is Markdown-only. In a terminal:
+Use `01_spark_basics.ipynb` as the guided learning sequence and
+`STEP1-DIRECT-SUBMISSION.md` for operational access and safety instructions.
+The notebook is Markdown-only; do not execute its displayed Python snippets
+in a notebook kernel. After organiser permission, use the prepared terminal:
 
 ```bash
 cd ~/Big-Data/Spark
-# Submit only after organiser permission; run one command at a time.
-python3 spark_remote.py test
-# Continue only after the test has finished successfully and analysis is approved.
-python3 spark_remote.py analyse
+python3 spark_direct_submit.py test
 ```
+
+After successful test completion and organiser approval, **follow the five
+numbered activities** in order. For each one:
+**read → predict → run → observe → record → reflect**.
+Copy only the current activity's command, wait for completion, then return to
+the notebook to record your answers before continuing. Do not paste batches.
+
+| Activity | Command to copy individually |
+|---|---|
+| 1 — Load and inspect | `python3 spark_direct_submit.py analyse --activity 1` |
+| 2 — Select columns | `python3 spark_direct_submit.py analyse --activity 2` |
+| 3 — Filter rows | `python3 spark_direct_submit.py analyse --activity 3` |
+| 4 — Count categories | `python3 spark_direct_submit.py analyse --activity 4` |
+| 5 — Export and retrieve | `python3 spark_direct_submit.py analyse --activity 5` |
+
+Each activity is an independent application with its own preparation and session
+cleanup attempt. No live DataFrame is retained between submissions. Activities
+1–4 do not write or download a preview. For activity 5, check execution completion
+and local preview retrieval separately. An older preview does not prove success.
+After an error, interruption or uncertain cleanup, stop and request organiser
+inspection before another submission.
+
+The full `python3 spark_direct_submit.py analyse` command remains an
+**optional organiser-requested reference**, not an additional required
+submission in the guided exercise. It runs all original analysis stages and
+downloads a bounded preview.
 
 The launcher uses your group's managed credentials under `~/.ssh/spark-direct/`
 and verifies the organiser-pinned SSH host key. Do not create an `.access`
