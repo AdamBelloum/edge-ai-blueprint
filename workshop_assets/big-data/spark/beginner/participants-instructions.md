@@ -9,7 +9,7 @@
 3. Read `STEP1-DIRECT-SUBMISSION.md`; after organiser permission, run `python3 spark_direct_submit.py test`. After successful completion and approval, follow the five numbered activities in the notebook, one submission at a time.
 4. Check the results and cleanup before continuing.
 5. Open `02_spark_via_livy.ipynb` and read the Step 2 guide.
-6. Use the approved Step 2 terminal submission path and check its results and cleanup.
+6. After separate Step 2 approval, follow its five numbered activities one command at a time; record predictions, observations and reflection, then check results and owned-session cleanup.
 
 Both notebooks contain **Markdown cells only**. They serve as participant manuals. There are no code cells to execute, no required kernel selection and no notebook/script alternatives to choose between. The scripts perform the exercises described by the guides.
 
@@ -132,36 +132,108 @@ cleanup. Do not continue to Step 2 until its separate launch path is approved.
 
 ## Step 2 — Spark through Livy
 
-### Read, submit and understand the new path
+### Read, predict, submit and reflect
 
-After Step 1 cleanup, read `02_spark_via_livy.ipynb`. Use the organiser's exact approved terminal command for the Step 2 analysis or bounded wrapper. The guide contains no imports or executable statements.
+Complete Step 1 and resolve its cleanup first. Wait for **separate Step 2 organiser
+approval**, then use matching updated copies of `02_spark_via_livy.ipynb`,
+`02_spark_via_livy.py` and `spark_livy_access.py`. The notebook is Markdown-only;
+do not execute its displayed Python snippets in a kernel.
 
-The prepared client sends requests over HTTP; the driver runs on the Livy side and executors run on Spark workers. Run `python 02_spark_via_livy.py` with the organiser-prepared interpreter. With neither Livy variable set, it automatically uses the managed group SSH credentials to open loopback-only forwarding and verify the supplied CSV on the driver and an executor. No manual tunnel or exported Livy settings are needed. Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain supported; partial overrides are rejected. Do not reuse Step 1 callback settings or guess addresses.
+In the prepared JupyterLab terminal, use `~/Big-Data/Spark`. Follow the notebook's
+**five numbered activities**, using **read → predict → run → observe → record →
+reflect**. Copy one command, wait for completion, record answers, and only then
+continue. Do not paste batches.
 
-The current helper assumes approved access without additional API authentication. JupyterHub authentication does not itself secure Livy. Do not expose the service publicly or disable TLS verification.
+| Activity | Command to copy individually |
+|---|---|
+| 1 — Load and inspect | `python3 02_spark_via_livy.py --activity 1` |
+| 2 — Select columns | `python3 02_spark_via_livy.py --activity 2` |
+| 3 — Filter rows | `python3 02_spark_via_livy.py --activity 3` |
+| 4 — Count categories | `python3 02_spark_via_livy.py --activity 4` |
+| 5 — Export and retrieve | `python3 02_spark_via_livy.py --activity 5` |
 
-### Observe session readiness and results
+The no-option `python3 02_spark_via_livy.py` command remains an **optional
+organiser-requested reference**, not an additional required submission. It runs
+the original full analysis and preview export in one owned session.
+**Guided participant execution remains unvalidated.**
 
-1. Preview the local CSV.
-2. Create a PySpark session and wait until it is ready.
-3. Submit the read, filter and grouped-count activities.
-4. Retrieve output using returned session and statement IDs.
-5. Transfer at most ten filtered rows to the local Step 2 preview.
-6. Request deletion of this exercise's session.
+### Prepared access and independent sessions
 
-Creation and execution are asynchronous. Helpers poll with bounded waits and report errors. Keep the printed session ID and assigned service for reporting; IDs are local to each Livy service. Do not assume zero or use another participant's session ID.
+The terminal runs the HTTP client; the driver runs on the Livy side and executors
+run in the assigned VM's worker. With neither Livy override supplied, the existing
+helper uses `~/.ssh/spark-direct/login_key` and `known_hosts` for managed,
+loopback-only SSH forwarding. It verifies the supplied CSV's SHA-256 on the driver
+and one executor before analysis. No manual tunnel, exported settings or software
+installation is needed.
 
-Compare the schema and counts with Step 1 for the same snapshot. Preview ordering need not match. Both organiser-controlled Tier-2 Livy tests returned the counts listed above.
+Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain
+supported; partial overrides fail. That explicit path does not perform automatic
+managed dataset verification and needs organiser validation. Participants must
+not set overrides, reuse Step 1 callback settings, or guess addresses.
+JupyterHub authentication does not itself secure Livy: do not expose the service,
+disable TLS checks, replace host pins, or display or exchange group credentials.
 
-### Output and cleanup limits
+Each activity command owns a **fresh Livy session** and repeats required input
+preparation. Variables persist between its statements, not between commands.
+Activity 5 recreates the filter rather than reusing activity 3's session.
+**One active submission per group; take turns.** There is no client concurrency
+lock, and separate session IDs do not prove concurrent capacity.
 
-The script writes `outputs/02_filtered_preview.csv` relative to its own directory. Rerunning replaces this preview, not Step 1's output or the source CSV. Follow the approved result retrieval instructions.
+### Observe readiness, results and completion
 
-The standalone script attempts session deletion in a `finally` block after obtaining an ID. `Session deletion requested; cluster containers remain running.` means a request was accepted, not that teardown has finished.
+Session creation and statement execution are asynchronous. The client uses the
+returned IDs, waits for an idle session, then polls each statement's result.
+Record the printed session ID, assigned service, Spark version/master, selected
+activity output and process exit status. IDs are scoped to the assigned Livy
+service; never assume zero or reuse another participant's ID.
 
-The tested organiser runner additionally applies explicit session resource limits and checks session disappearance, application inactivity and owned-client removal. The standalone script does not perform those same resource and teardown checks. Do not bypass the organiser-approved launch path.
+Compare the schema, selected-record count, strict age filter and raw category
+counts with Step 1 for the same snapshot. Reference results are in the notebook
+and README; preview ordering need not match. These references and earlier
+organiser tests are not proof of a successful new participant activity.
 
-If creation times out without returning an ID, an orphan session may exist. Ask the organiser to inspect it before retrying. Closing the terminal, notebook or JupyterHub server does not guarantee remote session deletion. Never delete other sessions or stop shared containers.
+For normal completion, check both:
+
+- `Owned-session removal confirmed; cluster containers remain running.`
+- `Analysis completed successfully; temporary managed forwarding has closed.`
+
+Immediately after the command, `echo $?` should report zero. In explicit-override
+mode there is no temporary forwarding, although the existing final message still
+mentions it. Activities 1–4 do **not** export a preview or print `Saved:`.
+
+### Output and cleanup evidence
+
+Only activity 5 or full analysis collects at most ten filtered rows on the
+Livy-side driver, transfers bounded JSON over HTTP, and writes the participant-
+local `outputs/02_filtered_preview.csv`. Check the printed `Saved:` path, the
+`Age,Income,Family` header and at most ten data rows. An empty filter produces
+only the header. This is not a full distributed CSV export; keep the row limit.
+
+An exporting rerun replaces the Step 2 preview, not Step 1's unique downloads or
+the source CSV. Retain a needed result before rerunning. A wrapper that runs in a
+separate client container may require additional organiser-approved retrieval.
+An older file is not evidence of current success. Report transfer/write failures
+and cleanup status rather than automatically resubmitting.
+
+After obtaining a valid ID, the client attempts deletion of **that owned session
+only** in a `finally` block. It polls GET for that same service and ID until
+**HTTP 404** before reporting removal. An accepted DELETE alone is insufficient.
+HTTP 404 confirms session-resource disappearance, not independent verification
+that all Spark applications or executors have terminated. Shared containers
+remain running; organiser application/worker checks are separate.
+
+The participant client retains its existing `{'kind': 'pyspark'}` creation
+payload; this guided change adds no resource limits. The organiser runner's
+explicit bounds and independent application/owned-client checks do not transfer
+automatically to this launch path. Do not bypass organiser approval.
+
+If creation times out without returning an ID, a session may still exist.
+After lost responses, interruption, timeouts, errors or unconfirmed cleanup,
+**stop** and report the activity, failing stage, session ID if available, assigned
+service, exit status and relevant paths. Closing the terminal, notebook or
+JupyterHub server does not guarantee remote deletion. Never guess an ID, delete
+other sessions, stop shared containers, expose secrets, or retry while cleanup
+is unresolved.
 
 ## Troubleshooting
 

@@ -1,31 +1,39 @@
 #!/usr/bin/env python3
-"""Exercise 2 — bank-loan analysis through pre-deployed Livy.
+"""Step 2 — guided bank-loan activities through pre-deployed Livy.
 
-This is the terminal alternative to 02_spark_via_livy.ipynb, NOT an additional
-exercise or an advanced solution. Choose either interface. Complete Exercise 1
-first and stop its Spark session before proceeding.
+Read 02_spark_via_livy.ipynb, record predictions, then copy one authorised
+activity command into the prepared JupyterLab terminal:
+    python3 02_spark_via_livy.py --activity 1
+Use activities 1 through 5 separately. Do not execute notebook snippets.
+The no-option full analysis remains an optional organiser-requested reference.
 
-Use the organiser-prepared interpreter:
-    python 02_spark_via_livy.py
+Each command owns a new Livy session; variables do not survive between commands.
+Only activity 5 or full analysis exports outputs/02_filtered_preview.csv.
+An exporting rerun replaces that participant-local preview; retain it first
+if needed. Activities 1–4 neither export nor establish freshness of old files.
 
-With neither LIVY_URL nor LIVY_DATA_PATH set, the shipped access helper uses
-managed SSH credentials to open temporary loopback-only Livy forwarding.
-It verifies the supplied CSV bytes on the driver and an executor before
-analysis. No manual tunnel, Livy variables or software installation is needed.
+With neither LIVY_URL nor LIVY_DATA_PATH supplied, the existing access helper
+uses group credentials for temporary loopback-only SSH forwarding and verifies
+CSV bytes on the driver and one executor. Complete explicit organiser settings
+remain supported; partial overrides fail. Explicit paths remain organiser-
+validated. Participants do not configure endpoints or install software.
 
-Complete explicit organiser LIVY_URL and LIVY_DATA_PATH overrides remain
-supported. Partial overrides fail; explicit paths remain organiser-validated.
+The client does not install software, manage containers or create local Spark.
+Session creation still uses the existing {'kind': 'pyspark'} payload; this change
+adds no resource limits or runtime configuration. Step 2 needs separate organiser
+approval. One active submission per group; no client concurrency lock exists.
 
-This client creates/deletes its own Livy session, not infrastructure. It does
-not install software, start containers or create a local SparkSession. Livy
-must already be configured for the assigned Spark cluster. This simple client
-assumes organiser-approved network access without additional API authentication;
-do not expose an unauthenticated Livy service publicly.
+Cleanup deletes only the returned owned session ID and polls for HTTP 404.
+This confirms session-resource disappearance, not independent verification of
+all Spark application/executor termination. Temporary forwarding closes on exit;
+closing a terminal does not prove remote cleanup. Stop after errors or uncertain
+completion and report the session ID and assigned service, never private keys.
 
-Pilot status: this new client requires live validation against the deployed
-Livy service. Exercise 1's validation is not evidence that Exercise 2 works.
+Pilot status: guided participant execution, capacity and failure-path recovery
+remain unvalidated. Source checks and organiser tests do not establish readiness.
 """
 
+import argparse
 import csv
 import json
 import os
@@ -138,7 +146,7 @@ def run_statement(base_url: str, session_id: int, code: str) -> str:
     raise TimeoutError(f"Livy statement {statement_id} exceeded {WAIT_TIMEOUT} seconds.")
 
 
-def analysis_steps(data_path: str):
+def _full_analysis_steps(data_path: str):
     """Exercise 1's read, filter and aggregation, executed in the Livy session."""
     return (
         ("3. Read CSV and inspect schema", f"""
@@ -159,6 +167,45 @@ print('Matching records:', result_df.count())
 df.groupBy('Personal Loan').count().orderBy('Personal Loan').show()
 """),
     )
+
+
+def analysis_steps(data_path: str, activity=None):
+    """Return the original full sequence or one activity with required input.
+
+    Activities are independent submissions. Statement variables persist only
+    inside the session owned by the current command. Only exporting commands
+    subsequently call export_preview(). No connection or Spark execution occurs
+    while constructing these statement strings.
+    """
+    if activity is not None and (type(activity) is not int or activity not in range(1, 6)):
+        raise ValueError("Activity must be an integer from 1 to 5.")
+    full = _full_analysis_steps(data_path)
+    if activity is None:
+        return full
+    if activity == 1:
+        return (full[0],)
+    load_code = f"""
+df = (spark.read.format('csv')
+      .option('header', 'true')
+      .option('inferSchema', 'true')
+      .load({data_path!r}))
+"""
+    if activity == 2:
+        heading = "Select Age, Income and Family"
+        code = """
+selected_df = df.select('Age', 'Income', 'Family')
+selected_df.show(10)
+print('Selected columns:', ', '.join(selected_df.columns))
+print('Records after column selection:', selected_df.count())
+"""
+    elif activity == 3:
+        heading, code = full[1]
+    elif activity == 4:
+        heading, code = full[2]
+    else:
+        heading = "Prepare the age-filtered bounded preview"
+        code = "result_df = df.select('Age', 'Income', 'Family').filter(df.Age > 30)\n"
+    return ((f"Load required input for activity {activity}", load_code), (heading, code))
 
 
 def export_preview(base_url: str, session_id: int, output_dir: Path) -> Path:
@@ -189,8 +236,12 @@ def export_preview(base_url: str, session_id: int, output_dir: Path) -> Path:
     return output_file
 
 
-def main() -> None:
+def main(activity=None) -> None:
     """Run the existing analysis with scoped access and owned-session cleanup."""
+    if activity is not None and (type(activity) is not int or activity not in range(1, 6)):
+        raise ValueError('Activity must be an integer from 1 to 5.')
+    if activity is not None:
+        print(f'Guided Livy activity: {activity}')
     from spark_livy_access import managed_connection, verify_dataset, delete_owned_session
     workspace = Path(__file__).resolve().parent
     local_csv = workspace / 'data' / 'Bank_Personal_Loan_Modelling.csv'
@@ -210,11 +261,12 @@ def main() -> None:
             data_path = settings['LIVY_DATA_PATH']
             if settings['VERIFY_DATASET']:
                 data_path = verify_dataset(run_statement, base_url, session_id, data_path, local_csv)
-            for heading, code in analysis_steps(data_path):
+            for heading, code in analysis_steps(data_path, activity=activity):
                 print(f'\n--- {heading} ---')
                 print(run_statement(base_url, session_id, code))
-            print('\n--- 6. Export a small local preview ---')
-            print('Saved:', export_preview(base_url, session_id, workspace / 'outputs'))
+            if activity in (None, 5):
+                print('\n--- 6. Export a small local preview ---')
+                print('Saved:', export_preview(base_url, session_id, workspace / 'outputs'))
         except BaseException as error:
             analysis_error = error
             raise
@@ -232,8 +284,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--activity", type=int, choices=range(1, 6),
+                        help="Run one guided activity; omit for full analysis.")
+    args = parser.parse_args()
     try:
-        main()
+        main(activity=args.activity)
     except KeyboardInterrupt:
         print("\nAnalysis interrupted. Report connection or cleanup problems to the organiser.",
               file=sys.stderr)
