@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "workshop_assets/big-data/spark/beginner/spark_remote.py"
+LAUNCHER = ROOT / "workshop_assets/big-data/spark/beginner/spark_direct_submit.py"
 
 
 class SparkRemoteLauncherTests(unittest.TestCase):

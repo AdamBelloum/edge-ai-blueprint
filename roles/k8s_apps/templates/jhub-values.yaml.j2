@@ -933,7 +933,7 @@ singleuser:
                   chmod 0755 "$big_data_workspace/$directory"
                 done
 
-                for filename in README.md STEP1-REMOTE.md spark_remote.py spark_livy_access.py 01_spark_basics.ipynb 01_spark_basics.py 02_spark_via_livy.ipynb 02_spark_via_livy.py participants-instructions.md data/Bank_Personal_Loan_Modelling.csv docs/spark-DA.pdf; do
+                for filename in README.md STEP1-DIRECT-SUBMISSION.md spark_direct_submit.py spark_livy_access.py 01_spark_basics.ipynb 01_spark_basics.py 02_spark_via_livy.ipynb 02_spark_via_livy.py participants-instructions.md data/Bank_Personal_Loan_Modelling.csv docs/spark-DA.pdf; do
                   copy_seed_file "$big_data_source/$filename" "$big_data_workspace/$filename" false
                 done
 

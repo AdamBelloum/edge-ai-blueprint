@@ -13,7 +13,7 @@ from teardown_directory import FLAGS, check_ancestor
 COMPONENTS = ("opt", "digitafrica", "big-data", "spark")
 ROOT = "/" + "/".join(COMPONENTS)
 FILES = {
-    "README.md", "STEP1-REMOTE.md", "spark_remote.py", "spark_livy_access.py",
+    "README.md", "STEP1-DIRECT-SUBMISSION.md", "spark_direct_submit.py", "spark_livy_access.py",
     "01_spark_basics.ipynb", "01_spark_basics.py",
     "02_spark_via_livy.ipynb", "02_spark_via_livy.py", "participants-instructions.md",
     "data/Bank_Personal_Loan_Modelling.csv", "docs/spark-DA.pdf",
@@ -21,7 +21,11 @@ FILES = {
 # Extra root-owned paths observed on both Tier-2 workers during live reset.
 # These are cleanup-only compatibility paths, NOT current publication inputs.
 # The fixed protected seed root and all existing safety checks still apply.
-LEGACY_FILES = {"01-spark-beginner.ipynb", "data-analytics.py"}
+# Previous Step 1 filenames remain cleanup-only compatibility entries.
+LEGACY_FILES = {
+    "01-spark-beginner.ipynb", "data-analytics.py",
+    "STEP1-REMOTE.md", "spark_remote.py",
+}
 FILES |= LEGACY_FILES
 DIRECTORIES = {"data", "docs"}
 

@@ -26,8 +26,8 @@
         mode: "0644"
       loop:
         - README.md
-        - STEP1-REMOTE.md
-        - spark_remote.py
+        - STEP1-DIRECT-SUBMISSION.md
+        - spark_direct_submit.py
         - spark_livy_access.py
         - 01_spark_basics.ipynb
         - 01_spark_basics.py
