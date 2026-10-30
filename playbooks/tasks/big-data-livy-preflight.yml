@@ -103,7 +103,9 @@
   ansible.builtin.assert:
     that:
       - (livy_build_worker_count | int) in [1, 2]
-      - (livy_build_compose.services | length) == (2 + (livy_build_worker_count | int))
+      # Only image building may coexist with staged participant service definitions.
+      # Other callers retain the original cold-pilot service-count restriction.
+      - (livy_build_compose.services.keys() | difference(['spark-client', 'spark-livy-access'] if (big_data_livy_build_only | default(false) | bool) else []) | length) == (2 + (livy_build_worker_count | int))
       - livy_build_compose.services['spark-livy'].image == big_data_livy_image
       - livy_build_compose.services['spark-livy'].build.context == (big_data_spark_runtime_host_path ~ '/livy-build')
       - livy_build_compose.services['spark-livy'].build.dockerfile == 'Dockerfile'

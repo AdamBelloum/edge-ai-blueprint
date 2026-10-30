@@ -13,7 +13,7 @@ from teardown_directory import FLAGS, check_ancestor
 COMPONENTS = ("opt", "digitafrica", "big-data", "spark")
 ROOT = "/" + "/".join(COMPONENTS)
 FILES = {
-    "README.md", "STEP1-REMOTE.md", "spark_remote.py",
+    "README.md", "STEP1-REMOTE.md", "spark_remote.py", "spark_livy_access.py",
     "01_spark_basics.ipynb", "01_spark_basics.py",
     "02_spark_via_livy.ipynb", "02_spark_via_livy.py", "participants-instructions.md",
     "data/Bank_Personal_Loan_Modelling.csv", "docs/spark-DA.pdf",

@@ -111,7 +111,7 @@ cleanup. Do not continue to Step 2 until its separate launch path is approved.
 
 After Step 1 cleanup, read `02_spark_via_livy.ipynb`. Use the organiser's exact approved terminal command for the Step 2 analysis or bounded wrapper. The guide contains no imports or executable statements.
 
-The prepared client sends requests over HTTP; the driver runs on the Livy side and executors run on Spark workers. The organiser supplies `LIVY_URL` and `LIVY_DATA_PATH`. Do not reuse Step 1 callback settings or guess addresses.
+The prepared client sends requests over HTTP; the driver runs on the Livy side and executors run on Spark workers. Run `python 02_spark_via_livy.py` with the organiser-prepared interpreter. With neither Livy variable set, it automatically uses the managed group SSH credentials to open loopback-only forwarding and verify the supplied CSV on the driver and an executor. No manual tunnel or exported Livy settings are needed. Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain supported; partial overrides are rejected. Do not reuse Step 1 callback settings or guess addresses.
 
 The current helper assumes approved access without additional API authentication. JupyterHub authentication does not itself secure Livy. Do not expose the service publicly or disable TLS verification.
 

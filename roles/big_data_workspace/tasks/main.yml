@@ -28,6 +28,7 @@
         - README.md
         - STEP1-REMOTE.md
         - spark_remote.py
+        - spark_livy_access.py
         - 01_spark_basics.ipynb
         - 01_spark_basics.py
         - 02_spark_via_livy.ipynb

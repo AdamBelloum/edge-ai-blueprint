@@ -59,7 +59,7 @@ unfinished. Publication and organiser-only tests do not establish readiness.
 
 ## Prepared connection — Step 2
 
-The organiser supplies `LIVY_URL` and `LIVY_DATA_PATH`. The remote path identifies the same CSV accessible to the Livy-side driver and executors; it need not equal the local path or Step 1's `SPARK_DATA_PATH`.
+Run `python 02_spark_via_livy.py` with the organiser-prepared interpreter. With neither Livy variable set, it automatically uses the managed group SSH credentials to open loopback-only forwarding and verify the supplied CSV on the driver and an executor. No manual tunnel or exported Livy settings are needed. Complete explicit organiser `LIVY_URL` and `LIVY_DATA_PATH` overrides remain supported; partial overrides are rejected. The remote path identifies the same CSV accessible to the Livy-side driver and executors; it need not equal the local path or Step 1's `SPARK_DATA_PATH`.
 
 The running client sends requests to prepared Livy. The driver runs on the Livy side, so Step 1's participant-driver callback settings are not reused. The Markdown guide does not import helpers or create a session.
 

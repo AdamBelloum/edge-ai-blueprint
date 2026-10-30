@@ -10,6 +10,8 @@
   tasks:
     - name: Validate the staged Livy build inputs
       ansible.builtin.import_tasks: tasks/big-data-livy-preflight.yml
+      vars:
+        big_data_livy_build_only: true
 
     - name: Check whether the local Livy image already exists
       ansible.builtin.command:
