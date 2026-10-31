@@ -1,0 +1,50 @@
+---
+# Internal playbook: invoke through the HPC cleanup helper.
+- name: Clean matching installation-created HPC staging files
+  hosts: "{{ hpc_cleanup_hosts }}"
+  become: true
+  gather_facts: false
+  strategy: linear
+  any_errors_fatal: true
+  vars:
+    hpc_cleanup_execute: false
+    hpc_cleanup_engine: "{{ playbook_dir }}/../scripts/workshops/hpc/cleanup-staged-files.py"
+  tasks:
+    - name: Refuse Ansible check mode which would skip real verification
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - hpc_cleanup_hosts | length > 0
+          - hpc_cleanup_jobs | length == 2
+        fail_msg: Use cleanup-staging.sh --check for a real read-only preflight.
+
+    - name: Preflight all target hosts before any staging deletion
+      ansible.builtin.script:
+        cmd: >-
+          {{ hpc_cleanup_engine | quote }}
+          --scope {{ item.scope | quote }}
+          --manifest-base64 {{ (item.manifest | to_json | b64encode) | quote }}
+          --check
+        executable: /usr/bin/python3
+      loop: "{{ hpc_cleanup_jobs }}"
+      loop_control:
+        label: "{{ item.scope }}"
+      when: inventory_hostname in item.hosts
+      changed_when: false
+
+    - name: Delete matching files and verify allowlisted files are absent
+      ansible.builtin.script:
+        cmd: >-
+          {{ hpc_cleanup_engine | quote }}
+          --scope {{ item.scope | quote }}
+          --manifest-base64 {{ (item.manifest | to_json | b64encode) | quote }}
+          --execute
+        executable: /usr/bin/python3
+      loop: "{{ hpc_cleanup_jobs }}"
+      loop_control:
+        label: "{{ item.scope }}"
+      when:
+        - hpc_cleanup_execute | bool
+        - inventory_hostname in item.hosts
+      register: hpc_cleanup_result
+      changed_when: "'removed 0 matching installed files' not in hpc_cleanup_result.stdout"

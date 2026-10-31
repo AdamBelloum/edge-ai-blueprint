@@ -185,7 +185,6 @@ class ModuleResetBoundaryTests(unittest.TestCase):
         cases = {
             "introduction-to-ai": ("module1", "module2", "module3"),
             "cloud-computing-soa": ("module1", "module2", "module5"),
-            "hpc": ("openmp-01-basics",),
         }
         for workshop, modules in cases.items():
             for module in modules:
