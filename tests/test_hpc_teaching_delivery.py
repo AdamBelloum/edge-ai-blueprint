@@ -82,12 +82,12 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
         )
         self.script = "set -eu\n" + render_shell(functions + block)
 
-    def seed(self, role="participant"):
+    def seed(self, role="participant", module="openmp-01-basics"):
         environment = dict(os.environ)
         environment.update(
             PATH=str(self.bin) + os.pathsep + environment.get("PATH", ""),
             workshop_type="hpc",
-            workshop_module="openmp-01-basics",
+            workshop_module=module,
             DIGITAFRICA_HPC_WORKSPACE_ROLE=role,
         )
         return subprocess.run(
@@ -120,7 +120,7 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
             if line.strip()
         ]
         self.assertEqual(startup_files, self.files)
-        self.assertEqual(len(self.files), 23)
+        self.assertEqual(len(self.files), 63)
         self.assertEqual(len(set(self.files)), len(self.files))
         self.assertTrue(all((ASSETS / name).is_file() for name in self.files))
         self.assertFalse(any(
@@ -130,7 +130,7 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
         tasks = (ROOT / "roles/hpc_workspace/tasks/main.yml").read_text()
         self.assertIn('loop: "{{ hpc_workspace_directories }}"', tasks)
         self.assertIn(
-            "'0755' if item == 'OpenMP/helpers/openmp_start' else '0644'",
+            "'0755' if item in ['OpenMP/helpers/openmp_start', 'MPI/helpers/mpi_start'] else '0644'",
             tasks,
         )
 
@@ -142,8 +142,13 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
                 (self.workspace / name).read_bytes(),
                 (self.source / name).read_bytes(),
             )
-        helper = self.workspace / "OpenMP/helpers/openmp_start"
-        self.assertEqual(helper.stat().st_mode & 0o777, 0o755)
+        for relative in (
+            "OpenMP/helpers/openmp_start",
+            "MPI/helpers/mpi_start",
+        ):
+            with self.subTest(helper=relative):
+                helper = self.workspace / relative
+                self.assertEqual(helper.stat().st_mode & 0o777, 0o755)
         self.assertTrue((self.workspace / "MPI").is_dir())
         self.assertTrue((self.workspace / "HPC_SEED_RECEIPT.txt").is_file())
         self.assertFalse((self.workspace / "runtime").exists())
@@ -156,10 +161,14 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
             "OpenMP/01-openmp-debugging.ipynb",
             "OpenMP/exercises/code1/code.c",
             "OpenMP/helpers/openmp_start",
+            "MPI/01-mpi-debugging.ipynb",
+            "MPI/exercises/code1/code.c",
+            "MPI/helpers/mpi_start",
         ):
             path = self.workspace / name
             path.write_bytes(path.read_bytes() + b"\nparticipant edit\n")
         (self.workspace / "OpenMP/my-notes.md").write_text("Keep my notes\n")
+        (self.workspace / "MPI/my-notes.md").write_text("Keep MPI notes\n")
         legacy = self.workspace / "openmp-01-basics/01-beginner"
         legacy.mkdir(parents=True)
         (legacy / "hello.c").write_text("Keep legacy work\n")
@@ -274,6 +283,62 @@ class HPCTeachingDeliveryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Exercise helper:", result.stdout)
         self.assertIn("Why is there only one thread?", result.stdout)
+
+
+    def test_mpi_selection_delivers_shared_workspace_and_preserves_edits(self):
+        result = self.seed(module="mpi-01-basics")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in self.files:
+            with self.subTest(file=name):
+                self.assertEqual(
+                    (self.workspace / name).read_bytes(),
+                    (self.source / name).read_bytes(),
+                )
+        for name in ("OpenMP/helpers/openmp_start", "MPI/helpers/mpi_start"):
+            self.assertEqual(
+                (self.workspace / name).stat().st_mode & 0o777, 0o755
+            )
+        code = self.workspace / "MPI/exercises/code7/code.c"
+        code.write_text("Participant correction\n")
+        (self.workspace / "MPI/my-notes.md").write_text("Keep MPI notes\n")
+        before = self.snapshot()
+        result = self.seed(module="mpi-01-basics")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, self.snapshot())
+        self.assertIn("preserving existing file", result.stdout)
+
+    def test_mpi_missing_source_fails_without_completion_receipt(self):
+        relative = "MPI/exercises/code7/solution.md"
+        existing = self.workspace / relative
+        existing.parent.mkdir(parents=True)
+        existing.write_text("Keep participant reference\n")
+        (self.source / relative).unlink()
+        result = self.seed(module="mpi-01-basics")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing required seed file", result.stderr)
+        self.assertEqual(existing.read_text(), "Keep participant reference\n")
+        self.assertFalse((self.workspace / "HPC_SEED_RECEIPT.txt").exists())
+
+    def test_mpi_manifest_covers_distributed_assets_and_matches_hashes(self):
+        module = ASSETS / "MPI"
+        manifest = json.loads((module / "source-manifest.json").read_text())
+        self.assertEqual(
+            manifest["source_revision"],
+            "297aaf15cda80e5ced209a7f0edeeb940f5713d5",
+        )
+        expected = {
+            name.removeprefix("MPI/")
+            for name in self.files if name.startswith("MPI/")
+        } - {"source-manifest.json"}
+        records = manifest["generated_sha256"]
+        self.assertEqual(set(records), expected)
+        self.assertEqual(len(records), 40)
+        for name, digest in records.items():
+            with self.subTest(file=name):
+                self.assertEqual(
+                    hashlib.sha256((module / name).read_bytes()).hexdigest(),
+                    digest,
+                )
 
     def test_current_seed_provenance_checksums_match(self):
         provenance = (ASSETS / "PROVENANCE.md").read_text()

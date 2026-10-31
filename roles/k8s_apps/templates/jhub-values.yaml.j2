@@ -720,7 +720,7 @@ singleuser:
           esac
 
           case "$workshop_module" in
-            none|module1|module2|module3|module5|spark|openmp-01-basics) ;;
+            none|module1|module2|module3|module5|spark|openmp-01-basics|mpi-01-basics) ;;
             *)
               echo "[seed] ERROR: unsupported workshop module: $workshop_module" >&2
               exit 1
@@ -728,7 +728,7 @@ singleuser:
           esac
 
           case "$workshop_type:$workshop_module" in
-            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module3|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics)
+            none:none|federated-learning:none|introduction-to-ai:module1|introduction-to-ai:module2|introduction-to-ai:module3|cloud-computing-soa:module1|cloud-computing-soa:module2|cloud-computing-soa:module3|cloud-computing-soa:module5|big-data:spark|hpc:openmp-01-basics|hpc:mpi-01-basics)
               ;;
             *)
               echo "[seed] ERROR: unsupported workshop type/module combination: $workshop_type/$workshop_module" >&2
@@ -865,7 +865,9 @@ singleuser:
 
           # HPC: explicit teaching-file allowlist; preserve participant edits.
           # Do not copy runtime definitions into the teaching workspace.
-          if [ "$workshop_type" = "hpc" ] && [ "$workshop_module" = "openmp-01-basics" ]; then
+          if [ "$workshop_type" = "hpc" ] &&
+             { [ "$workshop_module" = "openmp-01-basics" ] ||
+               [ "$workshop_module" = "mpi-01-basics" ]; }; then
             case "${{ '{{' }}DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
               administrator)
                 echo "[seed] Administrator: participant HPC workspace skipped."
@@ -883,7 +885,18 @@ singleuser:
                   "$hpc_workspace/OpenMP/exercises/code2" \
                   "$hpc_workspace/OpenMP/exercises/code3" \
                   "$hpc_workspace/OpenMP/exercises/code4" \
-                  "$hpc_workspace/MPI"; do
+                  "$hpc_workspace/MPI" \
+                  "$hpc_workspace/MPI/helpers" \
+                  "$hpc_workspace/MPI/exercises" \
+                  "$hpc_workspace/MPI/exercises/hello1" \
+                  "$hpc_workspace/MPI/exercises/hello2" \
+                  "$hpc_workspace/MPI/exercises/code1" \
+                  "$hpc_workspace/MPI/exercises/code2" \
+                  "$hpc_workspace/MPI/exercises/code3" \
+                  "$hpc_workspace/MPI/exercises/code4" \
+                  "$hpc_workspace/MPI/exercises/code5" \
+                  "$hpc_workspace/MPI/exercises/code6" \
+                  "$hpc_workspace/MPI/exercises/code7"; do
                   mkdir -p "$directory"
                   chown 1000:100 "$directory"
                   chmod 0755 "$directory"
@@ -912,17 +925,58 @@ singleuser:
                   OpenMP/exercises/code4/problem.md \
                   OpenMP/exercises/code4/solution.c \
                   OpenMP/exercises/code4/solution.md \
-                  MPI/README.md; do
+                  MPI/README.md \
+                  MPI/01-mpi-debugging.ipynb \
+                  MPI/ADAPTATION.md \
+                  MPI/source-manifest.json \
+                  MPI/helpers/mpi_start \
+                  MPI/exercises/hello1/code.c \
+                  MPI/exercises/hello1/problem.md \
+                  MPI/exercises/hello1/solution.c \
+                  MPI/exercises/hello1/solution.md \
+                  MPI/exercises/hello2/code.c \
+                  MPI/exercises/hello2/problem.md \
+                  MPI/exercises/hello2/solution.c \
+                  MPI/exercises/hello2/solution.md \
+                  MPI/exercises/code1/code.c \
+                  MPI/exercises/code1/problem.md \
+                  MPI/exercises/code1/solution.c \
+                  MPI/exercises/code1/solution.md \
+                  MPI/exercises/code2/code.c \
+                  MPI/exercises/code2/problem.md \
+                  MPI/exercises/code2/solution.c \
+                  MPI/exercises/code2/solution.md \
+                  MPI/exercises/code3/code.c \
+                  MPI/exercises/code3/problem.md \
+                  MPI/exercises/code3/solution.c \
+                  MPI/exercises/code3/solution.md \
+                  MPI/exercises/code4/code.c \
+                  MPI/exercises/code4/problem.md \
+                  MPI/exercises/code4/solution.c \
+                  MPI/exercises/code4/solution.md \
+                  MPI/exercises/code5/code.c \
+                  MPI/exercises/code5/problem.md \
+                  MPI/exercises/code5/solution.c \
+                  MPI/exercises/code5/solution.md \
+                  MPI/exercises/code6/code.c \
+                  MPI/exercises/code6/problem.md \
+                  MPI/exercises/code6/solution.c \
+                  MPI/exercises/code6/solution.md \
+                  MPI/exercises/code7/code.c \
+                  MPI/exercises/code7/problem.md \
+                  MPI/exercises/code7/solution.c \
+                  MPI/exercises/code7/solution.md; do
                   copy_seed_file "$hpc_source/$filename" "$hpc_workspace/$filename" false
                 done
 
                 # The generic copy helper sets 0644; this command must be executable.
                 chmod 0755 "$hpc_workspace/OpenMP/helpers/openmp_start"
+                chmod 0755 "$hpc_workspace/MPI/helpers/mpi_start"
 
                 # Delivery receipt only, not proof of runtime readiness.
                 write_receipt_if_absent \
                   "$hpc_workspace/HPC_SEED_RECEIPT.txt" \
-                  "OpenMP debugging notebook, exercises and references; MPI placeholder"
+                  "OpenMP and MPI debugging notebooks, exercises and references"
                 ;;
               *)
                 echo "[seed] ERROR: HPC source delivery is not enabled; reconcile workshop applications before participant startup." >&2

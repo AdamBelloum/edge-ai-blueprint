@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Display or run local MPI teaching exercises without modifying source files.
+
+Use --run only inside the organiser-authorised participant environment.
+This helper is not a sandbox and does not submit scheduler jobs.
+"""
+import argparse
+import os
+from pathlib import Path
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+
+
+# Intended layout: hello1/hello2 are introductory examples; code1-code7
+# are debugging assignments. Defaults match the reviewed source programs.
+PROCESS_COUNTS = {
+    "hello1": (2, (1, 2, 3, 4)),
+    "hello2": (4, (1, 2, 3, 4)),
+    "code1": (2, (2,)),
+    "code2": (2, (2,)),
+    "code3": (4, (4,)),
+    "code4": (4, (2, 3, 4)),
+    "code5": (2, (2,)),
+    "code6": (4, (4,)),
+    "code7": (2, (2, 3, 4)),
+}
+
+
+def bounded_integer(low, high):
+    def parse(value):
+        try:
+            number = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("must be an integer") from None
+        if not low <= number <= high:
+            raise argparse.ArgumentTypeError(f"must be between {low} and {high}")
+        return number
+    return parse
+
+
+def display(path):
+    if not path.is_file():
+        raise RuntimeError(f"Required exercise file is missing: {path}")
+    text = path.read_text(encoding="utf-8")
+    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+
+
+def terminate(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+
+
+def execute(command, *, cwd, timeout, env=None):
+    process = subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True)
+    try:
+        return process.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        terminate(process)
+        raise
+
+
+def shell_status(status):
+    return status if status >= 0 else 128 - status
+
+
+def prepared_tools():
+    prefix = Path.home() / ".local/share/digitafrica/runtime/hpc/environment"
+    receipt = prefix.parent / "environment.sha256"
+    if not receipt.is_file():
+        raise RuntimeError("Prepared HPC environment receipt is missing; ask the organiser.")
+    tools = [prefix / "bin/mpicc", prefix / "bin/mpirun"]
+    for tool in tools:
+        if not tool.is_file() or not os.access(tool, os.X_OK):
+            raise RuntimeError(f"Prepared MPI tool is unavailable: {tool}; ask the organiser.")
+    # Receipt presence is not proof of runtime readiness. Builds and runs
+    # remain necessary; do not install or fall back to a system MPI.
+    return tools
+
+
+def run_exercise(source, args):
+    if not source.is_file():
+        raise RuntimeError(f"Participant source file is missing: {source}")
+    if os.geteuid() == 0:
+        raise RuntimeError("Run MPI as the participant user, not as root.")
+    compiler, launcher = prepared_tools()
+    environment = dict(os.environ)
+    environment["PATH"] = str(compiler.parent) + os.pathsep + environment.get("PATH", "")
+    environment.pop("OMPI_ALLOW_RUN_AS_ROOT", None)
+    environment.pop("OMPI_ALLOW_RUN_AS_ROOT_CONFIRM", None)
+
+    with tempfile.TemporaryDirectory(prefix="digitafrica-mpi-") as temporary:
+        executable = Path(temporary) / "exercise"
+        command = [
+            str(compiler), "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra",
+            "-O0", str(source), "-o", str(executable), "-lm",
+        ]
+        print("[mpi_start] Compile: " + shlex.join(command), flush=True)
+        try:
+            status = execute(command, cwd=temporary, timeout=30, env=environment)
+        except subprocess.TimeoutExpired:
+            print("[mpi_start] Compilation timed out; nothing executed.", file=sys.stderr)
+            return 124
+        if status:
+            print("[mpi_start] Compilation failed; nothing executed.", file=sys.stderr)
+            return shell_status(status)
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError("Compiler did not produce an executable; nothing executed.")
+
+        command = [
+            str(launcher), "--host", "localhost", "--bind-to", "none",
+            "-np", str(args.processes), str(executable),
+        ]
+        print("[mpi_start] Local launch: " + shlex.join(command), flush=True)
+        print(
+            "[mpi_start] Use only organiser-authorised participant resources. "
+            "A successful exit does not prove MPI correctness.", flush=True,
+        )
+        for attempt in range(1, args.repeat + 1):
+            print(f"[mpi_start] Run {attempt}/{args.repeat}", flush=True)
+            try:
+                status = execute(command, cwd=temporary, timeout=args.timeout, env=environment)
+            except subprocess.TimeoutExpired:
+                print(
+                    "[mpi_start] Execution timed out; the local launcher process group "
+                    "was terminated. Check the exercise before treating this as an "
+                    "environment failure.", file=sys.stderr,
+                )
+                return 124
+            print(f"[mpi_start] Exit status: {status}", flush=True)
+            if status:
+                return shell_status(status)
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Display or run a local MPI exercise. Viewing never modifies files."
+    )
+    parser.add_argument("exercise", choices=tuple(PROCESS_COUNTS), help="hello1, hello2 or code1-code7")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--problem", action="store_true", help="display activity instructions")
+    action.add_argument("--solution", action="store_true", help="display reference code and explanation")
+    action.add_argument("--run", action="store_true", help="compile and run the current code.c")
+    parser.add_argument("--processes", type=bounded_integer(1, 4), default=None, help="local MPI processes (exercise-specific default)")
+    parser.add_argument("--repeat", type=bounded_integer(1, 20), default=None, help="execution repetitions (default: 1)")
+    parser.add_argument("--timeout", type=bounded_integer(1, 300), default=None, help="seconds per execution (default: 10)")
+    args = parser.parse_args(argv)
+    if not args.run and any(value is not None for value in (args.processes, args.repeat, args.timeout)):
+        parser.error("--processes, --repeat and --timeout require --run")
+    if args.run:
+        default, allowed = PROCESS_COUNTS[args.exercise]
+        args.processes = args.processes if args.processes is not None else default
+        if args.processes not in allowed:
+            parser.error(f"{args.exercise} requires a process count from: {', '.join(map(str, allowed))}")
+        args.repeat = args.repeat if args.repeat is not None else 1
+        args.timeout = args.timeout if args.timeout is not None else 10
+
+    root = Path(__file__).resolve().parent.parent
+    exercise = root / "exercises" / args.exercise
+    if not exercise.is_dir():
+        parser.error(f"Exercise is not available: {args.exercise}")
+    try:
+        if args.problem:
+            display(exercise / "problem.md")
+        elif args.solution:
+            for name in ("solution.c", "solution.md"):
+                if not (exercise / name).is_file():
+                    raise RuntimeError(f"Required solution file is missing: {exercise / name}")
+            display(exercise / "solution.c")
+            print("\n--- Solution explanation ---\n")
+            display(exercise / "solution.md")
+        elif args.run:
+            return run_exercise(exercise / "code.c", args)
+        else:
+            display(exercise / "code.c")
+    except KeyboardInterrupt:
+        print("\n[mpi_start] Interrupted; any active child process group was terminated.", file=sys.stderr)
+        return 130
+    except (OSError, RuntimeError, UnicodeError, ValueError) as error:
+        print(f"[mpi_start] ERROR: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

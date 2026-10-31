@@ -11,6 +11,17 @@ hpc_workspace_directories:
   - "OpenMP/exercises/code3"
   - "OpenMP/exercises/code4"
   - "MPI"
+  - "MPI/helpers"
+  - "MPI/exercises"
+  - "MPI/exercises/hello1"
+  - "MPI/exercises/hello2"
+  - "MPI/exercises/code1"
+  - "MPI/exercises/code2"
+  - "MPI/exercises/code3"
+  - "MPI/exercises/code4"
+  - "MPI/exercises/code5"
+  - "MPI/exercises/code6"
+  - "MPI/exercises/code7"
 hpc_workspace_files:
   - README.md
   - LICENSE
@@ -35,3 +46,43 @@ hpc_workspace_files:
   - OpenMP/exercises/code4/solution.c
   - OpenMP/exercises/code4/solution.md
   - MPI/README.md
+  - MPI/01-mpi-debugging.ipynb
+  - MPI/ADAPTATION.md
+  - MPI/source-manifest.json
+  - MPI/helpers/mpi_start
+  - MPI/exercises/hello1/code.c
+  - MPI/exercises/hello1/problem.md
+  - MPI/exercises/hello1/solution.c
+  - MPI/exercises/hello1/solution.md
+  - MPI/exercises/hello2/code.c
+  - MPI/exercises/hello2/problem.md
+  - MPI/exercises/hello2/solution.c
+  - MPI/exercises/hello2/solution.md
+  - MPI/exercises/code1/code.c
+  - MPI/exercises/code1/problem.md
+  - MPI/exercises/code1/solution.c
+  - MPI/exercises/code1/solution.md
+  - MPI/exercises/code2/code.c
+  - MPI/exercises/code2/problem.md
+  - MPI/exercises/code2/solution.c
+  - MPI/exercises/code2/solution.md
+  - MPI/exercises/code3/code.c
+  - MPI/exercises/code3/problem.md
+  - MPI/exercises/code3/solution.c
+  - MPI/exercises/code3/solution.md
+  - MPI/exercises/code4/code.c
+  - MPI/exercises/code4/problem.md
+  - MPI/exercises/code4/solution.c
+  - MPI/exercises/code4/solution.md
+  - MPI/exercises/code5/code.c
+  - MPI/exercises/code5/problem.md
+  - MPI/exercises/code5/solution.c
+  - MPI/exercises/code5/solution.md
+  - MPI/exercises/code6/code.c
+  - MPI/exercises/code6/problem.md
+  - MPI/exercises/code6/solution.c
+  - MPI/exercises/code6/solution.md
+  - MPI/exercises/code7/code.c
+  - MPI/exercises/code7/problem.md
+  - MPI/exercises/code7/solution.c
+  - MPI/exercises/code7/solution.md
