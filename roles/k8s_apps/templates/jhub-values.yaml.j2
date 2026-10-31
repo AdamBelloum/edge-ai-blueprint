@@ -866,8 +866,8 @@ singleuser:
           # HPC: explicit teaching-file allowlist; preserve participant edits.
           # Do not copy runtime definitions into the teaching workspace.
           if [ "$workshop_type" = "hpc" ] &&
-             { [ "$workshop_module" = "openmp-01-basics" ] ||
-               [ "$workshop_module" = "mpi-01-basics" ]; }; then
+             {{ '{{' }} [ "$workshop_module" = "openmp-01-basics" ] ||
+               [ "$workshop_module" = "mpi-01-basics" ]; {{ '}}' }}; then
             case "${{ '{{' }}DIGITAFRICA_HPC_WORKSPACE_ROLE:-disabled{{ '}}' }}" in
               administrator)
                 echo "[seed] Administrator: participant HPC workspace skipped."
