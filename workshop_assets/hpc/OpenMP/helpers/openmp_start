@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Display or run local OpenMP exercises without modifying source files."""
+import argparse
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+
+
+def bounded_integer(low, high):
+    def parse(value):
+        try:
+            number = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("must be an integer") from None
+        if not low <= number <= high:
+            raise argparse.ArgumentTypeError(
+                f"must be between {low} and {high}"
+            )
+        return number
+    return parse
+
+
+def display(path):
+    if not path.is_file():
+        raise RuntimeError(f"Required exercise file is missing: {path}")
+    text = path.read_text(encoding="utf-8")
+    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+
+
+def execute(command, *, cwd, timeout, env=None):
+    process = subprocess.Popen(
+        command, cwd=cwd, env=env, start_new_session=True
+    )
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        raise
+
+
+def shell_status(status):
+    return status if status >= 0 else 128 - status
+
+
+def run_exercise(source, args):
+    if not source.is_file():
+        raise RuntimeError(f"Participant source file is missing: {source}")
+
+    compiler = shlex.split(os.environ.get("CC", ""))
+    if not compiler:
+        raise RuntimeError(
+            "CC is not set. Activate the prepared HPC environment first."
+        )
+    if shutil.which(compiler[0]) is None:
+        raise RuntimeError(
+            f"Configured compiler is unavailable: {compiler[0]}"
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix="digitafrica-openmp-"
+    ) as temporary:
+        executable = Path(temporary) / "exercise"
+        command = compiler + [
+            "-std=c11", "-Wall", "-Wextra", "-O0", "-fopenmp",
+            str(source), "-o", str(executable), "-lm",
+        ]
+        print(
+            "[openmp_start] Compile: " + shlex.join(command),
+            flush=True,
+        )
+        try:
+            status = execute(command, cwd=temporary, timeout=30)
+        except subprocess.TimeoutExpired:
+            print(
+                "[openmp_start] Compilation timed out; nothing executed.",
+                file=sys.stderr,
+            )
+            return 124
+
+        if status:
+            print(
+                "[openmp_start] Compilation failed; nothing executed.",
+                file=sys.stderr,
+            )
+            return shell_status(status)
+
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError(
+                "Compiler did not produce an executable; nothing executed."
+            )
+
+        environment = dict(os.environ)
+        environment.update(
+            OMP_NUM_THREADS=str(args.threads),
+            OMP_DYNAMIC="FALSE",
+            OMP_THREAD_LIMIT=str(args.threads),
+        )
+        print(
+            f"[openmp_start] Requested threads: {args.threads}; "
+            "actual team size depends on the program and runtime.",
+            flush=True,
+        )
+        print(
+            "[openmp_start] A successful exit does not prove correctness "
+            "or absence of data races.",
+            flush=True,
+        )
+        for attempt in range(1, args.repeat + 1):
+            print(
+                f"[openmp_start] Run {attempt}/{args.repeat}",
+                flush=True,
+            )
+            try:
+                status = execute(
+                    [str(executable)], cwd=temporary,
+                    env=environment, timeout=args.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                print(
+                    "[openmp_start] Execution timed out.",
+                    file=sys.stderr,
+                )
+                return 124
+            print(
+                f"[openmp_start] Exit status: {status}",
+                flush=True,
+            )
+            if status:
+                return shell_status(status)
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description=(
+            "Display or run an OpenMP exercise. "
+            "Viewing never modifies participant files."
+        )
+    )
+    parser.add_argument("exercise", help="identifier, e.g. code1")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
+        "--problem", action="store_true",
+        help="display the problem description",
+    )
+    action.add_argument(
+        "--solution", action="store_true",
+        help="display reference code and explanation",
+    )
+    action.add_argument(
+        "--run", action="store_true",
+        help="compile and run the current participant code.c",
+    )
+    parser.add_argument(
+        "--threads", type=bounded_integer(1, 64), default=None,
+        help="requested OpenMP threads (default: 2)",
+    )
+    parser.add_argument(
+        "--repeat", type=bounded_integer(1, 20), default=None,
+        help="execution repetitions (default: 1)",
+    )
+    parser.add_argument(
+        "--timeout", type=bounded_integer(1, 300), default=None,
+        help="execution timeout in seconds per run (default: 10)",
+    )
+    args = parser.parse_args(argv)
+
+    if not re.fullmatch(r"code[1-9][0-9]*", args.exercise):
+        parser.error("exercise must be an identifier such as code1, not a path")
+    if not args.run and any(
+        value is not None
+        for value in (args.threads, args.repeat, args.timeout)
+    ):
+        parser.error("--threads, --repeat and --timeout require --run")
+
+    root = Path(__file__).resolve().parent.parent
+    exercise = root / "exercises" / args.exercise
+    if not exercise.is_dir():
+        parser.error(f"Exercise is not available: {args.exercise}")
+
+    try:
+        if args.problem:
+            display(exercise / "problem.md")
+        elif args.solution:
+            for name in ("solution.c", "solution.md"):
+                if not (exercise / name).is_file():
+                    raise RuntimeError(
+                        f"Required solution file is missing: {exercise / name}"
+                    )
+            display(exercise / "solution.c")
+            print("\n--- Solution explanation ---\n")
+            display(exercise / "solution.md")
+        elif args.run:
+            args.threads = args.threads if args.threads is not None else 2
+            args.repeat = args.repeat if args.repeat is not None else 1
+            args.timeout = args.timeout if args.timeout is not None else 10
+            return run_exercise(exercise / "code.c", args)
+        else:
+            display(exercise / "code.c")
+    except (OSError, RuntimeError, UnicodeError, ValueError) as error:
+        print(f"[openmp_start] ERROR: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

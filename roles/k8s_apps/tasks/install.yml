@@ -937,7 +937,7 @@
     )"
 
     case "$workshop_module" in
-      none|module1|module2|module3|module5|spark|openmp-01-basics)
+      none|module1|module2|module3|module5|spark|openmp-01-basics|mpi-01-basics)
         echo "preserved"
         exit 0
         ;;

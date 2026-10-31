@@ -136,7 +136,9 @@ class ParticipantScriptTests(unittest.TestCase):
         with patch.dict(self.namespace, self.main_replacements(spark, analysis)):
             with redirect_stdout(output):
                 self.namespace["main"]()
-        analysis.assert_called_once_with(spark, self.settings, self.script_path.parent)
+        analysis.assert_called_once_with(
+            spark, self.settings, self.script_path.parent, activity=None
+        )
         spark.stop.assert_called_once_with()
         self.assertIn("Analysis completed successfully.", output.getvalue())
 
