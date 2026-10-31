@@ -114,7 +114,7 @@ def run_exercise(source, args):
             raise RuntimeError("Compiler did not produce an executable; nothing executed.")
 
         command = [
-            str(launcher), "--host", "localhost", "--bind-to", "none",
+            str(launcher), "--host", f"localhost:{args.processes}", "--bind-to", "none",
             "-np", str(args.processes), str(executable),
         ]
         print("[mpi_start] Local launch: " + shlex.join(command), flush=True)

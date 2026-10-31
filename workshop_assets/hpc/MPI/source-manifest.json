@@ -39,7 +39,7 @@
     "exercises/hello2/problem.md": "417a29a6a36ed825c383a16cdccd3af06d340602a8c9202fdd8ad7273737ed43",
     "exercises/hello2/solution.c": "f82b834127ed23ddb801e36600b0e5d52711a7e610b980f813212eff1be56f2d",
     "exercises/hello2/solution.md": "71bd1c6fcd7d5237de3cd34c37f6d324643564e645524d07d2e0db0a0456c5f7",
-    "helpers/mpi_start": "bf81a1283df9cebd731230b229c5fb0abd6d4e9c93a0a0f2ce4225828cbf6ecf"
+    "helpers/mpi_start": "e0d36188b766101d8da7e0d2887d1c63da0e996babb53731246d444ab82dc3d4"
   },
   "source_revision": "297aaf15cda80e5ced209a7f0edeeb940f5713d5",
   "sources": {
