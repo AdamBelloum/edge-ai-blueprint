@@ -306,7 +306,7 @@ run_big_data_spark_menu() {
     workshop_ui_option 2 "Prepare Step 2 - work-in-progress"
     printf '\n%s\n' \
       'Step 1 opens the ordered workflow and requires staged-credential verification; publication alone is not workshop readiness.' \
-      'Step 2 integrated preparation is not implemented; selecting it performs no changes.'
+      'Step 2 opens candidate asset staging only; integrated preparation and execution remain unvalidated.'
     workshop_ui_section "STATUS AND TOOLS"
     workshop_ui_option 3 "Show workshop status"
     workshop_ui_option 4 "Maintenance and organiser tests"
@@ -317,8 +317,8 @@ run_big_data_spark_menu() {
     case "$choice" in
       1) big_data_spark_stage1_menu ||
            printf 'Spark Stage 1 workflow did not complete.\n' >&2 ;;
-      2) big_data_spark_future_unavailable 'Step 2 integrated preparation' ||
-           printf 'Spark Step 2 preparation is work-in-progress; no changes performed.\n' >&2 ;;
+      2) big_data_spark_step2_menu ||
+           printf 'Spark Step 2 candidate workflow did not complete; inspect before retrying.\n' >&2 ;;
       3) big_data_spark_show_status ||
            printf 'Workshop selection status could not be retrieved.\n' >&2 ;;
       4) big_data_spark_maintenance_menu ;;
@@ -446,6 +446,74 @@ big_data_spark_stage1_menu() {
       7) big_data_spark_show_status || printf 'Selection status could not be read.\n' >&2 ;;
       0) return 0 ;;
       *) printf 'Choose 0, 1, 2, 3, 4, 5 or 7.\n' >&2 ;;
+    esac
+  done
+}
+
+
+# Candidate staging only. Do not route through legacy prepare/build/start tools.
+# The standalone wrapper validates its release context and owns the typed
+# maintenance confirmation. Opening this submenu performs no runtime operation.
+big_data_spark_step2_action() {
+  local action="${1:-}" helper rc
+  local -a args=()
+  case "$action" in
+    syntax-check) args=(--syntax-check) ;;
+    stage) ;;
+    *) printf 'Unsupported Step 2 candidate action: %s\n' "$action" >&2; return 2 ;;
+  esac
+  helper="$BIG_DATA_SPARK_MODULE_DIR/stage-livy-candidate.sh"
+  [[ -x "$helper" ]] || {
+    printf 'Missing executable candidate-staging helper: %s\n' "$helper" >&2
+    return 2
+  }
+  if [[ "$action" == stage ]]; then
+    ensure_workshop_activation_allowed big-data || return $?
+    printf '%s\n' \
+      'The staging wrapper requires a typed maintenance-window confirmation.' \
+      'Exclude other Docker/filesystem writers before confirming.'
+  fi
+  if "$helper" "${args[@]}"; then
+    if [[ "$action" == syntax-check ]]; then
+      printf '%s\n' 'Candidate staging syntax check passed; no tasks, downloads or staging were performed.'
+    else
+      printf '%s\n' \
+        'Candidate-staging helper completed; inspect the per-host staging evidence.' \
+        'No image build, startup, publication or credential changes were requested.'
+    fi
+    printf '%s\n' 'Integrated Step 2 preparation and execution readiness remain unvalidated.'
+  else
+    rc=$?
+    printf 'Step 2 candidate %s failed or was cancelled (status %s). Inspect before retrying; staging evidence may remain.\n' \
+      "$action" "$rc" >&2
+    return "$rc"
+  fi
+}
+
+big_data_spark_step2_menu() {
+  local choice
+  while true; do
+    workshop_ui_heading "Spark / Step 2 candidate assets - work-in-progress"
+    printf '%s\n' \
+      'Requires an existing prepared one-worker Step 1 configuration.' \
+      'Opening this menu performs no operations.' \
+      'Staging downloads the locked archive and retains private delivery bundles.' \
+      'No image build, startup, publication or credential changes.' \
+      'Integrated Step 2 preparation and execution readiness remain unvalidated.'
+    workshop_ui_section "CANDIDATE ASSETS ONLY"
+    workshop_ui_option 1 "Syntax-check candidate staging - no VM tasks"
+    workshop_ui_option 2 "Stage verified candidate assets - maintenance confirmation required"
+    printf '\n'
+    workshop_ui_option 0 "Back to Spark"
+    workshop_ui_prompt
+    read -r choice || return 0
+    case "$choice" in
+      1) big_data_spark_step2_action syntax-check ||
+           printf 'Candidate syntax check did not complete.\n' >&2 ;;
+      2) big_data_spark_step2_action stage ||
+           printf 'Candidate staging did not complete; inspect before retrying.\n' >&2 ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 2.\n' >&2 ;;
     esac
   done
 }

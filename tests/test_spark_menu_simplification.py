@@ -22,6 +22,10 @@ big_data_spark_stage1_menu() {
   printf 'CALL_STAGE1\n'
   return "${MOCK_PREPARE_RC:-0}"
 }
+big_data_spark_step2_menu() {
+  printf 'CALL_STAGE2\n'
+  return "${MOCK_PREPARE_RC:-0}"
+}
 big_data_spark_show_status() { printf 'CALL_STATUS\n'; }
 big_data_spark_runtime_action() { printf 'CALL_RUNTIME:%s\n' "$1"; }
 big_data_spark_computation_test() { printf 'CALL_TEST:%s\n' "$1"; }
@@ -44,7 +48,8 @@ class SparkMenuSimplificationTests(unittest.TestCase):
         self.assertIn("OPTION:3:Show workshop status", text)
         self.assertIn("OPTION:4:Maintenance and organiser tests", text)
         self.assertIn("publication alone is not workshop readiness", text)
-        self.assertIn("selecting it performs no changes", text)
+        self.assertIn("candidate asset staging only", text)
+        self.assertIn("execution remain unvalidated", text)
         self.assertNotIn("OPTION:5:", text)
         self.assertNotIn("Advanced", text)
         self.assertNotIn("CALL_", text)
@@ -56,9 +61,10 @@ class SparkMenuSimplificationTests(unittest.TestCase):
         self.assertNotIn("CALL_RUNTIME", text)
         self.assertNotIn("CALL_TEST", text)
 
-    def test_step2_is_unavailable_without_publication_or_runtime_action(self):
+    def test_step2_opens_candidate_workflow_without_direct_runtime_action(self):
         text = self.run_menu("2\n0\n")
-        self.assertIn("CALL_UNAVAILABLE:Step 2 integrated preparation", text)
+        self.assertEqual(text.count("CALL_STAGE2"), 1)
+        self.assertNotIn("CALL_UNAVAILABLE", text)
         self.assertNotIn("CALL_WORKSPACE", text)
         self.assertNotIn("CALL_RUNTIME", text)
         self.assertNotIn("CALL_TEST", text)
