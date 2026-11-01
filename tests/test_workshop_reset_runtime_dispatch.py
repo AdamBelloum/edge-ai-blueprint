@@ -18,7 +18,7 @@ BLOCK = SOURCE.split(START, 1)[1].split(END, 1)[0]
 
 def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
                  fl_cleanup_status=0, local_cleanup_status=None, answer="",
-                 consume_stdin=False):
+                 consume_stdin=False, remote_stdout="", namespace_exported=True):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         script_dir = directory
@@ -55,6 +55,10 @@ def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
             wrapper = workshop_dir / "reset-workshop.sh"
             wrapper.write_text(
                 '#!/bin/sh\n'
+                'if [ "${DIGITAFRICA_NAMESPACE-unset}" != "mock-namespace" ]; then\n'
+                '    printf "Incorrect child namespace\\n" >&2\n'
+                '    exit 19\n'
+                'fi\n'
                 'printf "%s\\n" "$*" >> "$MOCK_TEARDOWN_LOG"\n'
                 'exit "$MOCK_TEARDOWN_STATUS"\n'
             )
@@ -83,15 +87,23 @@ def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
             "MOCK_TEARDOWN_LOG": str(log),
             "MOCK_TEARDOWN_STATUS": str(teardown_status),
             "MOCK_REMOTE_STATUS": str(remote_status),
+            "MOCK_REMOTE_STDOUT": remote_stdout,
+            "MOCK_NAMESPACE_EXPORTED": "yes" if namespace_exported else "no",
             "MOCK_DUPLICATE": "yes" if duplicate else "no",
             "MOCK_CONSUME_STDIN": "yes" if consume_stdin else "no",
         })
 
         setup = r'''
 set -euo pipefail
+if [[ "$MOCK_NAMESPACE_EXPORTED" == no ]]; then
+  export -n DIGITAFRICA_NAMESPACE
+fi
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 run_deployment_remote() {
   if [[ "$MOCK_REMOTE_STATUS" != 0 ]]; then
+    if [[ -n "$MOCK_REMOTE_STDOUT" ]]; then
+      printf "%s\n" "$MOCK_REMOTE_STDOUT"
+    fi
     return "$MOCK_REMOTE_STATUS"
   fi
   if [[ "$MOCK_CONSUME_STDIN" == yes ]]; then
@@ -179,6 +191,64 @@ class RuntimeDispatchTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertNotIn("EVENT workspace-boundary", result.stdout)
 
+    def test_saved_mpi_context_overrides_current_openmp_selection(self):
+        data = spark_context()
+        data.update(
+            workshop_type="hpc",
+            workshop_module="openmp-01-basics",
+            cleanup_workshop_type="hpc",
+            cleanup_workshop_module="mpi-01-basics",
+        )
+        result, calls = run_dispatch(data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ["--runtime-only --module mpi-01-basics"])
+        self.assertIn("hpc / mpi-01-basics", result.stdout)
+        self.assertIn("EVENT workspace-boundary", result.stdout)
+
+    def test_mpi_cleanup_failure_blocks_workspace_deletion(self):
+        data = spark_context()
+        data.update(
+            cleanup_workshop_type="hpc",
+            cleanup_workshop_module="mpi-01-basics",
+        )
+        result, calls = run_dispatch(data, teardown_status=7)
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(calls, ["--runtime-only --module mpi-01-basics"])
+        self.assertNotIn("EVENT workspace-boundary", result.stdout)
+        self.assertIn("cleanup remains in_progress", result.stderr)
+
+    def test_child_receives_unexported_resolved_namespace(self):
+        for module in ("openmp-01-basics", "mpi-01-basics"):
+            with self.subTest(module=module):
+                data = spark_context()
+                data.update(
+                    cleanup_workshop_type="hpc",
+                    cleanup_workshop_module=module,
+                )
+                result, calls = run_dispatch(data, namespace_exported=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls, ["--runtime-only --module " + module])
+                self.assertIn("EVENT workspace-boundary", result.stdout)
+
+    def test_captured_remote_failure_is_visible_and_preserves_status(self):
+        diagnostic = "MOCK: Unsupported saved cleanup module."
+        result, calls = run_dispatch(
+            spark_context(), remote_status=9, remote_stdout=diagnostic,
+        )
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(calls, [])
+        self.assertNotIn("EVENT workspace-boundary", result.stdout)
+        self.assertIn(diagnostic, result.stderr)
+        self.assertIn("cleanup remains in_progress", result.stderr)
+
+    def test_empty_remote_failure_still_has_stage_diagnostic(self):
+        result, calls = run_dispatch(spark_context(), remote_status=9)
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(calls, [])
+        self.assertNotIn("EVENT workspace-boundary", result.stdout)
+        self.assertIn("context read/validation failed", result.stderr)
+        self.assertIn("cleanup remains in_progress", result.stderr)
+
     def test_remote_failure_propagates_without_teardown(self):
         result, calls = run_dispatch(spark_context(), remote_status=9)
         self.assertEqual(result.returncode, 9)
@@ -195,7 +265,7 @@ class RuntimeDispatchTests(unittest.TestCase):
 
     def test_all_selected_workshops_delegate_saved_modules(self):
         cases = {
-            "hpc": ("openmp-01-basics",),
+            "hpc": ("openmp-01-basics", "mpi-01-basics"),
             "introduction-to-ai": ("module1", "module2", "module3"),
             "cloud-computing-soa": (
                 "module1", "module2", "module3", "module4", "module5"
