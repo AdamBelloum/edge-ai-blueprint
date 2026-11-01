@@ -211,3 +211,30 @@ conceptual/historical background, not executable managed-workshop instructions o
 an authoritative dataset dictionary. Visual checks, slide revisions and example
 execution remain pending. The source-repository review is recorded at
 `docs/spark-teaching-material-review.md`, outside the participant bundle.
+
+
+### Direct-submission logging
+
+Participant `test` and `analyse` submissions use WARN-level driver logging by
+default. Warnings, errors, application results and the remote exit status remain
+visible; the launcher does not filter either SSH output stream.
+
+For troubleshooting, retain the Spark image's original driver logging:
+
+```bash
+python3 spark_direct_submit.py test --verbose
+python3 spark_direct_submit.py analyse --activity 1 --verbose
+```
+
+Quiet submissions upload a small fixed-content Log4j2 profile to
+`/home/workshop/work/.spark-direct-log4j2-warn.properties` over the existing
+host-key-verified SFTP connection. It remains in the assigned client workspace
+and is selected only for the submitted driver. An upload failure stops submission.
+`--verbose` skips the upload and driver logging override. Custom `run` commands,
+master/worker logging, Livy and organiser-validation logging remain unchanged.
+Executor logs viewed separately are not quieted by this driver profile.
+
+This launcher-only change needs no image rebuild or runtime restart. The updated
+launcher must still be delivered to participant workspaces. Offline regression
+tests do not establish live JVM behaviour; validate quiet and verbose submissions
+before relying on the new output policy.

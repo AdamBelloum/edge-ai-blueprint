@@ -109,9 +109,10 @@ class Step1DocumentationTests(unittest.TestCase):
     def test_documented_remote_command_bounds_match_launcher(self):
         # Evaluate ONLY the pure command-string builders, not launcher main/imports.
         tree = ast.parse((BASE / 'spark_direct_submit.py').read_text())
+        expected = {'sparkpi_command', 'analysis_command', 'spark_logging_options'}
         builders = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-                    and node.name in ('sparkpi_command', 'analysis_command')]
-        self.assertEqual(len(builders), 2)
+                    and node.name in expected]
+        self.assertEqual({node.name for node in builders}, expected)
         namespace = {'shlex': shlex}
         exec(compile(ast.Module(body=builders, type_ignores=[]), '<command-builders>', 'exec'), namespace)
         for name, timeout in (('sparkpi_command', 120), ('analysis_command', 300)):
