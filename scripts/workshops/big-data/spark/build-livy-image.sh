@@ -4,21 +4,40 @@ set -Eeuo pipefail
 
 if [[ $# -eq 1 && ( "$1" == --help || "$1" == -h ) ]]; then
   printf '%s\n' \
-    'Usage: build-livy-image.sh [--syntax-check]' \
+    'Usage: build-livy-image.sh [--transition-candidate] [--syntax-check]' \
     'Requires explicitly staged Livy assets and the local pinned Spark base.' \
     'Builds sequentially on the selected inventory worker group.' \
+    '--transition-candidate reads compose.livy-transition.yaml for image building only.' \
     'Does not prepare assets, start services, publish workspaces, or change accounts.' \
     'A real build consumes VM resources; plan an appropriate maintenance window.'
   exit 0
 fi
 options=()
-if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --syntax-check ) ]]; then
-  printf 'ERROR: use build-livy-image.sh [--syntax-check].\n' >&2
-  exit 2
-fi
-if [[ $# -eq 1 ]]; then
-  options+=(--syntax-check)
-fi
+candidate_options=()
+syntax_seen=false
+candidate_seen=false
+for option in "$@"; do
+  case "$option" in
+    --syntax-check)
+      [[ "$syntax_seen" == false ]] || {
+        printf 'ERROR: duplicate --syntax-check.\n' >&2; exit 2
+      }
+      syntax_seen=true
+      options+=(--syntax-check)
+      ;;
+    --transition-candidate)
+      [[ "$candidate_seen" == false ]] || {
+        printf 'ERROR: duplicate --transition-candidate.\n' >&2; exit 2
+      }
+      candidate_seen=true
+      candidate_options+=(--extra-vars 'big_data_livy_build_candidate=true')
+      ;;
+    *)
+      printf 'ERROR: use build-livy-image.sh [--transition-candidate] [--syntax-check].\n' >&2
+      exit 2
+      ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../lib/workshop-context.sh
@@ -48,4 +67,5 @@ exec ansible-playbook \
   -i "$DIGITAFRICA_INVENTORY" \
   "$playbook" \
   --extra-vars "big_data_worker_group=${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP}" \
+  "${candidate_options[@]}" \
   "${options[@]}"
