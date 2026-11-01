@@ -36,7 +36,7 @@ def fixture(gateway=False):
         container["Image"] = images[transition.REFERENCES[service]]
         hashes[service] = format(index, "064x")
         container["Config"]["Labels"]["com.docker.compose.config-hash"] = hashes[service]
-    status = {"activeapps": [], "workers": [{"state": "ALIVE", "host": "spark-worker-1"}]}
+    status = {"activeapps": [], "waitingapps": [], "workers": [{"state": "ALIVE", "host": "spark-worker-1"}]}
     return (containers, networks, volumes), status, images, hashes
 
 
@@ -73,6 +73,12 @@ class TransitionPlanTests(unittest.TestCase):
                 state, _, images, hashes = fixture()
                 with self.assertRaises(ValueError):
                     self.plan(state, status, images, hashes)
+
+    def test_missing_queue_observation_is_refused(self):
+        state, status, images, hashes = fixture()
+        status.pop("waitingapps")
+        with self.assertRaises(ValueError):
+            self.plan(state, status, images, hashes)
 
     def test_wrong_worker_missing_worker_and_extra_worker_are_refused(self):
         for workers in ([], [{"state": "DEAD", "host": "spark-worker-1"}],
