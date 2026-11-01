@@ -278,7 +278,7 @@ stop_selected_participant_servers
 # BEGIN SAVED-CONTEXT RUNTIME DISPATCH
 
 # Read persisted cleanup context, never the possibly neutral selection.
-runtime_context_output="$(run_deployment_remote "$(cat <<REMOTE
+if runtime_context_output="$(run_deployment_remote "$(cat <<REMOTE
 set -euo pipefail
 state="\$(k3s kubectl -n "${DIGITAFRICA_NAMESPACE}" \
   get configmap digitafrica-workshop-state -o json)"
@@ -296,7 +296,7 @@ supported = {
     "none": {"none"},
     "federated-learning": {"none"},
     "big-data": {"spark"},
-    "hpc": {"openmp-01-basics"},
+    "hpc": {"openmp-01-basics", "mpi-01-basics"},
     "introduction-to-ai": {"module1", "module2", "module3"},
     "cloud-computing-soa": {
         "module1", "module2", "module3", "module4", "module5"
@@ -310,7 +310,17 @@ if not isinstance(module, str) or module not in supported[workshop]:
 print("RESET_RUNTIME_ROUTE=" + workshop + ":" + module)
 '
 REMOTE
-)" </dev/null)"
+)" </dev/null)"; then
+  :
+else
+  runtime_context_status=$?
+  printf "%s\n" \
+    'Saved runtime cleanup context read/validation failed; cleanup remains in_progress.' >&2
+  if [[ -n "$runtime_context_output" ]]; then
+    printf "%s\n" "$runtime_context_output" >&2
+  fi
+  exit "$runtime_context_status"
+fi
 
 mapfile -t runtime_routes < <(
   printf '%s\n' "$runtime_context_output" |
@@ -387,7 +397,8 @@ case "$cleanup_workshop" in
       esac
     fi
     # END MODULE3 RESET ATTESTATION
-    if "$workshop_reset" "${runtime_reset_args[@]}"; then
+    if env DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:?Missing namespace}" \
+      "$workshop_reset" "${runtime_reset_args[@]}"; then
       printf '%s\n' \
         'Selected workshop runtime reset stage returned successfully.' \
         'Full workshop cleanup remains unverified.'
