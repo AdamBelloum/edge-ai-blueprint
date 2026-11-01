@@ -16,7 +16,8 @@ class SparkRemoteLauncherTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = LAUNCHER.read_text()
-        names = {"sparkpi_command", "analysis_command", "resolve_endpoint"}
+        names = {"sparkpi_command", "analysis_command", "resolve_endpoint",
+                 "spark_logging_options"}
         nodes = [
             node for node in ast.parse(cls.source).body
             if isinstance(node, ast.FunctionDef) and node.name in names

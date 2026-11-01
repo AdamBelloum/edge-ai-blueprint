@@ -30,7 +30,45 @@ import uuid
 import paramiko
 
 
-def sparkpi_command():
+def spark_logging_options(verbose=False):
+    """Override only this driver; verbose retains the image defaults."""
+    if verbose:
+        return ''
+    option = '-Dlog4j.configurationFile=file:/home/workshop/work/.spark-direct-log4j2-warn.properties'
+    return '--driver-java-options ' + shlex.quote(option) + ' '
+
+
+def warning_logging_config():
+    """Keep warnings and errors on stderr; application output is not filtered."""
+    return """status = error
+name = SparkDirectParticipantWarnings
+appender.console.type = Console
+appender.console.name = console
+appender.console.target = SYSTEM_ERR
+appender.console.layout.type = PatternLayout
+appender.console.layout.pattern = %d{yy/MM/dd HH:mm:ss} %p %c{1}: %m%n
+rootLogger.level = warn
+rootLogger.appenderRef.console.ref = console
+logger.spark.name = org.apache.spark
+logger.spark.level = warn
+logger.spark.additivity = true
+"""
+
+
+def upload_warning_logging(client):
+    """Write a small fixed-content profile through the pinned SFTP connection.
+
+    The profile remains in the assigned client workspace; installed Spark
+    configuration and master/worker/organiser logging remain unchanged.
+    """
+    path = '/home/workshop/work/.spark-direct-log4j2-warn.properties'
+    with client.open_sftp() as sftp:
+        with sftp.open(path, 'w') as handle:
+            handle.write(warning_logging_config())
+        sftp.chmod(path, 0o644)
+
+
+def sparkpi_command(verbose=False):
     return (
         'set -eu; cd /home/workshop/work; '
         ': "${SPARK_HOME:?Missing organiser SPARK_HOME}"; '
@@ -44,13 +82,14 @@ def sparkpi_command():
         '--total-executor-cores 1 '
         '--executor-memory 512m '
         '--driver-memory 512m '
-        '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
+        + spark_logging_options(verbose)
+        + '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
         '--conf spark.driver.bindAddress=0.0.0.0 '
         '--class org.apache.spark.examples.SparkPi "$1" 2'
     )
 
 
-def analysis_command(filename, activity=None):
+def analysis_command(filename, activity=None, verbose=False):
     if activity is not None and (
         type(activity) is not int or activity not in range(1, 6)
     ):
@@ -66,7 +105,8 @@ def analysis_command(filename, activity=None):
         '--total-executor-cores 1 '
         '--executor-memory 512m '
         '--driver-memory 512m '
-        '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
+        + spark_logging_options(verbose)
+        + '--conf "spark.driver.host=$SPARK_DRIVER_HOST" '
         '--conf spark.driver.bindAddress=0.0.0.0 '
         + shlex.quote(filename)
     )
@@ -111,8 +151,12 @@ def main():
     get.add_argument('local', type=Path)
     run = sub.add_parser('run', help='Run the visible command after -- in the client workspace')
     run.add_argument('command', nargs=argparse.REMAINDER)
-    sub.add_parser('test', help='Submit SparkPi to the prepared cluster')
+    test = sub.add_parser('test', help='Submit SparkPi to the prepared cluster')
+    test.add_argument('--verbose', action='store_true',
+                      help='Keep image default driver logging instead of WARN.')
     analyse = sub.add_parser('analyse', help='Run full bank analysis or one learning activity')
+    analyse.add_argument('--verbose', action='store_true',
+                         help='Keep image default driver logging instead of WARN.')
     analyse.add_argument(
         'local', type=Path, nargs='?',
         default=Path(__file__).resolve().with_name('01_spark_basics.py'),
@@ -135,6 +179,8 @@ def main():
                        key_filename=str(args.key), allow_agent=False,
                        look_for_keys=False, timeout=15, auth_timeout=15,
                        banner_timeout=15)
+        if args.operation in ('test', 'analyse') and not args.verbose:
+            upload_warning_logging(client)
         if args.operation in ('put', 'analyse'):
             if not args.local.is_file():
                 p.error('Upload source must be a regular file.')
@@ -152,9 +198,11 @@ def main():
             print('Retrieved:', args.local)
         else:
             if args.operation == 'test':
-                remote = sparkpi_command()
+                remote = sparkpi_command(verbose=args.verbose)
             elif args.operation == 'analyse':
-                remote = analysis_command(args.local.name, activity=args.activity)
+                remote = analysis_command(
+                    args.local.name, activity=args.activity, verbose=args.verbose,
+                )
             else:
                 cmd = args.command
                 if cmd and cmd[0] == '--':
