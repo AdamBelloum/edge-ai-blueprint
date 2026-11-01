@@ -93,7 +93,7 @@ services:
     <<: *spark-common
     image: "{{ big_data_livy_image }}"
     build:
-      context: "{{ big_data_spark_runtime_host_path }}/livy-build"
+      context: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-build"
       dockerfile: Dockerfile
     hostname: spark-livy
     cpus: 1.0
@@ -112,13 +112,13 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: "{{ big_data_spark_runtime_host_path }}/livy.conf"
+        source: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy.conf"
         target: /opt/livy/conf/livy.conf
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: "{{ big_data_spark_runtime_host_path }}/livy-spark-defaults.conf"
+        source: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-spark-defaults.conf"
         target: /opt/spark/conf/spark-defaults.conf
         read_only: true
         bind:
