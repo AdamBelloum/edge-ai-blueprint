@@ -25,24 +25,24 @@ class FakeRuntime:
                              for kind in ('sessions', 'batches')})
         self.operations = []
         self.events = []
-        self.fenced = self.locked = False
+        self.window_active = self.locked = False
         self.observations = 0
         self.hook = None
         self.stop_noop = self.start_error = self.readiness_error = False
         self.partial_start = False
 
     @contextmanager
-    def fence(self):
-        self.fenced = True
+    def window(self):
+        self.window_active = True
         try:
             yield
         finally:
-            self.fenced = False
+            self.window_active = False
 
     @contextmanager
     def lock(self):
-        if not self.fenced:
-            raise AssertionError('Fence must precede lock')
+        if not self.window_active:
+            raise AssertionError('Maintenance window must precede lock')
         self.locked = True
         try:
             yield
@@ -50,8 +50,8 @@ class FakeRuntime:
             self.locked = False
 
     def observe(self):
-        if not (self.fenced and self.locked):
-            raise AssertionError('Observation outside fence/lock')
+        if not (self.window_active and self.locked):
+            raise AssertionError('Observation outside maintenance window/lock')
         self.observations += 1
         if self.hook:
             self.hook(self)
@@ -100,7 +100,7 @@ class FakeRuntime:
             raise RuntimeError('Synthetic readiness failure')
 
     def run(self):
-        return execute_transition(participant_fence=self.fence,
+        return execute_transition(maintenance_window=self.window,
                                   submission_lock=self.lock, observe=self.observe,
                                   stop_client=self.stop, start_services=self.start,
                                   verify_ready=self.ready,
@@ -116,7 +116,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(runtime.operations[1][1], ('spark-livy', 'spark-livy-access'))
         self.assertTrue(before <= {c['Id'] for c in runtime.data['containers']})
         self.assertEqual(result['status'], 'runtime-transition-verified')
-        self.assertFalse(runtime.fenced or runtime.locked)
+        self.assertFalse(runtime.window_active or runtime.locked)
 
     def test_active_application_refuses_before_operations(self):
         runtime = FakeRuntime()
@@ -124,7 +124,7 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runtime.run()
         self.assertEqual(runtime.operations, [])
-        self.assertFalse(runtime.fenced or runtime.locked)
+        self.assertFalse(runtime.window_active or runtime.locked)
 
     def test_fresh_activity_before_stop_refuses(self):
         runtime = FakeRuntime()

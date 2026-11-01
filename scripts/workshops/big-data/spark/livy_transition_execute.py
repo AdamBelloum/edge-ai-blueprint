@@ -1,7 +1,7 @@
 """Dependency-injected execution sequence for a warm Spark-to-Livy transition.
 
 No CLI or Docker operations are provided here. The future live caller must
-supply a real participant fence, the shared submission lock, fresh observations,
+supply an organiser-guaranteed submission-free maintenance window, the shared submission lock, fresh observations,
 bounded operations, runtime readiness checks and protected evidence recording.
 The existing planner validates the observations. Cooperative locking does not
 exclude arbitrary administrator Docker operations.
@@ -28,11 +28,14 @@ def _service_ids(observation):
     }
 
 
-def execute_transition(*, participant_fence, submission_lock, observe,
+def execute_transition(*, maintenance_window, submission_lock, observe,
                        stop_client, start_services, verify_ready, record_event):
     """Execute once; never remove resources or automatically roll back failures.
 
-    participant_fence and submission_lock are context-manager factories.
+    maintenance_window and submission_lock are context-manager factories.
+    The maintenance window is an organiser guarantee, not an enforced
+    SSH or firewall barrier. The caller must obtain explicit acknowledgement
+    that participants will not submit during the transition.
     observe returns fresh planner inputs plus a nonempty daemon_id.
     stop_client receives the validated full container ID.
     start_services receives a tuple of missing service names and a mapping of
@@ -41,9 +44,9 @@ def execute_transition(*, participant_fence, submission_lock, observe,
     verify_ready performs bounded runtime/gateway checks, not a readiness claim
     for all participants. record_event persists minimal non-secret evidence.
     """
-    phase = 'acquire-fence-and-lock'
+    phase = 'acquire-maintenance-window-and-lock'
     try:
-        with participant_fence(), submission_lock():
+        with maintenance_window(), submission_lock():
             phase = 'initial-validation'
             initial = observe()
             planned = _plan(initial)
