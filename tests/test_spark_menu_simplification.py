@@ -44,7 +44,7 @@ class SparkMenuSimplificationTests(unittest.TestCase):
     def test_primary_menu_has_four_choices_and_explicit_wip_limits(self):
         text = self.run_menu("0\n")
         self.assertIn("OPTION:1:Stage 1 - direct submission workflow", text)
-        self.assertIn("OPTION:2:Step 2 - warm-transition pilot (work-in-progress)", text)
+        self.assertIn("OPTION:2:Step 2 - submission via Livy REST API (work-in-progress)", text)
         self.assertIn("OPTION:3:Show workshop status", text)
         self.assertIn("OPTION:4:Maintenance and organiser tests", text)
         self.assertIn("publication alone is not workshop readiness", text)

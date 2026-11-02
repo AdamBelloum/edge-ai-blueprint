@@ -303,10 +303,10 @@ run_big_data_spark_menu() {
     workshop_ui_heading "Big Data / Spark Beginner - work-in-progress"
     workshop_ui_section "PREPARE WORKSHOP"
     workshop_ui_option 1 "Stage 1 - direct submission workflow"
-    workshop_ui_option 2 "Step 2 - warm-transition pilot (work-in-progress)"
+    workshop_ui_option 2 "Step 2 - submission via Livy REST API (work-in-progress)"
     printf '\n%s\n' \
       'Step 1 opens the ordered workflow and requires staged-credential verification; publication alone is not workshop readiness.' \
-      'Step 2 offers candidate staging and an exact-host warm-transition pilot; participant verification is separate and readiness remains unvalidated.'
+      'Step 2 prepares Livy REST API submission through candidate staging and an exact-host warm-transition pilot; participant verification is separate and readiness remains unvalidated.'
     workshop_ui_section "STATUS AND TOOLS"
     workshop_ui_option 3 "Show workshop status"
     workshop_ui_option 4 "Maintenance and organiser tests"
@@ -536,21 +536,21 @@ big_data_spark_step2_verification_guidance() {
 big_data_spark_step2_menu() {
   local choice pilot
   while true; do
-    workshop_ui_heading "Spark / Step 2 pilot transition - work-in-progress"
+    workshop_ui_heading "Spark / Step 2 - submission via Livy REST API - work-in-progress"
     printf '%s\n' \
       'Requires an existing prepared one-worker Step 1 configuration.' \
       'Opening this menu performs no operations.' \
-      'Staging downloads the locked archive and retains private delivery bundles.' \
+      'Staging downloads the version-locked archive and keeps private copies of the delivered files.' \
       'Candidate staging alone does not build or start services.'       'Warm transition may build the reviewed image, stop the direct client and start missing Livy services.'       'No account creation, credential replacement, participant publication or reset is offered here.' \
       'Integrated Step 2 preparation and execution readiness remain unvalidated.'
-    workshop_ui_section "CANDIDATE ASSETS ONLY"
-    workshop_ui_option 1 "Syntax-check candidate staging - no VM tasks"
-    workshop_ui_option 2 "Stage verified candidate assets - maintenance confirmation required"
-    workshop_ui_section "EXACT-HOST WARM-TRANSITION PILOT"
-    workshop_ui_option 3 "Syntax-check warm transition for one exact host - no VM tasks"
-    workshop_ui_option 4 "Warm transition one exact host - paused submissions and typed confirmation"
-    workshop_ui_section "PARTICIPANT VERIFICATION"
-    workshop_ui_option 5 "Show verification prerequisites and evidence checks - guidance only"
+    workshop_ui_section "1. PREPARE LIVY RUNTIME FILES"
+    workshop_ui_option 1 "Check file-staging configuration - no VM tasks"
+    workshop_ui_option 2 "Stage Livy runtime files - maintenance confirmation required"
+    workshop_ui_section "2. TRANSITION ONE WORKER TO LIVY (PILOT)"
+    workshop_ui_option 3 "Check transition configuration for one exact host - no VM tasks"
+    workshop_ui_option 4 "Transition one exact host to Livy - paused submissions and typed confirmation"
+    workshop_ui_section "3. VERIFY PARTICIPANT ACCESS"
+    workshop_ui_option 5 "Show participant verification instructions - guidance only, no test execution"
     printf '\n'
     workshop_ui_option 0 "Back to Spark"
     workshop_ui_prompt

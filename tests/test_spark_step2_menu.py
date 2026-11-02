@@ -57,7 +57,7 @@ class SparkStep2MenuTests(unittest.TestCase):
     def test_primary_option_two_opens_real_submenu_without_operations(self):
         rc, text = self.run_menu("2\n0\n0\n", entry="run_big_data_spark_menu")
         self.assertEqual(rc, 0)
-        self.assertEqual(text.count("HEADING:Spark / Step 2 pilot transition"), 1)
+        self.assertEqual(text.count("HEADING:Spark / Step 2 - submission via Livy REST API"), 1)
         self.assertNotIn("CALL_", text)
         self.assertNotIn("reserved for a future sprint", text)
 
