@@ -62,8 +62,8 @@ if [[ "$action" == apply ]]; then
     'Review a successful plan before applying.' \
     'Apply repeats validation and refuses conflicting existing credentials.'
   answer=''
-  if ! read -r -p 'Type apply to confirm Spark credential staging: ' answer ||
-      [[ "$answer" != apply ]]; then
+  if ! IFS= read -r -p 'Stage Spark participant credentials? [y/N]: ' answer ||
+      [[ ! "$answer" =~ ^[yY]$ ]]; then
     printf 'No credential staging was performed.\n' >&2
     exit 1
   fi

@@ -114,8 +114,8 @@ exit "${MOCK_ANSIBLE_RC:-0}"
         self.assertTrue(task["changed_when"].startswith("big_data_credentials_action == 'apply' and"))
         self.assertIn("'operation': big_data_credentials_action", task["ansible.builtin.command"]["stdin"])
 
-    def test_apply_requires_exact_confirmation_even_with_auto_yes(self):
-        for response in ("", "\n", "y\n", "n\n", "APPLY\n"):
+    def test_apply_requires_explicit_y_even_with_auto_yes(self):
+        for response in ("", "\n", "n\n", "N\n", "apply\n", "APPLY\n", "yes\n", " y\n", "y \n"):
             with self.subTest(response=response):
                 result, calls = self.invoke("apply", input_text=response)
                 self.assertEqual(result.returncode, 1, result.stderr)
@@ -123,9 +123,11 @@ exit "${MOCK_ANSIBLE_RC:-0}"
                 self.assertIn("No credential staging was performed", result.stderr)
 
     def test_confirmed_apply_delegates_existing_playbook(self):
-        result, calls = self.invoke("apply", input_text="apply\n")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, self.expected_arguments("apply"))
+        for answer in ("y\n", "Y\n"):
+            with self.subTest(answer=answer):
+                result, calls = self.invoke("apply", input_text=answer)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls, self.expected_arguments("apply"))
 
     def test_invalid_actions_and_extra_options_do_not_load_context(self):
         for arguments in ((), ("unexpected",), ("plan", "--extra-vars", "override=1")):
@@ -170,7 +172,7 @@ exit "${MOCK_ANSIBLE_RC:-0}"
         self.assertIn("playbook is missing", result.stderr)
 
     def test_ansible_failure_propagates_without_success_claim(self):
-        result, calls = self.invoke("apply", input_text="apply\n", MOCK_ANSIBLE_RC="19")
+        result, calls = self.invoke("apply", input_text="y\n", MOCK_ANSIBLE_RC="19")
         self.assertEqual(result.returncode, 19, result.stderr)
         self.assertEqual(calls, self.expected_arguments("apply"))
         self.assertNotIn("completed successfully", result.stdout)

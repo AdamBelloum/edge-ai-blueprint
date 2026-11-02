@@ -29,6 +29,24 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(host=host), self.assertRaises(ValueError):
                 scope.validate_scope(data, "workers", host)
 
+    def test_worker_listing_is_sorted_deduplicated_and_scoped(self):
+        data = {"workers": {"hosts": ["vm2"], "children": ["leaf"]},
+                "leaf": {"hosts": ["vm2", "vm1"]},
+                "foreign": {"hosts": ["other"]}}
+        self.assertEqual(scope.validate_scope(data, "workers", None), ["vm1", "vm2"])
+        self.assertEqual(scope.validate_scope(data, "workers", "vm1"), "vm1")
+
+    def test_worker_listing_refuses_empty_malformed_and_ambiguous_inventory(self):
+        cases = ({}, {"workers": {"hosts": []}},
+                 {"workers": {"hosts": "vm1"}},
+                 {"workers": {"hosts": [None]}},
+                 {"workers": {"hosts": ["vm*"]}},
+                 {"workers": {"hosts": ["vm1"], "children": ["missing"]}},
+                 {"workers": {"hosts": ["vm1"]}, "vm1": {"hosts": []}})
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                scope.validate_scope(data, "workers", None)
+
     def test_real_shared_lock_is_the_default(self):
         self.assertIs(live.run_transition.__kwdefaults__["submission_lock"],
                       locked_submission_runtime)
@@ -91,7 +109,12 @@ class WorkflowTests(unittest.TestCase):
             ):
                 with self.subTest(flags=flags):
                     self.assertNotEqual(invoke(flags).returncode, 0)
-            self.assertNotEqual(invoke(["--limit", "pilot"], "wrong\n").returncode, 0)
+            for answer in ("", "\n", "n\n", "N\n", "wrong\n", "yes\n",
+                           "transition-pilot-submissions-paused\n", " y\n", "y \n"):
+                with self.subTest(answer=answer):
+                    result = invoke(["--limit", "pilot"], answer)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertEqual(len(log.read_text().splitlines()), 1)
             elsewhere = root / "elsewhere"
             elsewhere.mkdir()
             wrong_context = dict(env, TEST_CONTEXT_ROOT=str(elsewhere))
@@ -100,22 +123,28 @@ class WorkflowTests(unittest.TestCase):
                        environment=wrong_context).returncode, 0)
             self.assertEqual(len(log.read_text().splitlines()), 1)
 
-            result = invoke(["--limit", "pilot"],
-                            "transition-pilot-submissions-paused\n")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            calls = [json.loads(line) for line in log.read_text().splitlines()]
-            self.assertEqual(len(calls), 2)
-            args = calls[-1]
-            self.assertNotIn("--syntax-check", args)
-            self.assertEqual(args[args.index("--limit") + 1], "pilot")
-            variables = json.loads(args[args.index("--extra-vars") + 1])
-            for key in (
-                "big_data_livy_stage_maintenance_confirmed",
-                "big_data_livy_build_candidate",
-                "big_data_livy_transition_maintenance_confirmed",
-                "big_data_livy_transition_submissions_paused",
-            ):
-                self.assertIs(variables[key], True)
+            for expected_calls, answer in enumerate(("y\n", "Y\n"), start=2):
+                with self.subTest(answer=answer):
+                    result = invoke(["--limit", "pilot"], answer)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("NOTE ===", result.stdout)
+                    self.assertIn("selected workshop machine (pilot)", result.stdout)
+                    self.assertIn("Participant submissions must be paused.", result.stdout)
+                    self.assertIn("Returning to direct submission requires RESET.", result.stdout)
+                    self.assertNotIn("Switch all groups", result.stdout)
+                    calls = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertEqual(len(calls), expected_calls)
+                    args = calls[-1]
+                    self.assertNotIn("--syntax-check", args)
+                    self.assertEqual(args[args.index("--limit") + 1], "pilot")
+                    variables = json.loads(args[args.index("--extra-vars") + 1])
+                    for key in (
+                        "big_data_livy_stage_maintenance_confirmed",
+                        "big_data_livy_build_candidate",
+                        "big_data_livy_transition_maintenance_confirmed",
+                        "big_data_livy_transition_submissions_paused",
+                    ):
+                        self.assertIs(variables[key], True)
 
     def test_order_failstop_handoff_and_isolated_import_closure(self):
         plays = yaml.safe_load(

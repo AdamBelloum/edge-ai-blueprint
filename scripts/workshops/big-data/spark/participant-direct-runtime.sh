@@ -17,8 +17,13 @@ load_workshop_context
 # Reject user overrides of the action or target group: use the released context.
 printf 'Big Data direct %s: worker group %s. No VM provisioning or reset.\n' "$action" "$DIGITAFRICA_DEPLOYMENT_WORKER_GROUP"
 if [[ " $* " != *' --syntax-check '* ]]; then
-  read -r -p "Type ${action} to confirm this Big Data runtime operation: " answer
-  [[ "$answer" == "$action" ]] || exit 1
+  case "$action" in
+    prepare) prompt='Prepare the Spark direct-submission runtime? [y/N]: ' ;;
+    start) prompt='Start the Spark direct-submission runtime? [y/N]: ' ;;
+  esac
+  answer=''
+  IFS= read -r -p "$prompt" answer || exit 1
+  [[ "$answer" =~ ^[yY]$ ]] || exit 1
 fi
 ansible-playbook -i "$DIGITAFRICA_INVENTORY" \
   "${WORKSHOP_CONTEXT_REPOSITORY_ROOT}/playbooks/participant-big-data-spark-direct.yml" \

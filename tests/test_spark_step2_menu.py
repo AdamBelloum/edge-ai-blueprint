@@ -75,7 +75,7 @@ class SparkStep2MenuTests(unittest.TestCase):
         self.assertEqual(text.count("CALL_GUARD:big-data"), 1)
         self.assertLess(text.index("CALL_GUARD"), text.index("CALL_CANDIDATE"))
         self.assertNotIn("CALL_CANDIDATE:--", text)
-        self.assertIn("typed maintenance-window confirmation", text)
+        self.assertIn("Confirm the maintenance window with [y/N] before staging.", text)
         self.assertIn("execution readiness remain unvalidated", text)
 
     def test_guard_failure_blocks_wrapper(self):

@@ -67,14 +67,17 @@ class CandidateStagingWrapperTests(unittest.TestCase):
         self.assertEqual(args[args.index("-i") + 1], self.env["FAKE_INVENTORY"])
 
     def test_confirmed_staging_passes_maintenance_attestation(self):
-        result = self.run_wrapper(answer="stage-candidate\n")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        args = self.captured()
-        self.assertIn("big_data_livy_stage_maintenance_confirmed=true", args)
-        self.assertNotIn("--syntax-check", args)
+        for answer in ("y\n", "Y\n"):
+            with self.subTest(answer=answer):
+                self.capture.unlink(missing_ok=True)
+                result = self.run_wrapper(answer=answer)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = self.captured()
+                self.assertIn("big_data_livy_stage_maintenance_confirmed=true", args)
+                self.assertNotIn("--syntax-check", args)
 
     def test_refusal_or_eof_does_not_invoke_ansible(self):
-        for answer in ("no\n", ""):
+        for answer in ("", "\n", "n\n", "N\n", "no\n", "yes\n", "stage-candidate\n", " y\n", "y \n"):
             with self.subTest(answer=answer):
                 result = self.run_wrapper(answer=answer)
                 self.assertEqual(result.returncode, 1)

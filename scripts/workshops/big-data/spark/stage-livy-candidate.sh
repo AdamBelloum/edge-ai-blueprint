@@ -52,8 +52,8 @@ maintenance=false
 if [[ "$syntax_seen" == false ]]; then
   printf '%s\n'     'Candidate assets only; existing compose.yaml and credentials remain unchanged.'     'Confirm a maintenance window excluding other Docker/filesystem writers.'     'The locked archive will be downloaded; private delivery storage is retained.'     'No image build or service startup; runtime readiness remains unvalidated.'
   answer=''
-  read -r -p 'Type stage-candidate to confirm: ' answer || exit 1
-  [[ "$answer" == stage-candidate ]] || exit 1
+  IFS= read -r -p 'Confirm maintenance and stage Livy runtime files? [y/N]: ' answer || exit 1
+  [[ "$answer" =~ ^[yY]$ ]] || exit 1
   maintenance=true
 else
   printf '%s\n' 'Syntax check only; no tasks, downloads or staging.'

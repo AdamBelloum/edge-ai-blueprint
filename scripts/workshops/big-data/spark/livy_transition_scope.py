@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve one exact inventory host; never run VM tasks."""
+"""List workshop machines or validate one exact host; never run VM tasks."""
 import json
 import re
 import subprocess
@@ -10,9 +10,9 @@ GROUP = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 
 
 def validate_scope(data, group, host):
-    if not GROUP.fullmatch(group) or not HOST.fullmatch(host):
+    if not GROUP.fullmatch(group) or (host is not None and not HOST.fullmatch(host)):
         raise ValueError("Invalid exact scope.")
-    if not isinstance(data, dict) or group not in data or host in data:
+    if not isinstance(data, dict) or group not in data or (host is not None and host in data):
         raise ValueError("Missing group or ambiguous group/host name.")
     visited, members = set(), set()
 
@@ -33,15 +33,21 @@ def validate_scope(data, group, host):
             visit(child)
 
     visit(group)
+    if host is None:
+        if not members:
+            raise ValueError("No workshop machines found.")
+        if any(not HOST.fullmatch(member) or member in data for member in members):
+            raise ValueError("Invalid or ambiguous workshop machine name.")
+        return sorted(members)
     if host not in members:
-        raise ValueError("Pilot is outside the selected worker group.")
+        raise ValueError("Machine is outside the selected worker group.")
     return host
 
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 3:
-        print("Exact inventory, group and host required.", file=sys.stderr)
+        print("Inventory, group and an exact host or --list-workers required.", file=sys.stderr)
         return 2
     inventory, group, host = args
     try:
@@ -50,9 +56,13 @@ def main(argv=None):
             check=True, text=True, capture_output=True, timeout=60)
         if len(result.stdout) > 16 * 1024 * 1024:
             raise ValueError("Inventory exceeded its bound.")
-        validate_scope(json.loads(result.stdout), group, host)
+        resolved = validate_scope(
+            json.loads(result.stdout), group,
+            None if host == "--list-workers" else host)
+        if host == "--list-workers":
+            print("\n".join(resolved))
     except Exception:
-        print("Pilot scope verification failed; no VM tasks were run.",
+        print("Workshop machine verification failed; no VM tasks were run.",
               file=sys.stderr)
         return 2
     return 0

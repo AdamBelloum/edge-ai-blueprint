@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$pilot" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || {
-  printf 'ERROR: exact pilot hostname required, not an expression.\n' >&2
+  printf 'ERROR: a single valid workshop machine name is required.\n' >&2
   exit 2
 }
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,16 +67,21 @@ confirmed=false
 options=()
 if [[ "$syntax" == true ]]; then
   options+=(--syntax-check)
-  printf 'Syntax check only for exact pilot %s; no VM tasks.\n' "$pilot"
+  printf 'Configuration check only for workshop machine %s; no VM tasks.\n' "$pilot"
 else
   printf '%s\n' \
-    "Exact pilot: $pilot" \
-    'Participants must not submit; other administrators must not alter Docker/runtime files.' \
-    'The direct client will stop; only missing Livy services may start.' \
-    'No automatic rollback. Participant REST computation remains unverified.'
+    'Other administrators must not alter runtime files during this operation.' \
+    'The direct submission client will stop; missing Livy services may start.' \
+    'No automatic rollback. Participant access via Livy remains unverified.'
+  printf '\n%s\n' \
+    'NOTE ============================================================' \
+    "Switch the selected workshop machine ($pilot) to Livy submission mode?" \
+    'Participant submissions must be paused.' \
+    'Returning to direct submission requires RESET.' \
+    '================================================================='
   answer=''
-  read -r -p "Type transition-${pilot}-submissions-paused to confirm: " answer || exit 1
-  [[ "$answer" == "transition-${pilot}-submissions-paused" ]] || exit 1
+  IFS= read -r -p 'Continue? [y/N]: ' answer || exit 1
+  [[ "$answer" =~ ^[yY]$ ]] || exit 1
   confirmed=true
 fi
 
