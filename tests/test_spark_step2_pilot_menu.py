@@ -73,7 +73,7 @@ class PilotMenuTests(unittest.TestCase):
     def test_primary_menu_opens_submenu_without_operations(self):
         rc, text = self.run_entry("2\n0\n0\n", entry="run_big_data_spark_menu")
         self.assertEqual(rc, 0)
-        self.assertEqual(text.count("HEADING:Spark / Step 2 pilot transition"), 1)
+        self.assertEqual(text.count("HEADING:Spark / Step 2 - submission via Livy REST API"), 1)
         self.assertNotIn("CALL_", text)
 
     def test_syntax_delegates_exact_host_and_syntax_flag_after_preflight(self):
