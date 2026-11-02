@@ -74,6 +74,36 @@ class Docker:
             volumes,
         )
 
+    def bind_sources(self):
+        """Inspect all remaining containers; never authorise their removal."""
+        identifiers = self.command(
+            "container", "ls", "--all", "--quiet", "--no-trunc"
+        ).split()
+        for identifier in identifiers:
+            full_id(identifier)
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("Duplicate all-container discovery identity.")
+        records = self.inspect("container", sorted(identifiers))
+        sources = set()
+        for record in records:
+            mounts = record.get("Mounts")
+            if not isinstance(mounts, list):
+                raise ValueError("Missing or invalid remaining-container mounts.")
+            for mount in mounts:
+                if not isinstance(mount, dict) or mount.get("Type") not in {
+                    "bind", "volume", "tmpfs"
+                }:
+                    raise ValueError("Invalid remaining-container mount.")
+                if mount["Type"] != "bind":
+                    continue
+                source = mount.get("Source")
+                if (not isinstance(source, str) or not source.startswith("/")
+                        or "\x00" in source
+                        or any(part in {".", ".."} for part in source.split("/"))):
+                    raise ValueError("Invalid absolute Docker bind source.")
+                sources.add("/" + "/".join(part for part in source.split("/") if part))
+        return sorted(sources)
+
     def remove_container(self, identifier):
         self.command("container", "rm", "--force", full_id(identifier))
 

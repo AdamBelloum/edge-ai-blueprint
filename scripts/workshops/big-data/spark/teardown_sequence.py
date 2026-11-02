@@ -12,7 +12,8 @@ def teardown(*, snapshot, load_evidence, save_evidence,
     """
     evidence = set(load_evidence())
     initial = validate_snapshot(
-        *snapshot(), verified_legacy_network_ids=evidence
+        *snapshot(), verified_legacy_network_ids=evidence,
+        allow_livy_transition=True
     )
     evidence.update(initial["legacy_network_ids"])
 
@@ -30,7 +31,8 @@ def teardown(*, snapshot, load_evidence, save_evidence,
 
     # Revalidate current ownership and endpoints before removing networks.
     current = validate_snapshot(
-        *snapshot(), verified_legacy_network_ids=evidence
+        *snapshot(), verified_legacy_network_ids=evidence,
+        allow_livy_transition=True
     )
     if current["container_ids"]:
         raise ValueError("Project containers remain or appeared; cleanup refused.")
@@ -41,7 +43,8 @@ def teardown(*, snapshot, load_evidence, save_evidence,
         remove_network(identifier)
 
     final = validate_snapshot(
-        *snapshot(), verified_legacy_network_ids=evidence
+        *snapshot(), verified_legacy_network_ids=evidence,
+        allow_livy_transition=True
     )
     if final["container_ids"] or final["network_ids"]:
         raise ValueError("Spark runtime cleanup could not be verified.")
