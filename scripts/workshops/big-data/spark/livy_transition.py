@@ -86,7 +86,7 @@ def plan_transition(containers, networks, volumes, master_status, *,
             "Both SSH access services are running; inspect explicitly.")
     require(isinstance(master_status, dict)
             and master_status.get("activeapps") == []
-            and master_status.get("waitingapps") == [],
+            and master_status.get("waitingapps", []) == [],
             "Spark applications are active, queued, or unverified; transition refused.")
     workers = master_status.get("workers")
     require(isinstance(workers, list) and len(workers) == 1

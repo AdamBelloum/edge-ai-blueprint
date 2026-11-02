@@ -68,7 +68,7 @@
       - --maintenance-window-confirmed
       - --submissions-paused-confirmed
     register: livy_warm_transition
-    changed_when: (livy_warm_transition.stdout | from_json).changed
+    changed_when: livy_warm_transition.rc == 0 and (livy_warm_transition.stdout | from_json).changed
   - name: Report runtime verification only
     ansible.builtin.debug:
       msg: Warm runtime transition verified. Participant SSH-forwarded REST computation

@@ -36,7 +36,7 @@ def fixture(gateway=False):
         container["Image"] = images[transition.REFERENCES[service]]
         hashes[service] = format(index, "064x")
         container["Config"]["Labels"]["com.docker.compose.config-hash"] = hashes[service]
-    status = {"activeapps": [], "waitingapps": [], "workers": [{"state": "ALIVE", "host": "spark-worker-1"}]}
+    status = {"activeapps": [], "workers": [{"state": "ALIVE", "host": "spark-worker-1"}]}
     return (containers, networks, volumes), status, images, hashes
 
 
@@ -74,11 +74,21 @@ class TransitionPlanTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.plan(state, status, images, hashes)
 
-    def test_missing_queue_observation_is_refused(self):
+    def test_spark_353_master_without_waitingapps_is_accepted(self):
         state, status, images, hashes = fixture()
-        status.pop("waitingapps")
-        with self.assertRaises(ValueError):
-            self.plan(state, status, images, hashes)
+        self.assertNotIn("waitingapps", status)
+        plan = self.plan(state, status, images, hashes)
+        self.assertEqual(plan["stop_client_id"], CID)
+        self.assertEqual(plan["start_services"], ["spark-livy", "spark-livy-access"])
+
+    def test_malformed_application_observations_are_refused(self):
+        for field in ("activeapps", "waitingapps"):
+            for value in (None, {}, "", False):
+                with self.subTest(field=field, value=value):
+                    state, status, images, hashes = fixture()
+                    status[field] = value
+                    with self.assertRaises(ValueError):
+                        self.plan(state, status, images, hashes)
 
     def test_wrong_worker_missing_worker_and_extra_worker_are_refused(self):
         for workers in ([], [{"state": "DEAD", "host": "spark-worker-1"}],
