@@ -44,12 +44,13 @@ class SparkMenuSimplificationTests(unittest.TestCase):
     def test_primary_menu_has_four_choices_and_explicit_wip_limits(self):
         text = self.run_menu("0\n")
         self.assertIn("OPTION:1:Stage 1 - direct submission workflow", text)
-        self.assertIn("OPTION:2:Prepare Step 2 - work-in-progress", text)
+        self.assertIn("OPTION:2:Step 2 - warm-transition pilot (work-in-progress)", text)
         self.assertIn("OPTION:3:Show workshop status", text)
         self.assertIn("OPTION:4:Maintenance and organiser tests", text)
         self.assertIn("publication alone is not workshop readiness", text)
-        self.assertIn("candidate asset staging only", text)
-        self.assertIn("execution remain unvalidated", text)
+        self.assertIn("candidate staging and an exact-host warm-transition pilot", text)
+        self.assertIn("participant verification is separate", text)
+        self.assertIn("readiness remains unvalidated", text)
         self.assertNotIn("OPTION:5:", text)
         self.assertNotIn("Advanced", text)
         self.assertNotIn("CALL_", text)
@@ -61,7 +62,7 @@ class SparkMenuSimplificationTests(unittest.TestCase):
         self.assertNotIn("CALL_RUNTIME", text)
         self.assertNotIn("CALL_TEST", text)
 
-    def test_step2_opens_candidate_workflow_without_direct_runtime_action(self):
+    def test_step2_opens_pilot_submenu_without_direct_runtime_action(self):
         text = self.run_menu("2\n0\n")
         self.assertEqual(text.count("CALL_STAGE2"), 1)
         self.assertNotIn("CALL_UNAVAILABLE", text)
