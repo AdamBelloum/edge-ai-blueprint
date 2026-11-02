@@ -1,0 +1,75 @@
+---
+- name: Require the exact acknowledged pilot before staging or build
+  hosts: '{{ big_data_worker_group }}'
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+  - name: Refuse expanded scope or missing maintenance acknowledgement
+    ansible.builtin.assert:
+      that:
+      - ansible_play_hosts_all == [big_data_livy_pilot_host]
+      - inventory_hostname == big_data_livy_pilot_host
+      - big_data_livy_pilot_host in groups[big_data_worker_group]
+      - big_data_livy_build_candidate is sameas true
+      - big_data_livy_stage_maintenance_confirmed is sameas true
+      - big_data_livy_transition_maintenance_confirmed is sameas true
+      - big_data_livy_transition_submissions_paused is sameas true
+      fail_msg: Exact pilot and submission-free maintenance window required.
+- ansible.builtin.import_playbook: stage-big-data-spark-livy-candidate.yml
+- ansible.builtin.import_playbook: build-big-data-livy-image.yml
+  vars:
+    big_data_livy_build_candidate: true
+- name: Warm-transition the same protected Spark pilot runtime
+  hosts: '{{ big_data_worker_group }}'
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+  - name: Require this host staging handoff and acknowledgements
+    ansible.builtin.assert:
+      that:
+      - inventory_hostname == big_data_livy_pilot_host
+      - livy_delivery is defined
+      - livy_delivery.path is match('^/var/lib/digitafrica-livy-stage-[A-Za-z0-9_-]+$')
+      - big_data_livy_transition_maintenance_confirmed is sameas true
+      - big_data_livy_transition_submissions_paused is sameas true
+  - name: Deliver the complete transition Python import closure
+    ansible.builtin.copy:
+      src: '{{ playbook_dir }}/../scripts/workshops/big-data/spark/{{ item }}'
+      dest: '{{ livy_delivery.path }}/helpers/{{ item }}'
+      owner: root
+      group: root
+      mode: '0600'
+    loop:
+    - livy_candidate_assets.py
+    - livy_candidate_compose.py
+    - livy_candidate_deliver.py
+    - livy_candidate_delivery.py
+    - livy_candidate_observe.py
+    - livy_candidate_stage.py
+    - livy_candidate_verify.py
+    - livy_transition.py
+    - livy_transition_docker.py
+    - livy_transition_execute.py
+    - livy_transition_live.py
+    - teardown_assets.py
+    - teardown_directory.py
+    - teardown_docker.py
+    - teardown_evidence.py
+    - teardown_validation.py
+  - name: Execute the acknowledged shared-lock warm transition once
+    ansible.builtin.command:
+      argv:
+      - '{{ ansible_facts.python.executable }}'
+      - '{{ livy_delivery.path }}/helpers/livy_transition_live.py'
+      - '{{ livy_delivery.path }}'
+      - --maintenance-window-confirmed
+      - --submissions-paused-confirmed
+    register: livy_warm_transition
+    changed_when: (livy_warm_transition.stdout | from_json).changed
+  - name: Report runtime verification only
+    ansible.builtin.debug:
+      msg: Warm runtime transition verified. Participant SSH-forwarded REST computation
+        is NOT VERIFIED. No accounts or workspaces were recreated.

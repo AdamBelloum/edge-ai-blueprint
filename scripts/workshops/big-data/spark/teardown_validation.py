@@ -29,6 +29,14 @@ LIVY_MOUNTS = {
 }
 
 
+TRANSITION_CONFIG = ROOT + "/compose.livy-transition.yaml"
+TRANSITION_LIVY_MOUNTS = {
+    (ROOT + "/livy-transition/livy.conf", "/opt/livy/conf/livy.conf"),
+    (ROOT + "/livy-transition/livy-spark-defaults.conf",
+     "/opt/spark/conf/spark-defaults.conf"),
+}
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -201,13 +209,18 @@ def validate_participant_service(container, *, livy_access=False):
 
 
 def validate_snapshot(containers, networks, volumes, *,
-                      verified_legacy_network_ids=()):
+                      verified_legacy_network_ids=(),
+                      allow_livy_transition=False):
     """Return verified IDs; reject ambiguous ownership before deletion.
 
     verified_legacy_network_ids must come from protected, host-local
     evidence written after successful validation, not from user input.
     Current network identity and endpoint checks still apply on retry.
     """
+    # Opt-in only for the warm-transition planner. The default teardown
+    # contract remains unchanged. This flag is not a live-readiness assertion.
+    require(type(allow_livy_transition) is bool,
+            "Transition validation opt-in must be boolean.")
     require(not volumes, "Unexpected project-labelled volumes; teardown refused.")
     require(len(networks) <= 2, "Unexpected project networks.")
     require(all(isinstance(n.get("Id"), str)
@@ -243,10 +256,17 @@ def validate_snapshot(containers, networks, volumes, *,
         require(service not in services, "Duplicate Spark service.")
         services.add(service)
 
+        config_files = ROOT + "/compose.yaml"
+        if (allow_livy_transition
+                and service in {"spark-livy", "spark-livy-access"}
+                and labels.get("com.docker.compose.project.config_files")
+                == TRANSITION_CONFIG):
+            config_files = TRANSITION_CONFIG
+
         expected = {
             **OWNERSHIP,
             "com.docker.compose.project": PROJECT,
-            "com.docker.compose.project.config_files": ROOT + "/compose.yaml",
+            "com.docker.compose.project.config_files": config_files,
             "com.docker.compose.project.working_dir": ROOT,
             "com.docker.compose.container-number": "1",
             "com.docker.compose.oneoff": "False",
@@ -263,7 +283,9 @@ def validate_snapshot(containers, networks, volumes, *,
         mounts = container.get("Mounts", [])
         expected_mounts = {DATA_MOUNT}
         if service == "spark-livy":
-            expected_mounts |= LIVY_MOUNTS
+            expected_mounts |= (TRANSITION_LIVY_MOUNTS
+                                if config_files == TRANSITION_CONFIG
+                                else LIVY_MOUNTS)
         elif service in {"spark-client", "spark-livy-access"}:
             livy_access = service == "spark-livy-access"
             validate_participant_service(container, livy_access=livy_access)

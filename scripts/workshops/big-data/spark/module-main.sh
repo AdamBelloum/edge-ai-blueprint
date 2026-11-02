@@ -303,10 +303,10 @@ run_big_data_spark_menu() {
     workshop_ui_heading "Big Data / Spark Beginner - work-in-progress"
     workshop_ui_section "PREPARE WORKSHOP"
     workshop_ui_option 1 "Stage 1 - direct submission workflow"
-    workshop_ui_option 2 "Prepare Step 2 - work-in-progress"
+    workshop_ui_option 2 "Step 2 - warm-transition pilot (work-in-progress)"
     printf '\n%s\n' \
       'Step 1 opens the ordered workflow and requires staged-credential verification; publication alone is not workshop readiness.' \
-      'Step 2 integrated preparation is not implemented; selecting it performs no changes.'
+      'Step 2 offers candidate staging and an exact-host warm-transition pilot; participant verification is separate and readiness remains unvalidated.'
     workshop_ui_section "STATUS AND TOOLS"
     workshop_ui_option 3 "Show workshop status"
     workshop_ui_option 4 "Maintenance and organiser tests"
@@ -317,8 +317,8 @@ run_big_data_spark_menu() {
     case "$choice" in
       1) big_data_spark_stage1_menu ||
            printf 'Spark Stage 1 workflow did not complete.\n' >&2 ;;
-      2) big_data_spark_future_unavailable 'Step 2 integrated preparation' ||
-           printf 'Spark Step 2 preparation is work-in-progress; no changes performed.\n' >&2 ;;
+      2) big_data_spark_step2_menu ||
+           printf 'Spark Step 2 candidate workflow did not complete; inspect before retrying.\n' >&2 ;;
       3) big_data_spark_show_status ||
            printf 'Workshop selection status could not be retrieved.\n' >&2 ;;
       4) big_data_spark_maintenance_menu ;;
@@ -446,6 +446,133 @@ big_data_spark_stage1_menu() {
       7) big_data_spark_show_status || printf 'Selection status could not be read.\n' >&2 ;;
       0) return 0 ;;
       *) printf 'Choose 0, 1, 2, 3, 4, 5 or 7.\n' >&2 ;;
+    esac
+  done
+}
+
+
+# Candidate staging only. Do not route through legacy prepare/build/start tools.
+# The standalone wrapper validates its release context and owns the typed
+# maintenance confirmation. Opening this submenu performs no runtime operation.
+big_data_spark_step2_action() {
+  local action="${1:-}" helper rc
+  local -a args=()
+  case "$action" in
+    syntax-check) args=(--syntax-check) ;;
+    stage) ;;
+    *) printf 'Unsupported Step 2 candidate action: %s\n' "$action" >&2; return 2 ;;
+  esac
+  helper="$BIG_DATA_SPARK_MODULE_DIR/stage-livy-candidate.sh"
+  [[ -x "$helper" ]] || {
+    printf 'Missing executable candidate-staging helper: %s\n' "$helper" >&2
+    return 2
+  }
+  if [[ "$action" == stage ]]; then
+    ensure_workshop_activation_allowed big-data || return $?
+    printf '%s\n' \
+      'The staging wrapper requires a typed maintenance-window confirmation.' \
+      'Exclude other Docker/filesystem writers before confirming.'
+  fi
+  if "$helper" "${args[@]}"; then
+    if [[ "$action" == syntax-check ]]; then
+      printf '%s\n' 'Candidate staging syntax check passed; no tasks, downloads or staging were performed.'
+    else
+      printf '%s\n' \
+        'Candidate-staging helper completed; inspect the per-host staging evidence.' \
+        'No image build, startup, publication or credential changes were requested.'
+    fi
+    printf '%s\n' 'Integrated Step 2 preparation and execution readiness remain unvalidated.'
+  else
+    rc=$?
+    printf 'Step 2 candidate %s failed or was cancelled (status %s). Inspect before retrying; staging evidence may remain.\n' \
+      "$action" "$rc" >&2
+    return "$rc"
+  fi
+}
+
+
+# Pilot-only integration. Delegate runtime mutation and typed confirmation to
+# the standalone wrapper; never call legacy startup, publication or reset.
+big_data_spark_step2_transition_action() {
+  local action="${1:-}" pilot="${2:-}" helper rc
+  local -a args=()
+  case "$action" in
+    syntax-check|transition) ;;
+    *) printf 'Unsupported Step 2 transition action: %s\n' "$action" >&2; return 2 ;;
+  esac
+  [[ "$pilot" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || {
+    printf 'Step 2 blocked: one exact pilot inventory host is required, not a pattern.\n' >&2
+    return 2
+  }
+  helper="$BIG_DATA_SPARK_MODULE_DIR/warm-transition.sh"
+  [[ -x "$helper" ]] || {
+    printf 'Missing executable warm-transition helper: %s\n' "$helper" >&2
+    return 2
+  }
+  # Existing preflight checks selected context, reset markers and complete
+  # cohort metadata. The wrapper independently validates fresh exact-host scope.
+  big_data_spark_stage1_preflight || return $?
+  args=(--limit "$pilot")
+  [[ "$action" != syntax-check ]] || args+=(--syntax-check)
+  printf '%s\n'     'Reuse the existing Step 1 cohort, credentials and participant workspaces.'     'The wrapper owns typed confirmation; no confirmation-bypass flags are supplied.'
+  if "$helper" "${args[@]}"; then
+    if [[ "$action" == syntax-check ]]; then
+      printf '%s\n' 'Warm-transition syntax check passed; no VM tasks were executed.'
+    else
+      printf '%s\n'         'Warm-transition helper completed; inspect per-host runtime transition evidence.'         'Participant verification, credential staging and publication were not requested.'
+    fi
+    printf '%s\n' 'Participant and full-activity execution readiness remain unvalidated.'
+  else
+    rc=$?
+    printf 'Step 2 %s failed or was cancelled (status %s). Inspect before retrying; no automatic rollback or retry.\n'       "$action" "$rc" >&2
+    return "$rc"
+  fi
+}
+
+big_data_spark_step2_verification_guidance() {
+  printf '%s\n'     'GUIDANCE ONLY: no participant probe or remote operation is started.'     'After an authorised pilot transition, use one existing managed participant identity in its JupyterHub environment.'     'Make the reviewed participant-livy-verify.py available beside the existing 02_spark_via_livy.py and spark_livy_access.py.'     'The verifier checks the two asset hashes; do not edit them or replace managed credentials.'     'An authorised operator must independently confirm the expected SSH host and port for that identity; an inventory alias is not necessarily the SSH endpoint.'     'The verifier requires --workspace, --evidence-dir, --expected-ssh-host and --expected-ssh-port.'     'It also requires explicit --maintenance-window-confirmed and --submissions-paused-confirmed acknowledgements.'     'Use the existing prepared dataset and a private evidence location; do not set LIVY_URL or LIVY_DATA_PATH overrides.'     'All submissions and competing administrative writes must be paused. This probe is not a remote submission lock.'     'Inspect the verifier result and evidence: worker computation, owned-session HTTP 404 cleanup, empty post-cleanup inventory and closed forwarding must be confirmed.'     'On FAILED, unknown session creation or unconfirmed cleanup: stop and inspect; never guess session IDs, bulk-delete sessions or retry automatically.'     'PASSED applies only to one managed identity and the bounded probe; it does not establish cohort capacity or full-activity readiness.'     'Workspace delivery of the verifier is not automated here; no participant publication or workshop selection is changed.'     'Controlled participant and full-activity testing still require separate authorisation.'
+}
+
+big_data_spark_step2_menu() {
+  local choice pilot
+  while true; do
+    workshop_ui_heading "Spark / Step 2 pilot transition - work-in-progress"
+    printf '%s\n' \
+      'Requires an existing prepared one-worker Step 1 configuration.' \
+      'Opening this menu performs no operations.' \
+      'Staging downloads the locked archive and retains private delivery bundles.' \
+      'Candidate staging alone does not build or start services.'       'Warm transition may build the reviewed image, stop the direct client and start missing Livy services.'       'No account creation, credential replacement, participant publication or reset is offered here.' \
+      'Integrated Step 2 preparation and execution readiness remain unvalidated.'
+    workshop_ui_section "CANDIDATE ASSETS ONLY"
+    workshop_ui_option 1 "Syntax-check candidate staging - no VM tasks"
+    workshop_ui_option 2 "Stage verified candidate assets - maintenance confirmation required"
+    workshop_ui_section "EXACT-HOST WARM-TRANSITION PILOT"
+    workshop_ui_option 3 "Syntax-check warm transition for one exact host - no VM tasks"
+    workshop_ui_option 4 "Warm transition one exact host - paused submissions and typed confirmation"
+    workshop_ui_section "PARTICIPANT VERIFICATION"
+    workshop_ui_option 5 "Show verification prerequisites and evidence checks - guidance only"
+    printf '\n'
+    workshop_ui_option 0 "Back to Spark"
+    workshop_ui_prompt
+    read -r choice || return 0
+    case "$choice" in
+      1) big_data_spark_step2_action syntax-check ||
+           printf 'Candidate syntax check did not complete.\n' >&2 ;;
+      2) big_data_spark_step2_action stage ||
+           printf 'Candidate staging did not complete; inspect before retrying.\n' >&2 ;;
+      3|4)
+        read -r -p 'Exact pilot inventory host (no pattern): ' pilot || return 0
+        if [[ "$choice" == 3 ]]; then
+          big_data_spark_step2_transition_action syntax-check "$pilot" ||
+            printf 'Warm-transition syntax check did not complete.\n' >&2
+        else
+          big_data_spark_step2_transition_action transition "$pilot" ||
+            printf 'Warm transition did not complete; inspect before retrying.\n' >&2
+        fi
+        ;;
+      5) big_data_spark_step2_verification_guidance ;;
+      0) return 0 ;;
+      *) printf 'Choose a value from 0 through 5.\n' >&2 ;;
     esac
   done
 }

@@ -1,0 +1,225 @@
+# Candidate delivery only. Never invoke standard preparation or transition execution.
+---
+- name: Stage isolated Livy transition candidate assets on selected VMs
+  hosts: '{{ big_data_worker_group }}'
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    livy_candidate_defaults: '{{ lookup(''file'', playbook_dir ~ ''/../roles/big_data_spark_runtime/defaults/main.yml'')
+      | from_yaml }}'
+    livy_candidate_templates:
+    - template: compose.yaml.j2
+      path: compose.livy-transition.yaml
+    - template: livy.Dockerfile.j2
+      path: livy-transition/livy-build/Dockerfile
+    - template: livy.conf.j2
+      path: livy-transition/livy.conf
+    - template: livy-spark-defaults.conf.j2
+      path: livy-transition/livy-spark-defaults.conf
+  tasks:
+  - name: Select reviewed candidate rendering inputs without preparing runtime
+    ansible.builtin.set_fact:
+      big_data_spark_image: '{{ big_data_spark_image | default(livy_candidate_defaults.big_data_spark_image)
+        }}'
+      big_data_spark_runtime_host_path: '{{ big_data_spark_runtime_host_path | default(livy_candidate_defaults.big_data_spark_runtime_host_path)
+        }}'
+      big_data_spark_project_name: '{{ big_data_spark_project_name | default(livy_candidate_defaults.big_data_spark_project_name)
+        }}'
+      big_data_spark_worker_count: 1
+      big_data_spark_master_ui_loopback_port: '{{ big_data_spark_master_ui_loopback_port | default(livy_candidate_defaults.big_data_spark_master_ui_loopback_port)
+        }}'
+      big_data_spark_master_container_memory: '{{ big_data_spark_master_container_memory | default(livy_candidate_defaults.big_data_spark_master_container_memory)
+        }}'
+      big_data_spark_worker_container_memory: '{{ big_data_spark_worker_container_memory | default(livy_candidate_defaults.big_data_spark_worker_container_memory)
+        }}'
+      big_data_spark_client_enabled: true
+      big_data_spark_client_image: '{{ big_data_spark_client_image | default(livy_candidate_defaults.big_data_spark_client_image)
+        }}'
+      big_data_spark_client_port: '{{ big_data_spark_client_port | default(livy_candidate_defaults.big_data_spark_client_port)
+        }}'
+      big_data_spark_client_container_memory: '{{ big_data_spark_client_container_memory | default(livy_candidate_defaults.big_data_spark_client_container_memory)
+        }}'
+      big_data_livy_enabled: true
+      big_data_livy_version: '{{ big_data_livy_version | default(livy_candidate_defaults.big_data_livy_version)
+        }}'
+      big_data_livy_archive_url: '{{ big_data_livy_archive_url | default(livy_candidate_defaults.big_data_livy_archive_url)
+        }}'
+      big_data_livy_archive_sha512: '{{ big_data_livy_archive_sha512 | default(livy_candidate_defaults.big_data_livy_archive_sha512)
+        }}'
+      big_data_livy_image: '{{ big_data_livy_image | default(livy_candidate_defaults.big_data_livy_image)
+        }}'
+      big_data_livy_container_memory: '{{ big_data_livy_container_memory | default(livy_candidate_defaults.big_data_livy_container_memory)
+        }}'
+      big_data_livy_access_enabled: true
+      big_data_livy_assets_host_path: /opt/digitafrica/big-data/runtime/spark/livy-transition
+      big_data_spark_client_bind_ip: '{{ big_data_spark_client_bind_ip | default('''', true) or ansible_host
+        | default('''') or (ansible_default_ipv4 | default({})).get(''address'', '''') }}'
+  - name: Require explicit maintenance confirmation and reviewed platform
+    ansible.builtin.assert:
+      that:
+      - not ansible_check_mode
+      - big_data_livy_stage_maintenance_confirmed | default(false) | bool
+      - ansible_system == 'Linux'
+      - ansible_architecture == 'x86_64'
+      - (ansible_processor_vcpus | int) >= 4
+      - (ansible_memtotal_mb | int) >= 7168
+      - (big_data_spark_worker_count | int) == 1
+      - big_data_spark_client_enabled | bool
+      - big_data_livy_enabled | bool
+      - big_data_livy_access_enabled | bool
+      - big_data_spark_client_bind_ip in ansible_all_ipv4_addresses
+      - big_data_spark_client_bind_ip not in ['0.0.0.0', '127.0.0.1']
+      - (big_data_spark_client_port | int) == 2222
+      - big_data_livy_assets_host_path == '/opt/digitafrica/big-data/runtime/spark/livy-transition'
+      - big_data_spark_runtime_host_path == livy_candidate_defaults.big_data_spark_runtime_host_path
+      - big_data_spark_project_name == livy_candidate_defaults.big_data_spark_project_name
+      - big_data_spark_image == livy_candidate_defaults.big_data_spark_image
+      - big_data_spark_client_image == livy_candidate_defaults.big_data_spark_client_image
+      - big_data_livy_version == livy_candidate_defaults.big_data_livy_version
+      - big_data_livy_image == livy_candidate_defaults.big_data_livy_image
+      - big_data_livy_archive_url == livy_candidate_defaults.big_data_livy_archive_url
+      - big_data_livy_archive_sha512 == livy_candidate_defaults.big_data_livy_archive_sha512
+      - big_data_livy_container_memory == livy_candidate_defaults.big_data_livy_container_memory
+      - big_data_spark_master_container_memory == livy_candidate_defaults.big_data_spark_master_container_memory
+      - big_data_spark_worker_container_memory == livy_candidate_defaults.big_data_spark_worker_container_memory
+      - big_data_spark_client_container_memory == livy_candidate_defaults.big_data_spark_client_container_memory
+      fail_msg: Requires the reviewed one-worker Step 1 inputs and an administrator-confirmed maintenance
+        window. Check mode is unsupported; use syntax-check for offline validation.
+  - name: Inspect temporary-delivery ancestors without following links
+    ansible.builtin.stat:
+      path: '{{ item }}'
+      follow: false
+      get_checksum: false
+    loop:
+    - /
+    - /var
+    - /var/lib
+    register: livy_delivery_ancestors
+  - name: Require protected root-owned delivery ancestors
+    ansible.builtin.assert:
+      that:
+      - item.stat.isdir | default(false)
+      - not (item.stat.islnk | default(false))
+      - (item.stat.uid | default(-1)) == 0
+      - (item.stat.mode | default('')) is match('^0[0-7][0145][0145]$')
+    loop: '{{ livy_delivery_ancestors.results }}'
+  - name: Allocate private temporary delivery storage outside runtime
+    ansible.builtin.tempfile:
+      state: directory
+      path: /var/lib
+      prefix: digitafrica-livy-stage-
+    register: livy_delivery
+  - name: Require the fixed temporary delivery namespace
+    ansible.builtin.assert:
+      that:
+      - livy_delivery.path is match('^/var/lib/digitafrica-livy-stage-[A-Za-z0-9_-]+$')
+  - name: Create private delivery and separate reference directories
+    ansible.builtin.file:
+      path: '{{ livy_delivery.path }}/{{ item }}'
+      state: directory
+      owner: root
+      group: root
+      mode: '0700'
+    loop:
+    - helpers
+    - livy-transition
+    - livy-transition/livy-build
+    - review
+    - review/livy-transition
+    - review/livy-transition/livy-build
+  - name: Deliver only the entry point and its local import closure
+    ansible.builtin.copy:
+      src: '{{ playbook_dir }}/../scripts/workshops/big-data/spark/{{ item }}'
+      dest: '{{ livy_delivery.path }}/helpers/{{ item }}'
+      owner: root
+      group: root
+      mode: '0600'
+    loop:
+    - livy_candidate_assets.py
+    - livy_candidate_compose.py
+    - livy_candidate_deliver.py
+    - livy_candidate_delivery.py
+    - livy_candidate_observe.py
+    - livy_candidate_stage.py
+    - livy_candidate_verify.py
+    - teardown_assets.py
+    - teardown_directory.py
+    - teardown_evidence.py
+  - name: Render candidate text assets and independent reference copies
+    ansible.builtin.template:
+      src: '{{ playbook_dir }}/../roles/big_data_spark_runtime/templates/{{ item.0.template }}'
+      dest: '{{ item.1 }}/{{ item.0.path }}'
+      owner: root
+      group: root
+      mode: '0600'
+    loop: '{{ livy_candidate_templates | product([livy_delivery.path, livy_delivery.path ~ ''/review''])
+      | list }}'
+  - name: Deliver the fixed build-context restriction and reference
+    ansible.builtin.copy:
+      dest: '{{ item }}/livy-transition/livy-build/.dockerignore'
+      content: '*
+
+        !Dockerfile
+
+        !livy.zip
+
+        '
+      owner: root
+      group: root
+      mode: '0600'
+    loop:
+    - '{{ livy_delivery.path }}'
+    - '{{ livy_delivery.path }}/review'
+  - name: Read the separately rendered reference texts
+    ansible.builtin.slurp:
+      src: '{{ livy_delivery.path }}/review/{{ item }}'
+    loop:
+    - compose.livy-transition.yaml
+    - livy-transition/livy-build/Dockerfile
+    - livy-transition/livy.conf
+    - livy-transition/livy-spark-defaults.conf
+    - livy-transition/livy-build/.dockerignore
+    register: livy_reference_texts
+  - name: Initialize the reference manifest for this host
+    ansible.builtin.set_fact:
+      livy_reviewed_texts: {}
+  - name: Assemble exact reference text without YAML conversion
+    ansible.builtin.set_fact:
+      livy_reviewed_texts: '{{ livy_reviewed_texts | combine({item.item: item.content | b64decode}) }}'
+    loop: '{{ livy_reference_texts.results }}'
+    loop_control:
+      label: '{{ item.item }}'
+  - name: Deliver the private reference manifest
+    ansible.builtin.copy:
+      dest: '{{ livy_delivery.path }}/reviewed-assets.json'
+      content: '{{ livy_reviewed_texts | to_json }}'
+      owner: root
+      group: root
+      mode: '0600'
+  - name: Download and verify the locked archive only into temporary storage
+    ansible.builtin.get_url:
+      url: '{{ big_data_livy_archive_url }}'
+      dest: '{{ livy_delivery.path }}/livy-transition/livy-build/livy.zip'
+      checksum: sha512:{{ big_data_livy_archive_sha512 }}
+      owner: root
+      group: root
+      mode: '0600'
+      timeout: 120
+      validate_certs: true
+  - name: Invoke locked verified create-only candidate staging
+    ansible.builtin.command:
+      argv:
+      - '{{ ansible_facts.python.executable }}'
+      - '{{ livy_delivery.path }}/helpers/livy_candidate_deliver.py'
+      - '{{ livy_delivery.path }}'
+      - --maintenance-window-confirmed
+    register: livy_candidate_result
+    changed_when: livy_candidate_result.rc == 0 and ((livy_candidate_result.stdout | from_json).created
+      | length) > 0
+  - name: Report staging only and retain private delivery evidence
+    ansible.builtin.debug:
+      msg: Candidate asset staging completed. No image was built and no service or credential was changed.
+        Runtime readiness is NOT VALIDATED. Private delivery bundle retained at {{ livy_delivery.path
+        }}.

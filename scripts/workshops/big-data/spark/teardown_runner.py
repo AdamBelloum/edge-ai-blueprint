@@ -24,6 +24,9 @@ def run_teardown():
                     remove_network=docker.remove_network,
                 )
                 result["removed_image_references"] = images.remove()
+                # Fresh inspection of all remaining containers is not removal authority.
+                # Keep both locks held and require exclusive administrator control.
+                assets.check_remaining_docker_sources(docker.bind_sources())
                 result["removed_asset_paths"] = assets.remove() + seed.remove()
                 result["retry_evidence_removed"] = clear_evidence(directory_fd, daemon_id)
                 return result

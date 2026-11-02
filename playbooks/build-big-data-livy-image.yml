@@ -5,6 +5,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   vars_files:
     - ../roles/big_data_spark_runtime/defaults/main.yml
   tasks:
@@ -33,7 +34,7 @@
           - --pull=false
           - --network=none
           - --file
-          - "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+          - "{{ livy_selected_build_context }}/Dockerfile"
           - --tag
           - "{{ big_data_livy_image }}"
           - --label
@@ -42,7 +43,7 @@
           - "org.digitafrica.livy.dockerfile-sha512={{ livy_build_files.results[0].stat.checksum }}"
           - --label
           - "org.digitafrica.livy.spark-base={{ big_data_spark_image }}"
-          - "{{ big_data_spark_runtime_host_path }}/livy-build"
+          - "{{ livy_selected_build_context }}"
       changed_when: true
       when: (livy_image_before_build.stdout | trim) == ''
 

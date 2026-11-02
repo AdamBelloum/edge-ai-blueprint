@@ -3,6 +3,10 @@
 - name: Validate the locked Livy release inputs
   ansible.builtin.assert:
     that:
+      - >-
+        (big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path))
+        in [big_data_spark_runtime_host_path,
+            big_data_spark_runtime_host_path ~ '/livy-transition']
       - big_data_livy_version == '0.9.0-incubating'
       - big_data_livy_archive_url == 'https://archive.apache.org/dist/incubator/livy/0.9.0-incubating/apache-livy-0.9.0-incubating_2.12-bin.zip'
       - big_data_livy_archive_sha512 is match('^[0-9a-f]{128}$')
@@ -16,7 +20,7 @@
 
 - name: Create the protected Livy build context
   ansible.builtin.file:
-    path: "{{ big_data_spark_runtime_host_path }}/livy-build"
+    path: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-build"
     state: directory
     owner: root
     group: root
@@ -25,7 +29,7 @@
 - name: Download and verify the locked Livy archive
   ansible.builtin.get_url:
     url: "{{ big_data_livy_archive_url }}"
-    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/livy.zip"
+    dest: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-build/livy.zip"
     checksum: "sha512:{{ big_data_livy_archive_sha512 }}"
     owner: root
     group: root
@@ -36,14 +40,14 @@
 - name: Stage the pinned Livy Dockerfile
   ansible.builtin.template:
     src: livy.Dockerfile.j2
-    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+    dest: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-build/Dockerfile"
     owner: root
     group: root
     mode: '0600'
 
 - name: Restrict the Livy Docker build context
   ansible.builtin.copy:
-    dest: "{{ big_data_spark_runtime_host_path }}/livy-build/.dockerignore"
+    dest: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-build/.dockerignore"
     content: |
       *
       !Dockerfile
@@ -55,7 +59,7 @@
 - name: Stage the organiser-managed Livy configuration
   ansible.builtin.template:
     src: livy.conf.j2
-    dest: "{{ big_data_spark_runtime_host_path }}/livy.conf"
+    dest: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy.conf"
     owner: root
     group: root
     mode: '0644'
@@ -63,7 +67,7 @@
 - name: Stage Spark driver networking defaults for Livy
   ansible.builtin.template:
     src: livy-spark-defaults.conf.j2
-    dest: "{{ big_data_spark_runtime_host_path }}/livy-spark-defaults.conf"
+    dest: "{{ big_data_livy_assets_host_path | default(big_data_spark_runtime_host_path) }}/livy-spark-defaults.conf"
     owner: root
     group: root
     mode: '0644'

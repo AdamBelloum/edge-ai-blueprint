@@ -11,6 +11,20 @@ from teardown_directory import FLAGS, SUBMISSION_COMPONENTS, check_ancestor
 
 ROOT = "/" + "/".join(SUBMISSION_COMPONENTS)
 FILES = {"compose.yaml", "livy.conf", "livy-spark-defaults.conf"}
+# Fixed candidate layout. No credential contents or archives are read.
+TRANSITION_FILES = {
+    "compose.livy-transition.yaml": 0o640,
+    "livy-transition/livy.conf": 0o644,
+    "livy-transition/livy-spark-defaults.conf": 0o644,
+    "livy-transition/livy-build/Dockerfile": 0o600,
+    "livy-transition/livy-build/.dockerignore": 0o600,
+    "livy-transition/livy-build/livy.zip": 0o600,
+}
+TRANSITION_DIRECTORIES = {
+    "livy-transition": 0o750,
+    "livy-transition/livy-build": 0o750,
+}
+TRANSITION_TOP = {"compose.livy-transition.yaml", "livy-transition"}
 CLIENT_FILES = {
     "client-build": {"Dockerfile": 0o600, ".dockerignore": 0o600},
     "client-access": {
@@ -101,6 +115,82 @@ class Assets:
         finally:
             os.close(fd)
 
+    def _candidate_inventory(self, name):
+        """Exact partial layout; capture every candidate inode and metadata.
+
+        Partial staging/removal is allowed. Unknown entries, wrong modes,
+        foreign owners, links and cross-device entries remain prohibited.
+        """
+        device = os.fstat(self.fd).st_dev
+        result = []
+
+        def fingerprint(info):
+            return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                    info.st_gid, info.st_nlink, info.st_size,
+                    info.st_mtime_ns, info.st_ctime_ns)
+
+        def visit(parent, child, relative):
+            info = self._stat(parent, child)
+            require(info.st_dev == device, "Cross-device candidate cleanup refused.")
+            self._protected(info)
+            directory = relative in TRANSITION_DIRECTORIES
+            mode = (TRANSITION_DIRECTORIES[relative] if directory
+                    else TRANSITION_FILES[relative])
+            require(stat.S_IMODE(info.st_mode) == mode,
+                    "Unexpected candidate permissions: " + relative)
+            if not directory:
+                require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
+                        "Linked or special candidate file refused.")
+                result.append((relative, fingerprint(info)))
+                return
+            require(stat.S_ISDIR(info.st_mode), "Expected protected candidate directory.")
+            fd = os.open(child, FLAGS, dir_fd=parent)
+            try:
+                require(fingerprint(os.fstat(fd)) == fingerprint(info),
+                        "Candidate directory changed before inspection.")
+                children = sorted(os.listdir(fd))
+                allowed = {
+                    path[len(relative) + 1:].split("/")[0]
+                    for path in (*TRANSITION_FILES, *TRANSITION_DIRECTORIES)
+                    if path.startswith(relative + "/")
+                }
+                require(set(children) <= allowed,
+                        "Unknown candidate entry; cleanup refused: " + relative)
+                result.append((relative, fingerprint(info)))
+                for entry in children:
+                    visit(fd, entry, relative + "/" + entry)
+                require(fingerprint(os.fstat(fd)) == fingerprint(info)
+                        and fingerprint(self._stat(parent, child)) == fingerprint(info),
+                        "Candidate directory changed during inspection.")
+            finally:
+                os.close(fd)
+
+        visit(self.fd, name, name)
+        return tuple(result)
+
+    def check_remaining_docker_sources(self, sources):
+        """Inspection-only guard after owned resources stop, under both locks.
+
+        Any remaining container, including stopped or unrelated containers,
+        blocks removal if a bind source overlaps a removable runtime asset.
+        The preserved submission lock alone is not a removal target.
+        """
+        require(isinstance(sources, (list, tuple, set))
+                and all(isinstance(source, str) and source.startswith("/")
+                        and "\x00" not in source
+                        and not any(part in {".", ".."} for part in source.split("/"))
+                        for source in sources),
+                "Fresh absolute Docker bind sources are required.")
+        targets = [self.root.rstrip("/") + "/" + name for name in self.initial]
+        for source in sources:
+            source = "/" + "/".join(part for part in source.split("/") if part)
+            require(not any(
+                source == target
+                or source.startswith(target + "/")
+                or target.startswith(source.rstrip("/") + "/")
+                for target in targets),
+                "Remaining Docker bind source intersects removable runtime assets.")
+
     def scan(self):
         if self.fd is None:
             return {}
@@ -115,14 +205,15 @@ class Assets:
                         "Invalid preserved submission lock.")
                 continue
             self._protected(entry)
-            if name in FILES:
+            if name in FILES or name == 'compose.livy-transition.yaml':
                 require(stat.S_ISREG(entry.st_mode), "Expected generated configuration file.")
-            elif name == "livy-build" or name in CLIENT_FILES or RUN.fullmatch(name):
+            elif name in {"livy-build", "livy-transition"} or name in CLIENT_FILES or RUN.fullmatch(name):
                 require(stat.S_ISDIR(entry.st_mode), "Expected generated runtime directory.")
             else:
                 raise ValueError("Unknown runtime asset; cleanup refused: " + name)
+            candidate = self._candidate_inventory(name) if name in TRANSITION_TOP else None
             self._tree(self.fd, name, info.st_dev, self.root + "/" + name, mounts)
-            result[name] = identity(entry)
+            result[name] = candidate if candidate is not None else identity(entry)
             if name in CLIENT_FILES:
                 result[name] = (identity(entry), self._client_inventory(name, entry))
         return result

@@ -3,6 +3,7 @@
   ansible.builtin.assert:
     that:
       - ansible_system == 'Linux'
+      - not (big_data_livy_build_candidate | default(false) | bool) or (big_data_livy_build_only | default(false) | bool)
       - ansible_architecture == 'x86_64'
       - (ansible_processor_vcpus | int) >= 4
       - big_data_spark_runtime_host_path == '/opt/digitafrica/big-data/runtime/spark'
@@ -11,9 +12,13 @@
       - big_data_livy_archive_sha512 is match('^[0-9a-f]{128}$')
     fail_msg: Build requires the reviewed platform, runtime path and locked image inputs.
 
+- name: Select the fixed Livy build context
+  ansible.builtin.set_fact:
+    livy_selected_build_context: "{{ big_data_spark_runtime_host_path }}/{{ 'livy-transition/livy-build' if (big_data_livy_build_candidate | default(false) | bool) else 'livy-build' }}"
+
 - name: Inspect required staged build files without following symlinks
   ansible.builtin.stat:
-    path: "{{ big_data_spark_runtime_host_path }}/livy-build/{{ item }}"
+    path: "{{ livy_selected_build_context }}/{{ item }}"
     follow: false
     get_checksum: true
     checksum_algorithm: sha512
@@ -43,7 +48,7 @@
 
 - name: Read the staged Dockerfile
   ansible.builtin.slurp:
-    src: "{{ big_data_spark_runtime_host_path }}/livy-build/Dockerfile"
+    src: "{{ livy_selected_build_context }}/Dockerfile"
   register: livy_dockerfile
 
 - name: Require the pinned Spark base in the staged Dockerfile
@@ -78,7 +83,7 @@
       - --project-name
       - "{{ big_data_spark_project_name }}"
       - --file
-      - "{{ big_data_spark_runtime_host_path }}/compose.yaml"
+      - "{{ big_data_spark_runtime_host_path }}/{{ 'compose.livy-transition.yaml' if (big_data_livy_build_candidate | default(false) | bool) else 'compose.yaml' }}"
       - config
       - --format
       - json
@@ -107,7 +112,7 @@
       # Other callers retain the original cold-pilot service-count restriction.
       - (livy_build_compose.services.keys() | difference(['spark-client', 'spark-livy-access'] if (big_data_livy_build_only | default(false) | bool) else []) | length) == (2 + (livy_build_worker_count | int))
       - livy_build_compose.services['spark-livy'].image == big_data_livy_image
-      - livy_build_compose.services['spark-livy'].build.context == (big_data_spark_runtime_host_path ~ '/livy-build')
+      - livy_build_compose.services['spark-livy'].build.context == livy_selected_build_context
       - livy_build_compose.services['spark-livy'].build.dockerfile == 'Dockerfile'
       - (livy_build_compose.services['spark-livy'].mem_limit | int) == 2147483648
       - (livy_build_compose.services['spark-master'].mem_limit | int) == 536870912
