@@ -115,7 +115,45 @@ class CandidateDeliverTests(unittest.TestCase):
             self.assertEqual(delivery.main(
                 [PATH, "--maintenance-window-confirmed"]), 1)
         self.assertEqual(output.getvalue(), "")
-        self.assertIn("verification failed", errors.getvalue())
+        self.assertNotIn("verification failed", errors.getvalue())
+        self.assertEqual(json.loads(errors.getvalue()), {
+            "status": "failed", "phase": "candidate-staging",
+            "error_type": "ValueError",
+        })
+
+
+    def test_cli_failure_redacts_synthetic_secret(self):
+        secret = "SYNTHETIC_TEST_ONLY_DO_NOT_LOG"
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(
+                delivery, "deliver_candidate",
+                side_effect=RuntimeError("synthetic-token=" + secret)), \
+                redirect_stdout(output), redirect_stderr(errors):
+            self.assertEqual(delivery.main(
+                [PATH, "--maintenance-window-confirmed"]), 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertNotIn(secret, errors.getvalue())
+        self.assertEqual(json.loads(errors.getvalue()), {
+            "status": "failed", "phase": "candidate-staging",
+            "error_type": "RuntimeError",
+        })
+
+    def test_cli_failure_bounds_and_validates_error_type(self):
+        for name in ("X" * 102, "Invalid/Error"):
+            with self.subTest(name=name):
+                error = type(name, (Exception,), {})("synthetic-detail")
+                output, errors = io.StringIO(), io.StringIO()
+                with patch.object(delivery, "deliver_candidate",
+                                  side_effect=error), \
+                        redirect_stdout(output), redirect_stderr(errors):
+                    self.assertEqual(delivery.main(
+                        [PATH, "--maintenance-window-confirmed"]), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertNotIn("synthetic-detail", errors.getvalue())
+                self.assertEqual(json.loads(errors.getvalue()), {
+                    "status": "failed", "phase": "candidate-staging",
+                    "error_type": "Exception",
+                })
 
 
 if __name__ == "__main__":

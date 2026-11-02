@@ -17,6 +17,7 @@ from livy_candidate_delivery import protected_directory, read_delivery
 from livy_candidate_stage import stage_verified_candidate
 
 BUNDLE = re.compile(r"/var/lib/digitafrica-livy-stage-[A-Za-z0-9_-]+")
+ERROR_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,100}")
 
 
 @contextmanager
@@ -62,7 +63,12 @@ def main(argv=None):
     try:
         created = deliver_candidate(args.bundle)
     except Exception as error:
-        print("Candidate staging failed: " + str(error), file=sys.stderr)
+        name = type(error).__name__
+        print(json.dumps({
+            "status": "failed",
+            "phase": "candidate-staging",
+            "error_type": name if ERROR_TYPE.fullmatch(name) else "Exception",
+        }, sort_keys=True), file=sys.stderr)
         return 1
     print(json.dumps({
         "status": "candidate-assets-staged",
