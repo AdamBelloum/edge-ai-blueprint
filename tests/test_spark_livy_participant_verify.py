@@ -349,5 +349,105 @@ class ParticipantVerificationTests(unittest.TestCase):
         self.assertNotIn("DO-NOT-LEAK", output.getvalue())
 
 
+    def test_probe_transport_caps_oversized_response(self):
+        exercise, _ = self.v.load_modules()
+        reads = []
+        class Response:
+            closed = False
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.closed = True
+            def read(self, size=None):
+                reads.append(size)
+                body = b"x" * 1048577
+                return body if size is None else body[:size]
+        response = Response()
+        opener = SimpleNamespace(open=lambda request, timeout: response)
+        with patch.object(exercise, "build_opener", return_value=opener), \
+             patch.object(self.v, "build_opener", return_value=opener, create=True):
+            with self.assertRaises(ValueError):
+                exercise.livy_request(
+                    "http://127.0.0.1:12345", "GET", "/sessions")
+        self.assertEqual(reads, [1048577])
+        self.assertTrue(response.closed)
+
+    def test_stalled_owned_request_times_out_and_still_cleans(self):
+        original = self.http
+        def stalled(base, method, path, payload=None):
+            if (method == "GET" and path == "/sessions/41"
+                    and not self.delete_attempted):
+                self.v.time.sleep(1)
+            return original(base, method, path, payload)
+        self.exercise.livy_request = stalled
+        previous_alarm = self.v.signal.getsignal(self.v.signal.SIGALRM)
+        with patch.object(self.v, "HTTP_TIMEOUT", 0.03, create=True):
+            result = self.run_probe()
+        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertEqual(result["failure_phase"], "session-readiness")
+        self.assertIs(self.v.signal.getsignal(self.v.signal.SIGALRM), previous_alarm)
+        self.assertEqual(self.v.signal.getitimer(self.v.signal.ITIMER_REAL), (0, 0))
+        self.assertTrue(self.gone)
+        self.assertTrue(result["forwarding_closed"])
+        self.assertEqual(
+            [call[1] for call in self.calls if call[0] == "DELETE"],
+            ["/sessions/41"])
+
+
+
+    def test_request_alarm_is_restored_after_success(self):
+        previous = self.v.signal.getsignal(self.v.signal.SIGALRM)
+        result = self.run_probe()
+        self.assertEqual(result["status"], "PASSED")
+        self.assertIs(self.v.signal.getsignal(self.v.signal.SIGALRM), previous)
+        self.assertEqual(self.v.signal.getitimer(self.v.signal.ITIMER_REAL), (0, 0))
+
+    def test_existing_process_alarm_refuses_before_forwarding(self):
+        with patch.object(self.v.signal, "getitimer", return_value=(10, 0)), \
+             patch.object(self.v.signal, "setitimer") as timer, \
+             patch.object(self.v.signal, "signal") as handler:
+            with self.assertRaises(ValueError):
+                self.run_probe()
+        timer.assert_not_called()
+        handler.assert_not_called()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.events, [])
+
+    def test_non_main_thread_refuses_before_forwarding(self):
+        with patch.object(self.v.threading, "current_thread", return_value=object()):
+            with self.assertRaises(ValueError):
+                self.run_probe()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.events, [])
+
+    def test_probe_transport_closes_http_error(self):
+        body = io.BytesIO(b"synthetic-error-body")
+        error = HTTPError("http://127.0.0.1:12345/sessions/41", 404,
+                          "synthetic", {}, body)
+        def fail(request, timeout):
+            raise error
+        with patch.object(self.v, "build_opener",
+                          return_value=SimpleNamespace(open=fail)):
+            with self.assertRaises(HTTPError) as raised:
+                self.v.probe_http_request(
+                    "http://127.0.0.1:12345", "GET", "/sessions/41")
+        self.assertIs(raised.exception, error)
+        self.assertTrue(body.closed)
+
+    def test_probe_transport_refuses_redirects_and_external_endpoints(self):
+        self.assertIsNone(self.v._NoRedirect().redirect_request(
+            None, None, 302, "synthetic", {}, "http://example.invalid"))
+        with patch.object(self.v, "build_opener") as opener:
+            for endpoint in (
+                "http://example.invalid:8998", "https://127.0.0.1:12345",
+                "http://127.0.0.1", "http://synthetic@127.0.0.1:12345",
+            ):
+                with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
+                    self.v.probe_http_request(endpoint, "GET", "/sessions")
+            opener.assert_not_called()
+
+
+
 if __name__ == "__main__":
     unittest.main()

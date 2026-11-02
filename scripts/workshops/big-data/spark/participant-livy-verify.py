@@ -5,6 +5,7 @@ No credentials are staged, no workspace is published, and no containers are
 managed. Requires a submission-free maintenance window; this client neither
 reserves resources nor acquires the remote Docker host's submission lock.
 One successful probe does not establish cohort capacity or full activity readiness.
+HTTP deadlines require POSIX main-thread alarms; existing process alarms are refused.
 """
 import argparse
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
@@ -16,9 +17,12 @@ from pathlib import Path
 import re
 import signal
 import stat
+import threading
 import sys
 import time
 from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 import uuid
 
 ASSET_SHA256 = {'02_spark_via_livy.py': '3c6f363f76b49ce46f724c27ea4f26f9064f20667a807882a57717a24d6e4b82', 'spark_livy_access.py': '6332271400def883056b4e49b88410f38ff9417c7baa3994269d31d240b7e552'}
@@ -62,6 +66,72 @@ def require(condition, message):
 def error_type(error):
     name = type(error).__name__
     return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,100}", name) else "Exception"
+
+
+HTTP_TIMEOUT = 15
+MAX_RESPONSE_BYTES = 1048576
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _require_request_timer():
+    require(all(hasattr(signal, name) for name in (
+        "SIGALRM", "ITIMER_REAL", "getitimer", "setitimer"))
+        and threading.current_thread() is threading.main_thread(),
+        "POSIX main-thread request deadlines are required.")
+    require(signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0),
+            "An existing process alarm cannot be shared with the probe.")
+
+
+@contextmanager
+def _request_alarm(seconds):
+    _require_request_timer()
+    require(0 < seconds <= HTTP_TIMEOUT, "Invalid request deadline.")
+    def expired(signum, frame):
+        raise TimeoutError("Participant HTTP request deadline exhausted.")
+    previous = signal.signal(signal.SIGALRM, expired)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        yield
+    finally:
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        finally:
+            signal.signal(signal.SIGALRM, previous)
+
+
+def probe_http_request(base_url, method, path, payload=None):
+    """Body-bounded transport; verify() supplies its wall-clock request alarm."""
+    require(isinstance(base_url, str), "Invalid probe endpoint.")
+    parsed = urlsplit(base_url)
+    require(parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
+            and parsed.port is not None and 1 <= parsed.port <= 65535
+            and not parsed.username and not parsed.password
+            and not parsed.query and not parsed.fragment
+            and parsed.path in ("", "/"),
+            "A loopback-only probe endpoint is required.")
+    require(method in ("GET", "POST", "DELETE")
+            and isinstance(path, str) and path.startswith("/")
+            and not path.startswith("//") and "#" not in path,
+            "Invalid probe request.")
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = Request(
+        base_url.rstrip("/") + path, data=body, method=method,
+        headers={"Accept": "application/json", "Content-Type": "application/json",
+                 "X-Requested-By": "digitafrica-spark-exercise-2"})
+    opener = build_opener(ProxyHandler({}), _NoRedirect())
+    try:
+        with opener.open(request, timeout=HTTP_TIMEOUT) as response:
+            content = response.read(MAX_RESPONSE_BYTES + 1)
+            require(len(content) <= MAX_RESPONSE_BYTES,
+                    "Probe HTTP response exceeded its size bound.")
+    except HTTPError as error:
+        error.close()
+        raise
+    return json.loads(content) if content.strip() else {}
 
 
 def snapshot(path, bound, *, participant_owned=False):
@@ -127,6 +197,8 @@ def load_modules():
         module.__file__ = str(path)
         exec(compile(raw, str(path), "exec"), module.__dict__)
         modules.append(module)
+    # Keep reviewed tutorial logic; use the probe-specific HTTP transport.
+    modules[0].livy_request = probe_http_request
     return tuple(modules)
 
 
@@ -250,6 +322,7 @@ def verify(*, workspace, exercise, access, connection, emit,
             "Explicit maintenance and submission-pause acknowledgements required.")
     require(not any(name in os.environ for name in ("LIVY_URL", "LIVY_DATA_PATH")),
             "Explicit endpoint overrides are forbidden.")
+    _require_request_timer()
     report = {"status": "FAILED", "session_request_sent": False, "session_id": None,
               "cleanup": "not-required", "forwarding_closed": False,
               "scope": "one managed participant identity; not cohort or full-activity readiness"}
@@ -257,9 +330,11 @@ def verify(*, workspace, exercise, access, connection, emit,
     deadline, phase, failure = started + 240, "input-validation", None
     cleanup_failure = None
     def request(*args, **kwargs):
-        if clock() >= deadline:
+        remaining = deadline - clock()
+        if remaining <= 0:
             raise TimeoutError("Participant probe request budget exhausted.")
-        return original_request(*args, **kwargs)
+        with _request_alarm(min(HTTP_TIMEOUT, remaining)):
+            return original_request(*args, **kwargs)
     exercise.livy_request = request
     try:
         dataset = Path(workspace) / "data" / "Bank_Personal_Loan_Modelling.csv"
