@@ -15,6 +15,8 @@ from teardown_directory import (
 )
 from teardown_assets import mount_paths
 
+DOCKER_PREFIX = ("docker", "--host", "unix:///var/run/docker.sock")
+
 ID = re.compile(r"[0-9a-f]{64}")
 BATCH_SIZE = 64
 MAX_CONTAINERS = 4096
@@ -48,21 +50,24 @@ def open_runtime():
 def observe_mounts(*, run=subprocess.run, host_mounts=mount_paths):
     """Inspect every container and refuse unstable or unverifiable inventories."""
     def command(argv):
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(("DOCKER_", "COMPOSE_"))}
+        env["COMPOSE_DISABLE_ENV_FILE"] = "1"
         result = run(argv, text=True, stdout=subprocess.PIPE,
-                     stderr=subprocess.PIPE, timeout=30, check=False)
+                     stderr=subprocess.PIPE, timeout=30, check=False, env=env)
         require(result.returncode == 0 and isinstance(result.stdout, str),
                 "Docker mount observation command failed.")
         return result.stdout.strip()
 
     def daemon():
-        value = command(["docker", "info", "--format", "{{.ID}}"])
+        value = command([*DOCKER_PREFIX, "info", "--format", "{{.ID}}"])
         require(value and len(value) <= 256 and not any(c.isspace() for c in value),
                 "Docker daemon identity is unverifiable.")
         return value
 
     def inventory():
         values = command([
-            "docker", "container", "ls", "--all", "--quiet", "--no-trunc"
+            *DOCKER_PREFIX, "container", "ls", "--all", "--quiet", "--no-trunc"
         ]).split()
         require(len(values) <= MAX_CONTAINERS
                 and len(values) == len(set(values))
@@ -76,7 +81,7 @@ def observe_mounts(*, run=subprocess.run, host_mounts=mount_paths):
     sources = set()
     for offset in range(0, len(ids), BATCH_SIZE):
         batch = ids[offset:offset + BATCH_SIZE]
-        containers = json.loads(command(["docker", "container", "inspect", *batch]))
+        containers = json.loads(command([*DOCKER_PREFIX, "container", "inspect", *batch]))
         require(isinstance(containers, list)
                 and len(containers) == len(batch)
                 and all(isinstance(c, dict) for c in containers)

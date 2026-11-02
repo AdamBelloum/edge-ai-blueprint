@@ -23,8 +23,18 @@ class CandidateMountObservationTests(unittest.TestCase):
     def invoke(self, replies, hosts=lambda: {"/"}):
         calls = []
         responses = iter(replies)
+        self.command_envs = []
         def run(argv, **kwargs):
             calls.append(argv)
+            self.assertEqual(
+                argv[:3], ["docker", "--host", "unix:///var/run/docker.sock"])
+            env = kwargs.get("env")
+            self.assertIsInstance(env, dict)
+            self.assertFalse(any(
+                key.startswith(("DOCKER_", "COMPOSE_"))
+                and key != "COMPOSE_DISABLE_ENV_FILE" for key in env))
+            self.assertTrue(env.get("COMPOSE_DISABLE_ENV_FILE") == "1")
+            self.command_envs.append(dict(env))
             self.assertEqual(kwargs["timeout"], 30)
             self.assertFalse(kwargs["check"])
             response = next(responses)
@@ -46,7 +56,7 @@ class CandidateMountObservationTests(unittest.TestCase):
             self.inspected([{"Type": "bind", "Source": "/protected/config"}]),
             CID, "daemon"])
         self.assertEqual(result["docker_sources"], ["/protected/config"])
-        lists = [call for call in calls if call[1:3] == ["container", "ls"]]
+        lists = [call for call in calls if call[3:5] == ["container", "ls"]]
         self.assertEqual(len(lists), 2)
         for call in lists:
             self.assertIn("--all", call)
@@ -92,6 +102,38 @@ class CandidateMountObservationTests(unittest.TestCase):
         import subprocess
         with self.assertRaises(subprocess.TimeoutExpired):
             self.invoke([subprocess.TimeoutExpired(["docker"], 30)])
+
+
+    def test_fixed_local_daemon_for_complete_discovery(self):
+        _, calls = self.invoke([
+            "daemon", CID, self.inspected(), CID, "daemon"])
+        self.assertEqual(len(calls), 5)
+        self.assertTrue(all(
+            call[:3] == ["docker", "--host", "unix:///var/run/docker.sock"]
+            for call in calls))
+        self.assertTrue(any(call[3:5] == ["container", "inspect"]
+                            for call in calls))
+
+    def test_inherited_daemon_and_compose_overrides_are_removed(self):
+        overrides = {
+            "DOCKER_HOST": "tcp://example.invalid:2376",
+            "DOCKER_CONTEXT": "synthetic-remote",
+            "DOCKER_CONFIG": "/synthetic/docker-config",
+            "DOCKER_TLS_VERIFY": "1",
+            "COMPOSE_FILE": "/synthetic/compose.yaml",
+            "COMPOSE_PROFILES": "unreviewed",
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C",
+        }
+        with patch.dict(adapter.os.environ, overrides, clear=True):
+            result, calls = self.invoke(["daemon", "", "", "daemon"])
+        self.assertEqual(result["docker_sources"], [])
+        self.assertEqual(len(calls), 4)
+        expected = {
+            "PATH": "/usr/bin:/bin", "LANG": "C",
+            "COMPOSE_DISABLE_ENV_FILE": "1",
+        }
+        self.assertTrue(all(env == expected for env in self.command_envs))
 
 
 class ProtectedRuntimeAdapterTests(unittest.TestCase):
