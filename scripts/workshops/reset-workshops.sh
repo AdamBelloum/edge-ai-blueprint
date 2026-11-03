@@ -335,7 +335,7 @@ case "$cleanup_workshop" in
   none)
     [[ "$cleanup_module" == none ]] ||
       fail 'Invalid neutral cleanup module.'
-    printf '%s\n' 'Saved cleanup context is neutral; no selected runtime dispatched.'
+    printf '%s\n' 'Saved cleanup context is neutral; selection-specific runtime dispatch skipped.'
     ;;
   federated-learning)
     [[ "$cleanup_module" == none ]] ||
@@ -413,6 +413,31 @@ case "$cleanup_workshop" in
     fail 'Unsupported saved runtime cleanup route.'
     ;;
 esac
+
+# BEGIN PUBLICATION-INDEPENDENT SPARK CLEANUP
+# Spark preparation/startup can precede publication. A neutral or different
+# saved selection is not evidence that Spark resources are absent.
+# The selected Spark route already performed this stage; do not run it twice.
+if [[ "$cleanup_workshop" != big-data || "$cleanup_module" != spark ]]; then
+  spark_reset="$SCRIPT_DIR/big-data/reset-workshop.sh"
+  [[ -x "$spark_reset" ]] ||
+    fail "Missing executable Spark reset helper: $spark_reset"
+
+  printf '%s\n' \
+    'Checking and cleaning managed Spark resources independently of publication.'
+
+  if env DIGITAFRICA_NAMESPACE="${DIGITAFRICA_NAMESPACE:?Missing namespace}" \
+    "$spark_reset" --runtime-only --module spark; then
+    printf '%s\n' \
+      'Publication-independent Spark cleanup stage succeeded.'
+  else
+    spark_reset_status=$?
+    printf '%s\n' \
+      'Spark cleanup failed; cleanup remains in_progress.' >&2
+    exit "$spark_reset_status"
+  fi
+fi
+# END PUBLICATION-INDEPENDENT SPARK CLEANUP
 # END SAVED-CONTEXT RUNTIME DISPATCH
 
 # Clean local partitions only for the saved FL cleanup context.
