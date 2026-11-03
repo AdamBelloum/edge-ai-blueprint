@@ -367,7 +367,7 @@ Application reconciliation deploys all three tracks as protected ConfigMaps.
 Activating Module 3 copies only the organiser-selected Beginner or Advanced
 TODO notebook when a participant next spawns a JupyterHub server and does not
 already have the relevant file under:
-  ~/Introduction-to-AI/Module-2/
+  ~/Introduction-to-AI/Module-3/
 
 Reference solutions are copied only after the organiser explicitly releases
 them after the workshop.

@@ -46,20 +46,22 @@ run_introduction_to_ai_module2_publish() {
   run_introduction_to_ai_module     "$INTRODUCTION_TO_AI_MODULE2_HELPER"     activate
 }
 
-run_introduction_to_ai_module2_check() {
+run_introduction_to_ai_track_check() {
+  local module="$1"
+  local helper="$2"
   local mode="${INTRODUCTION_TO_AI_MODE:-}"
   local choice
 
   if [[ -z "$mode" ]]; then
     if [[ ! -t 0 ]]; then
       printf '%s\n' \
-        'Module 2 readiness check requires INTRODUCTION_TO_AI_MODE=beginner|advanced in a non-interactive shell.' >&2
+        "Module ${module} readiness check requires INTRODUCTION_TO_AI_MODE=beginner|advanced in a non-interactive shell." >&2
       return 2
     fi
 
     while true; do
       printf '\n%s\n' \
-        'Module 2 / Check publication readiness' \
+        "Module ${module} / Check publication readiness" \
         'Select the teaching track to check. This does not publish or change workshop state.' \
         '  1) Beginner' \
         '  2) Advanced' \
@@ -86,7 +88,11 @@ run_introduction_to_ai_module2_check() {
   esac
 
   run_introduction_to_ai_module \
-    "$INTRODUCTION_TO_AI_MODULE2_HELPER" check --mode "$mode"
+    "$helper" check --mode "$mode"
+}
+
+run_introduction_to_ai_module2_check() {
+  run_introduction_to_ai_track_check 2 "$INTRODUCTION_TO_AI_MODULE2_HELPER"
 }
 
 run_introduction_to_ai_module2_release_solutions() {
@@ -98,7 +104,7 @@ run_introduction_to_ai_module3_publish() {
 }
 
 run_introduction_to_ai_module3_check() {
-  run_introduction_to_ai_module     "$INTRODUCTION_TO_AI_MODULE3_HELPER"     check
+  run_introduction_to_ai_track_check 3 "$INTRODUCTION_TO_AI_MODULE3_HELPER"
 }
 
 run_introduction_to_ai_module3_release_solutions() {
