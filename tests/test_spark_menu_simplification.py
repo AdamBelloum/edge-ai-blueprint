@@ -48,7 +48,7 @@ class SparkMenuSimplificationTests(unittest.TestCase):
         self.assertIn("OPTION:3:Show workshop status", text)
         self.assertIn("OPTION:4:Maintenance and organiser tests", text)
         self.assertIn("publication alone is not workshop readiness", text)
-        self.assertIn("candidate staging and an exact-host warm-transition pilot", text)
+        self.assertIn("candidate staging and local Livy warm transitions on all inventory workers", text)
         self.assertIn("participant verification is separate", text)
         self.assertIn("readiness remains unvalidated", text)
         self.assertNotIn("OPTION:5:", text)

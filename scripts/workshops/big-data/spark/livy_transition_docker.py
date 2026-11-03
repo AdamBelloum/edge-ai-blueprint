@@ -118,8 +118,31 @@ class TransitionDocker(Docker):
                             input=document.decode('utf-8'))
 
     def hashes(self, document, services):
+        # For the two-service Livy startup with --no-deps, Compose retains
+        # dependencies within the explicit startup set and excludes external
+        # Spark dependencies. Derive hashes from this reviewed effective config;
+        # never learn an expected hash from an existing container's labels.
+        resolved = json.loads(self.compose(document, 'config', '--format', 'json'))
+        require(isinstance(resolved, dict)
+                and isinstance(resolved.get('services'), dict)
+                and set(resolved['services']) == set(services)
+                and all(isinstance(value, dict)
+                        for value in resolved['services'].values()),
+                'Exact resolved service configurations are required for hashing.')
+        for service in STARTABLE & set(resolved['services']):
+            configuration = resolved['services'][service]
+            dependencies = configuration.get('depends_on', {})
+            require(isinstance(dependencies, dict),
+                    'Resolved Livy startup dependencies must be a mapping.')
+            retained = {name: options for name, options in dependencies.items()
+                        if name in STARTABLE}
+            if retained:
+                configuration['depends_on'] = retained
+            else:
+                configuration.pop('depends_on', None)
+        effective = json.dumps(resolved, sort_keys=True).encode('utf-8')
         result = {}
-        for line in self.compose(document, 'config', '--hash', '*').splitlines():
+        for line in self.compose(effective, 'config', '--hash', '*').splitlines():
             fields = line.split()
             require(len(fields) == 2 and fields[0] in services
                     and HASH.fullmatch(fields[1]) and fields[0] not in result,

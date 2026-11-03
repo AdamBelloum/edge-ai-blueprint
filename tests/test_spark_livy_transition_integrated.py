@@ -93,6 +93,17 @@ class FakeDocker:
                 out = "\n".join(f"{k} {value}" for k, value in self.hashes.items())
             elif "config" in args:
                 text = yaml.safe_load(kwargs["input"])
+                # Model dependency syntax resolution performed by Compose
+                # config --format json, rather than returning raw YAML lists.
+                for service in text["services"].values():
+                    dependencies = service.get("depends_on")
+                    if isinstance(dependencies, list):
+                        service["depends_on"] = {
+                            name: {"condition": "service_started", "required": True}
+                            for name in dependencies
+                        }
+                    elif dependencies is None:
+                        service.pop("depends_on", None)
                 if self.bad_candidate and "spark-livy" in text["services"]:
                     text["services"]["spark-master"]["cpus"] = 999
                 if self.on_config:
@@ -227,6 +238,29 @@ class IntegratedTests(unittest.TestCase):
 
     def events(self):
         return [json.loads(p.read_text()) for p in sorted(self.evidence.glob("*.json"))]
+
+    def test_fake_compose_resolves_short_dependency_syntax_without_mutations(self):
+        source = {"services": {
+            "spark-master": {"image": adapter.CLIENT_IMAGE},
+            "spark-livy": {"image": adapter.LIVY_IMAGE,
+                           "depends_on": ["spark-master"]},
+            "spark-livy-access": {"image": adapter.PARTICIPANT_IMAGE,
+                                  "depends_on": ["spark-livy"]},
+        }}
+        response = self.fake.fake_run(
+            adapter.PREFIX + ["compose", "config", "--format", "json"],
+            input=yaml.safe_dump(source),
+        )
+        resolved = json.loads(response.stdout)["services"]
+        self.assertEqual(resolved["spark-livy"]["depends_on"], {
+            "spark-master": {"condition": "service_started", "required": True},
+        })
+        self.assertEqual(resolved["spark-livy-access"]["depends_on"], {
+            "spark-livy": {"condition": "service_started", "required": True},
+        })
+        self.assertEqual(resolved["spark-master"], source["services"]["spark-master"])
+        self.assertEqual(source["services"]["spark-livy"]["depends_on"], ["spark-master"])
+        self.assertEqual(self.fake.mutations, [])
 
     def test_real_round_trip_and_completed_runtime_retry(self):
         shared = {c["Config"]["Labels"]["com.docker.compose.service"]: c["Id"]

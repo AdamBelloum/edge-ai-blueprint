@@ -51,6 +51,12 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(argv[-5:], ['--file', '-', 'config', '--format', 'json'])
 
     def test_configuration_hashes_are_exact_and_complete(self):
+        def hash_run(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            output = (self.stdout if '--hash' in argv else
+                      json.dumps({'services': {'spark-livy': {}}}))
+            return SimpleNamespace(stdout=output)
+        self.docker.run = hash_run
         self.stdout = 'spark-livy ' + 'a' * 64 + '\n'
         self.assertEqual(self.docker.hashes(b'x', {'spark-livy'}), {'spark-livy': 'a' * 64})
         for invalid in ('', 'spark-livy invalid',
@@ -59,6 +65,153 @@ class AdapterTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 self.stdout = invalid
                 self.docker.hashes(b'x', {'spark-livy'})
+
+    def test_no_deps_hash_matches_started_livy_without_changing_shared_services(self):
+        # A deterministic fake hash models dependency-sensitive Compose.
+        # This is not an implementation of Docker Compose's hash algorithm.
+        services = {
+            'spark-master': {'image': adapter.CLIENT_IMAGE, 'cpus': 0.5},
+            'spark-worker-1': {
+                'image': adapter.CLIENT_IMAGE,
+                'depends_on': {'spark-master': {'condition': 'service_started'}},
+            },
+            'spark-client': {
+                'image': adapter.PARTICIPANT_IMAGE,
+                'depends_on': {'spark-master': {'condition': 'service_started'}},
+            },
+            'spark-livy': {
+                'image': adapter.LIVY_IMAGE,
+                'depends_on': {'spark-master': {'condition': 'service_started'}},
+                'build': {'context': '/reviewed/livy-build'},
+                'environment': {'LIVY_SERVER_JAVA_OPTS': '-Xms128m -Xmx512m'},
+                'mem_limit': '2g',
+            },
+            'spark-livy-access': {
+                'image': adapter.PARTICIPANT_IMAGE,
+                'depends_on': {'spark-livy': {'condition': 'service_started'}},
+                'ports': ['145.100.135.172:2222:2222'],
+            },
+        }
+        original = json.dumps({'services': services}, sort_keys=True)
+        effective_documents = []
+
+        def fake_hash(value):
+            return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+        def dependency_sensitive_compose(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            self.assertEqual(argv[:3], adapter.PREFIX)
+            self.assertEqual(argv[3], 'compose')
+            self.assertIn('config', argv)
+            if '--hash' in argv:
+                effective = json.loads(kwargs['input'])
+                effective_documents.append(effective)
+                output = '\n'.join(
+                    name + ' ' + fake_hash(value)
+                    for name, value in effective['services'].items()
+                )
+            else:
+                output = original
+            return SimpleNamespace(stdout=output)
+
+        self.docker.run = dependency_sensitive_compose
+        result = self.docker.hashes(original.encode(), set(services))
+        self.assertEqual(len(self.calls), 2)
+        effective = effective_documents[0]['services']
+        for name in adapter.STARTABLE:
+            expected = dict(services[name])
+            retained = {dependency: options
+                        for dependency, options in expected['depends_on'].items()
+                        if dependency in adapter.STARTABLE}
+            if retained:
+                expected['depends_on'] = retained
+            else:
+                expected.pop('depends_on')
+            self.assertEqual(effective[name], expected)
+            self.assertEqual(result[name], fake_hash(expected))
+        self.assertNotEqual(result['spark-livy'], fake_hash(services['spark-livy']))
+        self.assertEqual(result['spark-livy-access'],
+                         fake_hash(services['spark-livy-access']))
+        for name in set(services) - adapter.STARTABLE:
+            self.assertEqual(effective[name], services[name])
+            self.assertEqual(result[name], fake_hash(services[name]))
+        self.assertEqual(original, json.dumps({'services': services}, sort_keys=True))
+
+    def test_livy_hash_retains_internal_dependency_options_and_filters_external_dependencies(self):
+        internal = {'condition': 'service_started', 'required': True, 'restart': False}
+        source = {'services': {
+            'spark-master': {'image': adapter.CLIENT_IMAGE},
+            'spark-livy': {
+                'image': adapter.LIVY_IMAGE,
+                'depends_on': {'spark-master': {'condition': 'service_started'}},
+            },
+            'spark-livy-access': {
+                'image': adapter.PARTICIPANT_IMAGE,
+                'depends_on': {
+                    'spark-livy': internal,
+                    'spark-master': {'condition': 'service_started'},
+                },
+            },
+        }}
+        captured = []
+        def compose(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            self.assertEqual(argv[:3], adapter.PREFIX)
+            self.assertIn('config', argv)
+            if '--hash' in argv:
+                captured.append(json.loads(kwargs['input']))
+                return SimpleNamespace(stdout='\n'.join(
+                    name + ' ' + str(index) * 64
+                    for index, name in enumerate(source['services'], 1)
+                ))
+            return SimpleNamespace(stdout=json.dumps(source))
+        self.docker.run = compose
+        self.docker.hashes(json.dumps(source).encode(), set(source['services']))
+        effective = captured[0]['services']
+        self.assertNotIn('depends_on', effective['spark-livy'])
+        self.assertEqual(effective['spark-livy-access']['depends_on'],
+                         {'spark-livy': internal})
+        self.assertEqual(effective['spark-master'], source['services']['spark-master'])
+        self.assertIn('spark-master', source['services']['spark-livy-access']['depends_on'])
+        self.assertEqual(len(self.calls), 2)
+
+    def test_invalid_livy_dependency_mapping_refuses_before_hash_command(self):
+        for dependencies in ('spark-master', ['spark-master'], None):
+            with self.subTest(dependencies=dependencies):
+                self.calls.clear()
+                self.stdout = json.dumps({'services': {
+                    'spark-livy': {'depends_on': dependencies},
+                }})
+                with self.assertRaises(ValueError):
+                    self.docker.hashes(b'x', {'spark-livy'})
+                self.assertEqual(len(self.calls), 1)
+                self.assertNotIn('--hash', self.calls[0][0])
+
+    def test_no_deps_hash_accepts_services_with_no_dependencies(self):
+        source = {'services': {'spark-livy': {'image': adapter.LIVY_IMAGE}}}
+        captured = []
+        def compose(argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            if '--hash' in argv:
+                captured.append(json.loads(kwargs['input']))
+                return SimpleNamespace(stdout='spark-livy ' + 'a' * 64)
+            return SimpleNamespace(stdout=json.dumps(source))
+        self.docker.run = compose
+        self.assertEqual(self.docker.hashes(json.dumps(source).encode(), {'spark-livy'}),
+                         {'spark-livy': 'a' * 64})
+        self.assertEqual(captured, [source])
+
+    def test_invalid_resolved_service_contract_refuses_before_hash_command(self):
+        for resolved in ([], {}, {'services': []},
+                         {'services': {'spark-master': {}}},
+                         {'services': {'spark-livy': 'invalid'}}):
+            with self.subTest(resolved=resolved):
+                self.calls.clear()
+                self.stdout = json.dumps(resolved)
+                with self.assertRaises(ValueError):
+                    self.docker.hashes(b'x', {'spark-livy'})
+                self.assertEqual(len(self.calls), 1)
+                self.assertNotIn('--hash', self.calls[0][0])
 
     def test_startup_is_only_explicit_services_without_recreation_dependencies_build_or_pull(self):
         self.docker.observe = lambda: {}

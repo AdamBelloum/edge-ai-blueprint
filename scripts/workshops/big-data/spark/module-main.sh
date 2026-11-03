@@ -306,7 +306,7 @@ run_big_data_spark_menu() {
     workshop_ui_option 2 "Step 2 - submission via Livy REST API (work-in-progress)"
     printf '\n%s\n' \
       'Step 1 opens the ordered workflow and requires staged-credential verification; publication alone is not workshop readiness.' \
-      'Step 2 prepares Livy REST API submission through candidate staging and an exact-host warm-transition pilot; participant verification is separate and readiness remains unvalidated.'
+      'Step 2 prepares Livy REST API submission through candidate staging and local Livy warm transitions on all inventory workers; participant verification is separate and readiness remains unvalidated.'
     workshop_ui_section "STATUS AND TOOLS"
     workshop_ui_option 3 "Show workshop status"
     workshop_ui_option 4 "Maintenance and organiser tests"
@@ -491,17 +491,17 @@ big_data_spark_step2_action() {
 }
 
 
-# Single-machine integration. Delegate runtime mutation and confirmation to
+# Inventory-cohort integration. Delegate runtime mutation and confirmation to
 # the standalone wrapper; never call legacy startup, publication or reset.
 big_data_spark_step2_transition_action() {
-  local action="${1:-}" pilot="${2:-}" helper rc
+  local action="${1:-}" helper rc
   local -a args=()
   case "$action" in
     syntax-check|transition) ;;
     *) printf 'Unsupported Step 2 transition action: %s\n' "$action" >&2; return 2 ;;
   esac
-  [[ "$pilot" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || {
-    printf 'Step 2 blocked: select one workshop machine before continuing.\n' >&2
+  [[ $# -eq 1 ]] || {
+    printf 'Step 2 targets all inventory workers; no host argument is accepted.\n' >&2
     return 2
   }
   helper="$BIG_DATA_SPARK_MODULE_DIR/warm-transition.sh"
@@ -510,9 +510,9 @@ big_data_spark_step2_transition_action() {
     return 2
   }
   # Existing preflight checks selected context, reset markers and complete
-  # cohort metadata. The wrapper independently validates fresh exact-host scope.
+  # cohort metadata. The wrapper independently resolves the complete inventory worker scope.
   big_data_spark_stage1_preflight || return $?
-  args=(--limit "$pilot")
+  args=(--all-workers)
   [[ "$action" != syntax-check ]] || args+=(--syntax-check)
   printf '%s\n'     'Reuse the existing Step 1 cohort, credentials and participant workspaces.'     'The helper asks for [y/N] confirmation; no confirmation-bypass flags are supplied.'
   if "$helper" "${args[@]}"; then
@@ -530,51 +530,11 @@ big_data_spark_step2_transition_action() {
 }
 
 big_data_spark_step2_verification_guidance() {
-  printf '%s\n'     'GUIDANCE ONLY: no participant probe or remote operation is started.'     'After the selected machine is switched to Livy, use one existing managed participant identity in its JupyterHub environment.'     'Make the reviewed participant-livy-verify.py available beside the existing 02_spark_via_livy.py and spark_livy_access.py.'     'The verifier checks the two asset hashes; do not edit them or replace managed credentials.'     'An authorised operator must independently confirm the expected SSH host and port for that identity; an inventory alias is not necessarily the SSH endpoint.'     'The verifier requires --workspace, --evidence-dir, --expected-ssh-host and --expected-ssh-port.'     'It also requires explicit --maintenance-window-confirmed and --submissions-paused-confirmed acknowledgements.'     'Use the existing prepared dataset and a private evidence location; do not set LIVY_URL or LIVY_DATA_PATH overrides.'     'All submissions and competing administrative writes must be paused. This probe is not a remote submission lock.'     'Inspect the verifier result and evidence: worker computation, owned-session HTTP 404 cleanup, empty post-cleanup inventory and closed forwarding must be confirmed.'     'On FAILED, unknown session creation or unconfirmed cleanup: stop and inspect; never guess session IDs, bulk-delete sessions or retry automatically.'     'PASSED applies only to one managed identity and the bounded probe; it does not establish cohort capacity or full-activity readiness.'     'Workspace delivery of the verifier is not automated here; no participant publication or workshop selection is changed.'     'Controlled participant and full-activity testing still require separate authorisation.'
-}
-
-# Print only the selected host to stdout; organiser-facing text uses stderr.
-# Discover targets read-only and retain exact-host validation in the wrapper.
-big_data_spark_step2_select_worker() {
-  local listing choice index i
-  local -a workers=()
-  if [[ -z "${DIGITAFRICA_INVENTORY:-}" ||
-        -z "${DIGITAFRICA_DEPLOYMENT_WORKER_GROUP:-}" ]]; then
-    printf 'Workshop configuration is missing; no operation was started.\n' >&2
-    return 2
-  fi
-  if ! listing="$(python "$BIG_DATA_SPARK_MODULE_DIR/livy_transition_scope.py" \
-      "$DIGITAFRICA_INVENTORY" "$DIGITAFRICA_DEPLOYMENT_WORKER_GROUP" \
-      --list-workers)"; then
-    return 2
-  fi
-  [[ -n "$listing" ]] || return 2
-  mapfile -t workers <<< "$listing"
-  if [[ "${#workers[@]}" -eq 1 ]]; then
-    printf '%s\n' "${workers[0]}"
-    return 0
-  fi
-  printf '\nChoose the workshop machine for this operation:\n' >&2
-  for i in "${!workers[@]}"; do
-    printf '%s) Machine %s (%s)\n' "$((i + 1))" "$((i + 1))" "${workers[i]}" >&2
-  done
-  printf '0) Cancel\nChoose a number: ' >&2
-  read -r choice || return 1
-  [[ -n "$choice" && "$choice" != 0 ]] || return 1
-  if [[ ! "$choice" =~ ^[1-9][0-9]*$ || "${#choice}" -gt 6 ]]; then
-    printf 'Invalid selection; no operation was started.\n' >&2
-    return 1
-  fi
-  index=$((10#$choice))
-  if (( index < 1 || index > ${#workers[@]} )); then
-    printf 'Invalid selection; no operation was started.\n' >&2
-    return 1
-  fi
-  printf '%s\n' "${workers[index - 1]}"
+  printf '%s\n'     'GUIDANCE ONLY: no participant probe or remote operation is started.'     'After all inventory workers are switched to local Livy, use one existing managed participant identity through its assigned VM in its JupyterHub environment.'     'Make the reviewed participant-livy-verify.py available beside the existing 02_spark_via_livy.py and spark_livy_access.py.'     'The verifier checks the two asset hashes; do not edit them or replace managed credentials.'     'An authorised operator must independently confirm the expected SSH host and port for that identity; an inventory alias is not necessarily the SSH endpoint.'     'The verifier requires --workspace, --evidence-dir, --expected-ssh-host and --expected-ssh-port.'     'It also requires explicit --maintenance-window-confirmed and --submissions-paused-confirmed acknowledgements.'     'Use the existing prepared dataset and a private evidence location; do not set LIVY_URL or LIVY_DATA_PATH overrides.'     'All submissions and competing administrative writes must be paused. This probe is not a remote submission lock.'     'Inspect the verifier result and evidence: worker computation, owned-session HTTP 404 cleanup, empty post-cleanup inventory and closed forwarding must be confirmed.'     'On FAILED, unknown session creation or unconfirmed cleanup: stop and inspect; never guess session IDs, bulk-delete sessions or retry automatically.'     'PASSED applies only to one managed identity and the bounded probe; it does not establish cohort capacity or full-activity readiness.'     'Workspace delivery of the verifier is not automated here; no participant publication or workshop selection is changed.'     'Controlled participant and full-activity testing still require separate authorisation.'
 }
 
 big_data_spark_step2_menu() {
-  local choice pilot
+  local choice
   while true; do
     workshop_ui_heading "Spark / Step 2 - submission via Livy REST API - work-in-progress"
     printf '%s\n' \
@@ -587,8 +547,8 @@ big_data_spark_step2_menu() {
     workshop_ui_option 1 "Check file-staging configuration - no VM tasks"
     workshop_ui_option 2 "Stage Livy runtime files - maintenance confirmation required"
     workshop_ui_section "2. SWITCH TO LIVY SUBMISSION"
-    workshop_ui_option 3 "Check Livy transition configuration - no changes"
-    workshop_ui_option 4 "Switch a workshop machine to Livy - submissions must be paused"
+    workshop_ui_option 3 "Check all-worker Livy transition configuration - no changes"
+    workshop_ui_option 4 "Switch all worker nodes to local Livy - submissions must be paused"
     workshop_ui_section "3. VERIFY PARTICIPANT ACCESS"
     workshop_ui_option 5 "Show participant verification instructions - guidance only, no test execution"
     printf '\n'
@@ -601,14 +561,11 @@ big_data_spark_step2_menu() {
       2) big_data_spark_step2_action stage ||
            printf 'Candidate staging did not complete; inspect before retrying.\n' >&2 ;;
       3|4)
-        if ! pilot="$(big_data_spark_step2_select_worker)"; then
-          continue
-        fi
         if [[ "$choice" == 3 ]]; then
-          big_data_spark_step2_transition_action syntax-check "$pilot" ||
+          big_data_spark_step2_transition_action syntax-check ||
             printf 'Warm-transition syntax check did not complete.\n' >&2
         else
-          big_data_spark_step2_transition_action transition "$pilot" ||
+          big_data_spark_step2_transition_action transition ||
             printf 'Warm transition did not complete; inspect before retrying.\n' >&2
         fi
         ;;

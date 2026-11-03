@@ -155,7 +155,7 @@ class WorkflowTests(unittest.TestCase):
             "stage-big-data-spark-livy-candidate.yml",
             "build-big-data-livy-image.yml"])
         self.assertTrue(plays[0]["any_errors_fatal"])
-        self.assertIn("ansible_play_hosts_all == [big_data_livy_pilot_host]",
+        self.assertIn("ansible_play_hosts_all == (big_data_livy_cohort_workers | default([big_data_livy_pilot_host | default('')]))",
                       plays[0]["tasks"][0]["ansible.builtin.assert"]["that"])
         last = plays[-1]
         self.assertTrue(last["any_errors_fatal"])

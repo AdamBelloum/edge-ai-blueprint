@@ -26,7 +26,7 @@ ensure_workshop_activation_allowed() { printf 'CALL_GUARD\n'; }
 big_data_spark_runtime_action() { printf 'FORBIDDEN_RUNTIME\n'; return 99; }
 big_data_spark_activate_selected_mode() { printf 'FORBIDDEN_PUBLICATION\n'; return 99; }
 big_data_spark_computation_test() { printf 'FORBIDDEN_COMPUTATION\n'; return 99; }
-"$3" "${4:-}" "${5:-}"
+if [[ -n "${5:-}" ]]; then "$3" "${4:-}" "$5"; else "$3" "${4:-}"; fi
 '''
 
 
@@ -83,7 +83,7 @@ class PilotMenuTests(unittest.TestCase):
         self.assertEqual(self.sentinel.read_text(), "original offline fixture")
         return result.returncode, text
 
-    def transition(self, action="transition", pilot="vm1", **kwargs):
+    def transition(self, action="transition", pilot="", **kwargs):
         return self.run_entry(entry="big_data_spark_step2_transition_action",
                               action=action, pilot=pilot, **kwargs)
 
@@ -105,7 +105,7 @@ class PilotMenuTests(unittest.TestCase):
         rc, text = self.transition("syntax-check")
         self.assertEqual(rc, 0)
         self.assertEqual(text.count("CALL_PREFLIGHT"), 1)
-        self.assertEqual(text.count("CALL_WARM:<--limit>:<vm1>:<--syntax-check>"), 1)
+        self.assertEqual(text.count("CALL_WARM:<--all-workers>:<--syntax-check>"), 1)
         self.assertLess(text.index("CALL_PREFLIGHT"), text.index("CALL_WARM"))
         self.assertIn("syntax check passed", text)
         self.assertNotIn("CALL_CANDIDATE", text)
@@ -113,7 +113,7 @@ class PilotMenuTests(unittest.TestCase):
     def test_transition_delegates_without_confirmation_bypass(self):
         rc, text = self.transition()
         self.assertEqual(rc, 0)
-        self.assertEqual(text.count("CALL_WARM:<--limit>:<vm1>\n"), 1)
+        self.assertEqual(text.count("CALL_WARM:<--all-workers>\n"), 1)
         self.assertLess(text.index("CALL_PREFLIGHT"), text.index("CALL_WARM"))
         self.assertIn("The helper asks for [y/N] confirmation", text)
         self.assertIn("execution readiness remain unvalidated", text)
@@ -122,68 +122,12 @@ class PilotMenuTests(unittest.TestCase):
         self.assertNotIn("<--execute>", text)
         self.assertNotIn("CALL_CANDIDATE", text)
 
-    def test_numbered_actions_select_and_forward_exactly_one_machine(self):
-        for choice, suffix in (("3", ":<--syntax-check>"), ("4", "")):
-            for selection, host in (("1", "vm1"), ("2", "vm2")):
-                with self.subTest(choice=choice, selection=selection):
-                    rc, text = self.run_entry(choice + "\n" + selection + "\n0\n")
-                    self.assertEqual(rc, 0)
-                    self.assertEqual(text.count(
-                        "CALL_WARM:<--limit>:<" + host + ">" + suffix + "\n"), 1)
-                    self.assertEqual(text.count("CALL_PREFLIGHT"), 1)
-                    self.assertEqual(text.count("CALL_WARM"), 1)
-                    self.assertIn("Choose the workshop machine", text)
-                    self.assertNotIn("Exact pilot inventory host", text)
-                    self.assertNotIn("CALL_CANDIDATE", text)
-                    self.assertEqual(json.loads(self.inventory_log.read_text()),
-                                     ["-i", str(self.root / "inventory.ini"), "--list"])
 
-    def test_single_machine_is_selected_without_an_extra_input(self):
-        for choice, suffix in (("3", ":<--syntax-check>"), ("4", "")):
-            with self.subTest(choice=choice):
-                rc, text = self.run_entry(choice + "\n0\n", hosts=("vm1",))
-                self.assertEqual(rc, 0)
-                self.assertEqual(text.count(
-                    "CALL_WARM:<--limit>:<vm1>" + suffix + "\n"), 1)
-                self.assertNotIn("Choose the workshop machine", text)
 
-    def test_invalid_machine_selection_does_not_start_an_operation(self):
-        for selection in ("vm1", "vm*", "-1", "3", "01", "1000000", "$(false)"):
-            with self.subTest(selection=selection):
-                rc, text = self.run_entry("4\n" + selection + "\n0\n")
-                self.assertEqual(rc, 0)
-                self.assertIn("Invalid selection", text)
-                self.assertNotIn("CALL_", text)
 
-    def test_failed_or_empty_discovery_blocks_dispatch(self):
-        for settings in ({"inventory_rc": 7}, {"hosts": ()},
-                         {"hosts": ("vm*",)}, {"missing_context": True}):
-            with self.subTest(settings=settings):
-                rc, text = self.run_entry("4\n0\n", **settings)
-                self.assertEqual(rc, 0)
-                self.assertNotIn("CALL_", text)
 
-    def test_eof_during_machine_selection_performs_no_operation(self):
-        for choice in ("3\n", "4\n"):
-            rc, text = self.run_entry(choice)
-            self.assertEqual(rc, 0)
-            self.assertNotIn("CALL_", text)
 
-    def test_blank_or_zero_selection_cancels_without_dispatch(self):
-        for selection in ("", "0"):
-            with self.subTest(selection=selection):
-                rc, text = self.run_entry("4\n" + selection + "\n0\n")
-                self.assertEqual(rc, 0)
-                self.assertIn("Choose the workshop machine", text)
-                self.assertNotIn("CALL_", text)
 
-    def test_patterns_options_and_empty_host_are_refused(self):
-        for pilot in ("", "-host", "vm1,vm2", "vm1:vm2", "vm*",
-                      "vm1 host", "vm[1:2]", "$(false)", "vm1\nvm2"):
-            with self.subTest(pilot=pilot):
-                rc, text = self.transition(pilot=pilot)
-                self.assertEqual(rc, 2)
-                self.assertNotIn("CALL_", text)
 
     def test_preflight_failure_prevents_wrapper(self):
         for action in ("syntax-check", "transition"):
@@ -258,6 +202,30 @@ class PilotMenuTests(unittest.TestCase):
         rc, text = self.run_entry("9\n0\n")
         self.assertEqual(rc, 0)
         self.assertIn("Choose a value from 0 through 5", text)
+        self.assertNotIn("CALL_", text)
+
+    def test_numbered_actions_dispatch_all_workers_without_host_input(self):
+        for choice, suffix in (("3", ":<--syntax-check>"), ("4", "")):
+            with self.subTest(choice=choice):
+                rc, text = self.run_entry(choice + "\n0\n")
+                self.assertEqual(rc, 0)
+                self.assertEqual(text.count("CALL_WARM:<--all-workers>" + suffix + "\n"), 1)
+                self.assertEqual(text.count("CALL_PREFLIGHT"), 1)
+                self.assertNotIn("Choose the workshop machine", text)
+                self.assertNotIn("<--limit>", text)
+                self.assertFalse(self.inventory_log.exists())
+
+    def test_host_arguments_are_refused_before_preflight(self):
+        for pilot in ("vm1", "vm1,vm2", "vm*", "$(false)"):
+            rc, text = self.transition(pilot=pilot)
+            self.assertEqual(rc, 2)
+            self.assertNotIn("CALL_", text)
+
+    def test_menu_advertises_all_worker_local_livy(self):
+        rc, text = self.run_entry("0\n")
+        self.assertEqual(rc, 0)
+        self.assertIn("Switch all worker nodes to local Livy", text)
+        self.assertNotIn("Choose the workshop machine", text)
         self.assertNotIn("CALL_", text)
 
 

@@ -1,5 +1,5 @@
 ---
-- name: Require the exact acknowledged pilot before staging or build
+- name: Require the exact acknowledged inventory scope before staging or build
   hosts: '{{ big_data_worker_group }}'
   gather_facts: false
   serial: 1
@@ -8,19 +8,19 @@
   - name: Refuse expanded scope or missing maintenance acknowledgement
     ansible.builtin.assert:
       that:
-      - ansible_play_hosts_all == [big_data_livy_pilot_host]
-      - inventory_hostname == big_data_livy_pilot_host
-      - big_data_livy_pilot_host in groups[big_data_worker_group]
+      - ansible_play_hosts_all == (big_data_livy_cohort_workers | default([big_data_livy_pilot_host | default('')]))
+      - inventory_hostname in (big_data_livy_cohort_workers | default([big_data_livy_pilot_host | default('')]))
+      - "(big_data_livy_cohort_workers == groups[big_data_worker_group]) if big_data_livy_cohort_workers is defined else (big_data_livy_pilot_host in groups[big_data_worker_group])"
       - big_data_livy_build_candidate is sameas true
       - big_data_livy_stage_maintenance_confirmed is sameas true
       - big_data_livy_transition_maintenance_confirmed is sameas true
       - big_data_livy_transition_submissions_paused is sameas true
-      fail_msg: Exact pilot and submission-free maintenance window required.
+      fail_msg: Complete inventory cohort or exact compatibility host and submission-free maintenance window required.
 - ansible.builtin.import_playbook: stage-big-data-spark-livy-candidate.yml
 - ansible.builtin.import_playbook: build-big-data-livy-image.yml
   vars:
     big_data_livy_build_candidate: true
-- name: Warm-transition the same protected Spark pilot runtime
+- name: Warm-transition each acknowledged protected local Spark runtime
   hosts: '{{ big_data_worker_group }}'
   become: true
   gather_facts: false
@@ -30,7 +30,7 @@
   - name: Require this host staging handoff and acknowledgements
     ansible.builtin.assert:
       that:
-      - inventory_hostname == big_data_livy_pilot_host
+      - inventory_hostname in (big_data_livy_cohort_workers | default([big_data_livy_pilot_host | default('')]))
       - livy_delivery is defined
       - livy_delivery.path is match('^/var/lib/digitafrica-livy-stage-[A-Za-z0-9_-]+$')
       - big_data_livy_transition_maintenance_confirmed is sameas true
