@@ -62,6 +62,37 @@ class SourceRevisionTests(unittest.TestCase):
         self.assertEqual(self.helper_hash(plan), hashlib.sha256(self.helper.read_bytes()).hexdigest())
         self.assertNotEqual(self.helper_hash(plan), self.old_hash)
 
+    def test_legacy_source_revision_uses_reviewed_blob_not_modified_working_tree(self):
+        entry = builder.LEGACY_WORKSPACE_FILES[0]
+        source = self.root / "workshop_assets/hpc" / entry["path"]
+        source.write_bytes(source.read_bytes() + b"\n/* modified fixture */\n")
+        before = source.read_bytes()
+        with self.assertRaises(ValueError):
+            self.build()
+        plan = self.build(self.revision)
+        files = plan["hpc_cleanup_jobs"][0]["manifest"]["files"]
+        self.assertEqual(next(e for e in files if e["path"] == entry["path"]), entry)
+        self.assertEqual(source.read_bytes(), before)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), self.current)
+
+    def test_unreviewed_legacy_git_blob_is_refused(self):
+        entry = builder.LEGACY_WORKSPACE_FILES[0]
+        source = self.root / "workshop_assets/hpc" / entry["path"]
+        source.write_bytes(source.read_bytes() + b"\n/* unreviewed baseline */\n")
+        self.git("add", ".")
+        self.commit("unreviewed legacy source")
+        revision = self.git("rev-parse", "HEAD").strip()
+        with self.assertRaises(ValueError):
+            self.build(revision)
+
+    def test_missing_legacy_git_blob_is_refused(self):
+        entry = builder.LEGACY_WORKSPACE_FILES[0]
+        self.git("rm", "workshop_assets/hpc/" + entry["path"])
+        self.commit("legacy source missing")
+        revision = self.git("rev-parse", "HEAD").strip()
+        with self.assertRaises(ValueError):
+            self.build(revision)
+
     def test_abbreviated_named_and_unknown_revisions_are_refused(self):
         for revision in ("HEAD", self.revision[:7], "-bad", "f" * 40):
             with self.subTest(revision=revision):

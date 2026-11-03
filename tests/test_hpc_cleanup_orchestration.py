@@ -38,6 +38,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(workspace["hosts"], ["worker-1", "worker-2"])
         self.assertEqual(runtime["hosts"], ["central-1"])
         expected = builder.read_yaml(ROOT / "roles/hpc_workspace/defaults/main.yml")["hpc_workspace_files"]
+        expected = expected + [e["path"] for e in builder.LEGACY_WORKSPACE_FILES]
         self.assertEqual([e["path"] for e in workspace["manifest"]["files"]], expected)
         for entry in workspace["manifest"]["files"]:
             source = ROOT / "workshop_assets/hpc" / entry["path"]

@@ -19,6 +19,9 @@ No automatic historical lookup, checkout, restaging or observed-hash acceptance.
 
 Overrides, content changes, symlinks, hard links and ownership/mode conflicts
 block cleanup. Directories and unrelated content remain.
+Includes the reviewed cleanup-only legacy OpenMP source files listed in
+build-cleanup-manifests.py; their provenance hashes are fixed. Source revisions
+must contain those same reviewed legacy bytes, not an unrecognised baseline.
 
 Requires stopped participant servers and exclusive administrator maintenance:
 no concurrent staging, publication, reconciliation or participant spawning.

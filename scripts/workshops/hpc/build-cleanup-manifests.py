@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only manifests from installation allowlists and resolved inventory."""
+"""Local-only cleanup manifests from current installation and reviewed legacy allowlists."""
 import argparse
 import hashlib
 import importlib.util
@@ -15,6 +15,23 @@ spec = importlib.util.spec_from_file_location(
     "hpc_cleanup_engine", Path(__file__).with_name("cleanup-staged-files.py"))
 engine = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(engine)
+
+
+# Cleanup-only migration inventory: never add these obsolete assets back to the
+# installation role. SHA-256 values are pinned to workshop_assets/hpc/PROVENANCE.md.
+# Neither inventory variables nor observed remote hashes can authorize new entries.
+LEGACY_WORKSPACE_FILES = (
+    {
+        "path": "openmp-01-basics/01-beginner/hello.c",
+        "sha256": "b8f984c4119afc76f8cc30dd9e25df4f32446e31454f9485c4d7930276c4cb5c",
+        "mode": 0o644,
+    },
+    {
+        "path": "openmp-01-basics/02-intermediate/pi_serial.c",
+        "sha256": "d59fd3cdbaba2e5a65f85894930c64fe0a1bae8b478b70f2d7949a0cc6ecf654",
+        "mode": 0o644,
+    },
+)
 
 
 def ordered_hosts(inventory, name):
@@ -88,6 +105,16 @@ def digest(path, revision=None, repository=None):
     return hashlib.sha256(content).hexdigest()
 
 
+def reviewed_legacy_entries(root, revision=None):
+    entries = [dict(entry) for entry in LEGACY_WORKSPACE_FILES]
+    engine.validate_entries(entries)
+    for entry in entries:
+        source = root / "workshop_assets/hpc" / entry["path"]
+        if digest(source, revision, root) != entry["sha256"]:
+            raise ValueError("Legacy source differs from reviewed provenance: " + entry["path"])
+    return entries
+
+
 def build(root, inventory, worker_group, control_group, revision=None):
     root = Path(root).resolve()
     if revision is not None:
@@ -150,6 +177,10 @@ def build(root, inventory, worker_group, control_group, revision=None):
     engine.validate_entries(workspace_entries)
     for entry in workspace_entries:
         entry["sha256"] = digest(root / "workshop_assets/hpc" / entry["path"], revision, root)
+
+    # Combine both scopes before fleet preflight; duplicate paths are refused.
+    workspace_entries.extend(reviewed_legacy_entries(root, revision))
+    engine.validate_entries(workspace_entries)
 
     runtime_entries = []
     tasks = read_yaml(root / "roles/hpc_runtime/tasks/main.yml")
