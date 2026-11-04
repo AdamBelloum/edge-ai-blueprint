@@ -1,6 +1,6 @@
 # RESTful URL Shortener Workshop with Flask
 
-This guide provides a complete walkthrough for building a simple RESTful URL shortener in Flask. It is written to match the tutorial skeleton and the final implementation used in this workshop.
+**Beginner track: start with [`01-rest-api-guided.ipynb`](01-rest-api-guided.ipynb).** It introduces the supplied `app.py` and guides you through the REST requests interactively. This document is a supplementary implementation reference; Sections 2–4 explain code assembly and are not instructions to recreate the supplied beginner application.
 
 ---
 
@@ -47,7 +47,7 @@ We use different HTTP methods to perform different actions:
 | 400         | Invalid or missing request data                                     |
 | 404         | ID not found, or global delete returns 404 in this assignment setup |
 
-> Note: In a more typical web application, `GET /<id>` might perform a real redirect using the `Location` header. In this workshop the implementation returns a JSON body with status code `301` because that matches the required test behavior.
+> Note: The supplied beginner handler returns the URL in a JSON body with status code `301`; it does not set a `Location` header. A real redirect usually uses `Location`. In the notebook, disable automatic redirect following to inspect the local API response instead of requesting the stored URL.
 
 ---
 
@@ -63,11 +63,7 @@ To check whether Flask is installed:
 python3 -m flask --version
 ```
 
-If Flask is not installed:
-
-```bash
-pip install flask
-```
+The workshop environment should already provide Flask. If this version check fails, ask the organiser; do not install or upgrade packages during the workshop.
 
 ### The First Flask App
 
@@ -148,7 +144,7 @@ def is_it_an_url(string):
     )
 ```
 
-This is intentionally simple and sufficient for the tests used in the workshop.
+This beginner check is deliberately limited: it verifies only the prefix and accepts values such as `http://` that have no host. Assignment 1 requires regular-expression validation for full credit; treat this as a starting example, not a complete URL validator.
 
 ### Step 3: GET / — Return All Keys
 
@@ -307,7 +303,7 @@ def is_it_an_url(string):
     )
 
 def generate_short_id(url):
-    # Create a unique 6-character hash of the URL
+    # Return a six-character hash prefix; distinct URLs can collide
     return hashlib.md5(url.encode()).hexdigest()[:6]
 
 @app.route("/", methods=["GET"])
@@ -357,7 +353,7 @@ def create_root():
     if not is_it_an_url(data.get("value")):
         return jsonify({"detail": "Invalid url"}), 400
 
-    # Add the value from the request body to the shared dictionary with a numeric key
+    # Store the submitted URL under its generated short identifier
     short_id = generate_short_id(data.get("value"))
     shared_dict[short_id] = data.get("value")
     return jsonify({"id": short_id}), 201
@@ -490,11 +486,11 @@ curl -X DELETE http://127.0.0.1:5000/
 
 **Why use a dictionary?** Because it is simple and easy to understand. A production system would use a real database.
 
-**Why is the generated ID so simple?** The goal of this tutorial is to practice REST APIs and Flask routing, not ID optimization.
+**Why is the generated ID so simple?** This beginner example is kept simple for learning. Its six-character hash does not guarantee unique IDs; Assignment 1 asks you to explain the required identifier properties, so treat this implementation as an example with limitations.
 
 **Why does** `DELETE /` **return 404?** This is not typical REST design, but it matches the assignment/test behavior used in this tutorial.
 
-**Why does** `GET /<id>` **return JSON instead of a real redirect?** Because this implementation is designed to be compatible with the expected test behavior. A more standard implementation could use Flask’s `redirect(...)`.
+**Why does** `GET /<id>` **return JSON instead of a real redirect?** The supplied beginner handler returns the URL in JSON with status `301` and does not set `Location`. The notebook disables automatic redirect following so you can inspect that local API response.
 
 ---
 
