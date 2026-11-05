@@ -1407,6 +1407,12 @@ singleuser:
                 "$selected_source/upstream_participants_guide_md" \
                 "$selected_workspace/upstream-participants-guide.md" \
                 false
+              if [ "$mode" = "beginner" ]; then
+                copy_seed_file \
+                  "$selected_source/module2_beginner_guided_ipynb" \
+                  "$selected_workspace/02-microservices-guided.ipynb" \
+                  false
+              fi
             fi
 
             # Record initial delivery; a receipt is not a service test

@@ -459,6 +459,7 @@
       --from-file=auth_service_auth_py="$root/beginner/auth_service/auth.py" \
       --from-file=shortener_service_shortener_py="$root/beginner/shortener_service/shortener.py" \
       --from-file=upstream_participants_guide_md="$root/beginner/upstream-participants-guide.md" \
+      --from-file=module2_beginner_guided_ipynb="$root/beginner/02-microservices-guided.ipynb" \
       --dry-run=client -o yaml | k3s kubectl apply -f -
 
     k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
