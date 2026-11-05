@@ -541,6 +541,7 @@
         ),
         # cloud-computing-soa/module1 REST API provenance entries
         "/opt/digitafrica/k8s-notebooks/cloud-computing-soa/module1/beginner": (
+            "01-rest-api-guided.ipynb",
             "app.py",
             "upstream-participants-guide.md",
         ),
