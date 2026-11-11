@@ -12,11 +12,9 @@
 #    the web server or load user data.
 # 3. Inspect auth_service/keys/ before running this script.
 #    - Neither key exists: continue to generate a new pair.
-#    - Both keys exist: the script preserves them.
-#    - Only one key exists: stop and inspect/recover the matching pair.
-#      Continuing regenerates BOTH keys, replacing the remaining key.
-#      Tokens signed with the previous private key will no longer verify
-#      against the new public key.
+#    - Both regular key files exist: the script preserves their contents.
+#    - Only one key exists, or either path is a symlink/non-regular file:
+#      the script refuses to proceed. Inspect or recover a matching pair.
 # 4. Run:
 #      bash setup_local_keys.sh
 # 5. Check the output and file permissions; do not print private-key contents:
@@ -36,6 +34,22 @@ shortener_dir="$track_root/shortener_service"
 
 mkdir -p "$auth_dir/keys" "$shortener_dir/keys"
 
+private_key="$auth_dir/keys/private_key.pem"
+public_key="$auth_dir/keys/public_key.pem"
+
+# Do not let ensure_keys_exist() silently replace a surviving key when
+# the pair is incomplete. With neither file present, generation is safe.
+if [[ -e "$private_key" || -L "$private_key" || \
+      -e "$public_key" || -L "$public_key" ]]; then
+  if [[ ! -f "$private_key" || ! -f "$public_key" || \
+        -L "$private_key" || -L "$public_key" ]]; then
+    printf '%s\n' \
+      'ERROR: Expected either no auth key files or both regular key files.' \
+      'Inspect or recover the key pair; refusing to replace either file.' >&2
+    exit 1
+  fi
+fi
+
 (
   cd "$auth_dir"
   python -c 'import auth; auth.ensure_keys_exist()'
@@ -49,5 +63,5 @@ cp "$auth_dir/keys/public_key.pem" \
 chmod 0644 "$shortener_dir/keys/public_key.pem"
 
 printf '%s\n' \
-  'Generated participant-local authentication keys.' \
+  'Prepared participant-local authentication keys.' \
   'Copied only auth_service/keys/public_key.pem to shortener_service/keys/.'

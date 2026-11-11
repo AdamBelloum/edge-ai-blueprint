@@ -3,11 +3,12 @@
 
 CLOUD_MODULE3_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLOUD_MODULE3_LOCAL_HELPER="$CLOUD_MODULE3_DIR/module3-local.sh"
+source "$CLOUD_MODULE3_DIR/module3-runtime.sh"
 
 cloud_module3_status() {
   printf '%s\n' \
     'Cloud Computing SOA — Module 3: Containerization and Orchestration' \
-    'Available actions: local checks, deployed readiness/status, publication and solution release.' \
+    'Available actions: local checks, deployed readiness/status, runtime start/status, publication and solution release.' \
     'Teaching-file delivery is integrated; deployed readiness must pass before publication.' \
     'Docker/Compose and Kubernetes exercise-runtime readiness is NOT VALIDATED.' \
     'This status does not inspect deployed assets or verify runtime readiness.' \
@@ -48,6 +49,9 @@ run_cloud_module3_menu() {
     workshop_ui_option 7 "Publish Advanced workshop: specification and Module 2 services; runtime NOT VALIDATED"
     workshop_ui_section "AFTER THE WORKSHOP"
     workshop_ui_option 8 "Release reference solutions: intermediate or advanced track"
+    workshop_ui_section "EXERCISE RUNTIME"
+    workshop_ui_option 9 "Start beginner containerization runtime on assigned VMs"
+    workshop_ui_option 10 "Show beginner containerization runtime status"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -69,10 +73,14 @@ run_cloud_module3_menu() {
            printf 'Advanced publication did not complete.\n' >&2 ;;
       8) cloud_module3_release_solutions ||
            printf 'Solution release did not complete.\n' >&2 ;;
+      9) cloud_module3_runtime_start ||
+           printf 'Module 3 runtime start did not complete.\n' >&2 ;;
+      10) cloud_module3_runtime_status ||
+            printf 'Module 3 runtime status check failed.\n' >&2 ;;
       4) cloud_module3_show_deployment_status ||
            printf 'Deployed status check failed.\n' >&2 ;;
       0) return 0 ;;
-      *) printf 'Choose 0 through 8.\n' >&2 ;;
+      *) printf 'Choose 0 through 10.\n' >&2 ;;
     esac
   done
 }

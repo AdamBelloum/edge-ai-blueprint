@@ -29,9 +29,10 @@ password hashes. Users are loaded at startup; changes update the in-memory
 dictionary and save it to disk. Requests do not reload the file.
 Compose mounts persistent storage at /app/data and read-only keys at
 /app/keys. Prepare a complete key pair before starting containers.
-The startup helper preserves keys when both files exist; otherwise it
-generates and writes a new pair, replacing any remaining key file.
-Generation cannot write through the read-only Compose key mount.
+The startup helper preserves a valid, matching key pair and generates
+keys only when neither file exists. It refuses incomplete, invalid, or
+mismatched pairs without replacing existing files. Generation cannot write
+through the read-only Compose key mount.
 Only the public key belongs in the shortener; never share the private key.
 
 Teaching limitations:
@@ -46,6 +47,7 @@ Use disposable lab credentials and the Flask server only for the practical.
 
 from flask import Flask, jsonify, request
 import os
+import stat
 import json
 import base64
 import time
@@ -122,17 +124,52 @@ def hash_password(password):
 
 
 def ensure_keys_exist():
-    """Preserve existing key files, or generate a new 2048-bit RSA pair.
+    """Validate an existing RSA key pair, or create one if neither file exists.
 
-    If both files exist, return without validating them. If either is
-    missing, rewrite both files, replacing any remaining key.
-    The private PEM is unencrypted; this helper does not set permissions.
-    Use setup_local_keys.sh to apply permissions and copy only the public
-    key to the shortener. Inspect incomplete pairs before running it.
+    Existing files must be regular, unencrypted PEM RSA keys of at least
+    2048 bits, and the public key must match the private key. Incomplete or
+    invalid pairs are never replaced. Newly created private and public files
+    use restrictive and public-readable permissions, respectively.
     """
     ensure_parent_dir(PRIVATE_KEY_FILE)
     ensure_parent_dir(PUBLIC_KEY_FILE)
-    if os.path.exists(PRIVATE_KEY_FILE) and os.path.exists(PUBLIC_KEY_FILE):
+
+    private_exists = os.path.lexists(PRIVATE_KEY_FILE)
+    public_exists = os.path.lexists(PUBLIC_KEY_FILE)
+
+    if private_exists != public_exists:
+        raise RuntimeError(
+            "Incomplete authentication key pair; refusing to replace either "
+            "existing key file. Inspect and repair the pair before starting."
+        )
+
+    if private_exists:
+        try:
+            if not stat.S_ISREG(os.lstat(PRIVATE_KEY_FILE).st_mode):
+                raise ValueError("Private key is not a regular file.")
+            if not stat.S_ISREG(os.lstat(PUBLIC_KEY_FILE).st_mode):
+                raise ValueError("Public key is not a regular file.")
+
+            with open(PRIVATE_KEY_FILE, "rb") as f:
+                private_key = serialization.load_pem_private_key(
+                    f.read(), password=None
+                )
+            with open(PUBLIC_KEY_FILE, "rb") as f:
+                public_key = serialization.load_pem_public_key(f.read())
+
+            if not isinstance(private_key, rsa.RSAPrivateKey):
+                raise ValueError("Private key is not an RSA key.")
+            if not isinstance(public_key, rsa.RSAPublicKey):
+                raise ValueError("Public key is not an RSA key.")
+            if private_key.key_size < 2048 or public_key.key_size < 2048:
+                raise ValueError("RSA keys must be at least 2048 bits.")
+            if private_key.public_key().public_numbers() != public_key.public_numbers():
+                raise ValueError("Public key does not match private key.")
+        except Exception as exc:
+            raise RuntimeError(
+                "Existing authentication keys are invalid or do not match; "
+                "refusing to replace them. Inspect and repair the pair."
+            ) from exc
         return
 
     private_key = rsa.generate_private_key(
@@ -141,22 +178,40 @@ def ensure_keys_exist():
     )
     public_key = private_key.public_key()
 
-    with open(PRIVATE_KEY_FILE, "wb") as f:
-        f.write(
-            private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            )
-        )
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
 
-    with open(PUBLIC_KEY_FILE, "wb") as f:
-        f.write(
-            public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+    created_files = []
+    try:
+        for key_path, contents, mode in (
+            (PRIVATE_KEY_FILE, private_pem, 0o600),
+            (PUBLIC_KEY_FILE, public_pem, 0o644),
+        ):
+            fd = os.open(
+                key_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                mode
             )
-        )
+            created_files.append(key_path)
+            with os.fdopen(fd, "wb") as f:
+                f.write(contents)
+    except OSError as exc:
+        for created_path in reversed(created_files):
+            try:
+                os.unlink(created_path)
+            except OSError:
+                pass
+        raise RuntimeError(
+            "Could not create a complete authentication key pair. Cleanup "
+            "was attempted; inspect the key directory before retrying."
+        ) from exc
 
 
 def load_private_key():
