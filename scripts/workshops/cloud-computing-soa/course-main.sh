@@ -579,6 +579,9 @@ run_cloud_computing_soa_module_menu() {
     workshop_ui_option 5 "Publish Advanced workshop: assignment specification only; selects Advanced for new spawns"
     workshop_ui_section "AFTER THE WORKSHOP"
     workshop_ui_option 6 "Release reference solutions: intermediate or advanced track"
+    workshop_ui_option 7 "Test every group's work: grading-script points per group"
+    workshop_ui_option 8 "Audit every group's work: TA audit report per group"
+    workshop_ui_note "Grade before releasing solutions or resetting: a reset deletes the workspaces."
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -609,12 +612,20 @@ run_cloud_computing_soa_module_menu() {
         "${prefix}_release_solutions" ||
           printf 'Module %s solution release did not complete.\n' "$module" >&2
         ;;
+      7)
+        cloud_soa_grade_groups "$module" tests ||
+          printf 'Module %s grading did not complete.\n' "$module" >&2
+        ;;
+      8)
+        cloud_soa_grade_groups "$module" audit ||
+          printf 'Module %s audit did not complete.\n' "$module" >&2
+        ;;
       2)
         "${prefix}_show_status" ||
           printf 'Module %s deployment status could not be retrieved.\n' "$module" >&2
         ;;
       0) return 0 ;;
-      *) printf 'Choose a value from 0 through 6.\n' >&2 ;;
+      *) printf 'Choose a value from 0 through 8.\n' >&2 ;;
     esac
   done
 }
@@ -694,3 +705,16 @@ if [[ ! -r "$CLOUD_COMPUTING_SOA_MODULE3_HELPER" ]]; then
 fi
 # shellcheck source=module3-main.sh
 source "$CLOUD_COMPUTING_SOA_MODULE3_HELPER"
+
+# Grading of every group's Module 1 or 2 work.
+CLOUD_COMPUTING_SOA_GRADING_HELPER="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
+)/grading-main.sh"
+
+if [[ ! -r "$CLOUD_COMPUTING_SOA_GRADING_HELPER" ]]; then
+  printf 'Missing Cloud Computing SOA grading controller: %s\n' \
+    "$CLOUD_COMPUTING_SOA_GRADING_HELPER" >&2
+  return 1
+fi
+# shellcheck source=grading-main.sh
+source "$CLOUD_COMPUTING_SOA_GRADING_HELPER"

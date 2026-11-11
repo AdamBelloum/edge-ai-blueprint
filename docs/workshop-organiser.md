@@ -79,6 +79,18 @@ After a full reset, prepare a new workshop cycle before participants use the
 platform again. An identity-only reset deliberately retains existing
 FL/JupyterHub state.
 
+## Grade Cloud Computing SOA work
+
+After a Cloud Computing SOA Module 1 or 2 workshop, and before releasing the
+solutions or resetting, the module's menu tests every group's work with the
+assignment's grading script (entry 7) or runs the TA audit on it (entry 8).
+The actions are `cloud-module1-grade`, `cloud-module1-audit`,
+`cloud-module2-grade` and `cloud-module2-audit`. Each group's work runs in its
+own pod on a copy of its workspace, which stays unchanged; the results are
+written under `secrets/workshops/grading/`. A reset refuses to start while a
+grading run is in the cluster; the grading entries remove a run that was cut
+off. See [cloud-soa-batch-grading.md](cloud-soa-batch-grading.md).
+
 ## Participant guidance
 
 Provide participants with their credentials only after preparation succeeds. Participants should follow the `00_START_HERE.md` notebook guide for their selected workshop level. The participant guides describe work after cohort preparation; they do not replace organiser preparation or reset procedures.

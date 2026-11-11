@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from audit_common import (
     Client, Context, ServiceUnreachable, base62_length, gives_url, is_5xx, listed, print_report,
-    registry, returned_id, run_checks, same_url, shorten, target_of, wait_for, write_markdown,
+    registry, returned_id, run_checks, same_url, shorten, target_of, wait_for, write_json, write_markdown,
 )
 
 CHECKS, check = registry()
@@ -735,6 +735,7 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:5000",
                         help="base URL of the shortener (default: %(default)s)")
     parser.add_argument("--report", metavar="FILE.md", help="also write the findings to a Markdown file")
+    parser.add_argument("--json", metavar="FILE.json", help="also write every result to a JSON file")
     parser.add_argument("--quick", action="store_true", help="fewer URLs, no collision search")
     parser.add_argument("--only", nargs="*", help="run only checks whose id starts with these, e.g. A1-URL")
     parser.add_argument("-v", "--verbose", action="store_true", help="show each check while it runs")
@@ -760,6 +761,8 @@ def main():
     if args.report:
         write_markdown(args.report, title, target, results)
         print(f"Report written to {args.report}")
+    if args.json:
+        write_json(args.json, title, target, results)
     sys.exit(1 if any(result.status == "FAIL" for result in results) else 0)
 
 

@@ -6,6 +6,7 @@ Run the file directly to see the points per line:
 
     python test_api.py                          # service on http://127.0.0.1:5000
     python test_api.py --url http://HOST:PORT
+    python test_api.py --json points.json       # also write the points as JSON
     python -m unittest -v test_api              # pass/fail only
 
 Start the service first. The checks create mappings, and every test ends
@@ -21,6 +22,7 @@ Requires the requests package.
 """
 import argparse
 import csv
+import json
 import os
 import random
 import re
@@ -360,38 +362,60 @@ def outcome_of(result, test_name):
     return ("not run", "")
 
 
-def print_report(result, title, rubric, not_tested):
-    """Print the points per rubric line; return True if every line passed."""
-    print(f"\n{title}\n")
-    print("Points  Rubric line")
-    earned = total = not_checked = 0
+def score(result, rubric, not_tested):
+    """The points per rubric line, as print_report prints them and --json writes them.
+
+    A line is "not checked" when its tests were skipped (and none failed); it
+    then counts neither for nor against the points of this run. A problem's
+    detail is the start of the failure message, which can quote the service.
+    """
+    lines = []
     for line, points, tests in rubric:
         outcomes = [outcome_of(result, name) for name in tests]
         if all(outcome in ("pass", "skipped") for outcome, _ in outcomes) and \
                 any(outcome == "skipped" for outcome, _ in outcomes):
-            not_checked += points
-            print(f" -/{points:<4} {line}")
+            status = "not checked"
         else:
-            passed = all(outcome == "pass" for outcome, _ in outcomes)
-            earned += points if passed else 0
-            total += points
-            print(f"{points if passed else 0:>2}/{points:<4} {line}")
-        for outcome, detail in dict.fromkeys(outcomes):
-            if outcome != "pass":
-                detail = " ".join(detail.split())
-                print(f"          {outcome}: {detail[:160]}")
-    print(f"{earned:>2}/{total:<4} tested by this script")
-    if not_checked:
-        print(f"{not_checked:>5}   not checked in this run (see above)")
+            status = "passed" if all(outcome == "pass" for outcome, _ in outcomes) else "failed"
+        problems = [{"outcome": outcome, "detail": " ".join(detail.split())[:300]}
+                    for outcome, detail in dict.fromkeys(outcomes) if outcome != "pass"]
+        lines.append({"line": line, "points": points, "status": status,
+                      "earned": points if status == "passed" else 0, "problems": problems})
+    checked = [line for line in lines if line["status"] != "not checked"]
+    return {
+        "earned": sum(line["earned"] for line in checked),
+        "possible": sum(line["points"] for line in checked),
+        "not_checked": sum(line["points"] for line in lines if line["status"] == "not checked"),
+        "lines": lines,
+        "not_tested": [{"line": line, "points": points} for line, points in not_tested],
+        "notes": list(dict.fromkeys(NOTES)),
+    }
+
+
+def print_report(result, title, rubric, not_tested):
+    """Print the points per rubric line and return them (see score)."""
+    report = score(result, rubric, not_tested)
+    print(f"\n{title}\n")
+    print("Points  Rubric line")
+    for line in report["lines"]:
+        if line["status"] == "not checked":
+            print(f" -/{line['points']:<4} {line['line']}")
+        else:
+            print(f"{line['earned']:>2}/{line['points']:<4} {line['line']}")
+        for problem in line["problems"]:
+            print(f"          {problem['outcome']}: {problem['detail'][:160]}")
+    print(f"{report['earned']:>2}/{report['possible']:<4} tested by this script")
+    if report["not_checked"]:
+        print(f"{report['not_checked']:>5}   not checked in this run (see above)")
     print()
     print("Not tested by this script:")
-    for line, points in not_tested:
-        print(f"{points:>5}   {line}")
-    if NOTES:
+    for line in report["not_tested"]:
+        print(f"{line['points']:>5}   {line['line']}")
+    if report["notes"]:
         print("\nNotes:")
-        for note in dict.fromkeys(NOTES):
+        for note in report["notes"]:
             print(f"  {note}")
-    return earned == total
+    return report
 
 
 def main():
@@ -399,6 +423,7 @@ def main():
     parser = argparse.ArgumentParser(description="Grade an Assignment 1 URL shortener over HTTP.")
     parser.add_argument("--url", default=BASE_URL,
                         help="base URL of the service (default: %(default)s, or SHORTENER_BASE_URL)")
+    parser.add_argument("--json", metavar="FILE", help="also write the points to FILE as JSON")
     parser.add_argument("-v", "--verbose", action="store_true", help="list every test while it runs")
     args = parser.parse_args()
     BASE_URL = args.url.rstrip("/")
@@ -406,7 +431,12 @@ def main():
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     runner = unittest.TextTestRunner(verbosity=2 if args.verbose else 1, resultclass=GradingResult)
     result = runner.run(suite)
-    passed = print_report(result, f"Assignment 1, URL shortener at {BASE_URL}", RUBRIC, NOT_TESTED)
+    title = f"Assignment 1, URL shortener at {BASE_URL}"
+    report = print_report(result, title, RUBRIC, NOT_TESTED)
+    passed = report["earned"] == report["possible"]
+    if args.json:
+        report = dict(assignment="1", title=title, passed=passed, **report)
+        Path(args.json).write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     sys.exit(0 if passed else 1)
 
 

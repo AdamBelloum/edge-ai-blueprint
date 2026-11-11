@@ -2,13 +2,17 @@
 
 workshop_assets/cloud-computing-soa/ta-audit/ holds the scripts that teaching
 assistants run against students' submissions to Assignments 1-3. Deployment
-code may only read the module folders next to it, so the audit never reaches
-the central server or a participant. CHECKS.md lists every check and is
-generated from the scripts by `python audit_common.py`.
+code may only read the module folders next to it, so the audit never reaches a
+participant. The one exception is the organiser's grading helper: for the audit
+entry of the Module 1 and 2 menus it sends the audit to grading pods, where
+only the grader container mounts it, never a container that runs a group's
+code (tests/test_cloud_soa_grading_remote.py). CHECKS.md lists every check and
+is generated from the scripts by `python audit_common.py`.
 """
 import importlib
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,13 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 COURSE = "workshop_assets/cloud-computing-soa"
 AUDIT = ROOT / COURSE / "ta-audit"
 COURSE_PATH = re.compile(re.escape(COURSE) + r"(?:/[^\s'\"]*)?")
+# Sends the audit to the grader container of grading pods (see above).
+GRADING_HELPER = ROOT / "scripts/workshops/cloud-computing-soa/grading-local.py"
 
 
 def delivery_files():
     """Files that decide what reaches the central server and the participants."""
     for pattern in ("roles/**/*.yml", "roles/**/*.j2", "roles/**/*.sh", "playbooks/**/*.yml",
                     "scripts/**/*.sh", "scripts/**/*.py", "workshop_assets/**/asset-map.tsv"):
-        yield from ROOT.glob(pattern)
+        yield from (path for path in ROOT.glob(pattern) if path != GRADING_HELPER)
 
 
 def audit_modules():
@@ -67,6 +73,38 @@ class CatalogueTests(unittest.TestCase):
                 unexplained = [check.id for check in checks
                                if check.severity in ("FAIL", "WARN") and not (check.why and check.ask)]
                 self.assertEqual([], unexplained)
+
+    def test_shared_secret_check_ignores_public_keys_only(self):
+        audit_common, _, audit_a2, _ = audit_modules()
+        [check] = [check for check in audit_a2.CHECKS if check.id == "SRC-04"]
+        module2 = ROOT / COURSE / "module2-microservices"
+
+        def status(auth, shortener):
+            context = audit_common.Context()
+            context.auth_source, context.shortener_source = str(auth), str(shortener)
+            return audit_common.run_checks([check], context, "A2")[0].status
+
+        # The delivered services name the same public key file, and the reference solutions share nothing.
+        for track in ("beginner", "intermediate", "solutions"):
+            with self.subTest(track=track):
+                self.assertEqual(status(module2 / track / "auth_service", module2 / track / "shortener_service"),
+                                 "PASS")
+        with tempfile.TemporaryDirectory() as folder:
+            auth, shortener = Path(folder, "auth"), Path(folder, "shortener")
+            auth.mkdir()
+            shortener.mkdir()
+            for auth_code, shortener_code, expected in (
+                ('JWT_SECRET = "correct horse battery"\n', 'SECRET = "correct horse battery"\n', "WARN"),
+                ('PUBLIC_KEY = "-----BEGIN"\nPUBLIC_KEY_PATH = "../keys/public.pem"\n',
+                 'PUBLIC_KEY = "-----BEGIN"\nPUBLIC_KEY_PATH = "../keys/public.pem"\n', "PASS"),
+                # Both services run beside ../keys: the shortener can read the private key and sign tokens.
+                ('PRIVATE_KEY_PATH = "../keys/private.pem"\n', 'PRIVATE_KEY_PATH = "../keys/private.pem"\n', "WARN"),
+                ('PRIVATE_KEY_FILE = "keys/a.pem"\n', 'KEY_FILE = "keys/a.pem"\n', "WARN"),
+            ):
+                with self.subTest(auth=auth_code, shortener=shortener_code):
+                    (auth / "auth.py").write_text(auth_code)
+                    (shortener / "shortener.py").write_text(shortener_code)
+                    self.assertEqual(status(auth, shortener), expected)
 
     def test_checks_md_is_up_to_date(self):
         audit_common = audit_modules()[0]
