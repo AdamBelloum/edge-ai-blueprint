@@ -9,12 +9,16 @@ BLOCK = SOURCE.split("# BEGIN MODULE3 RESET ATTESTATION", 1)[1].split(
     "# END MODULE3 RESET ATTESTATION", 1
 )[0]
 
+STUB_OK = 'module3_runtime_removal() { printf "STUB_REMOVAL_CALLED\\n"; return 0; }\n'
+STUB_FAIL = 'module3_runtime_removal() { printf "STUB_REMOVAL_CALLED\\n"; return 1; }\n'
 
-def invoke(workshop, module, answer):
+
+def invoke(workshop, module, answer, preamble=""):
     script = (
         'set -euo pipefail\n'
         'fail() { printf "%s\\n" "$*" >&2; exit 1; }\n'
         'cleanup_workshop="$1"; cleanup_module="$2"\n'
+        + preamble
         + BLOCK
         + '\nprintf "ARG=%s\\n" "${runtime_reset_args[@]}"\n'
     )
@@ -51,6 +55,30 @@ class Module3AttestationTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertNotIn("--confirm-no-external-module3-runtime", result.stdout)
                 self.assertNotIn("Confirm no external", result.stdout)
+
+    def test_no_then_successful_removal_adds_confirmation(self):
+        result = invoke("cloud-computing-soa", "module3", "n\n", STUB_OK)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("STUB_REMOVAL_CALLED", result.stdout)
+        self.assertIn("ARG=--confirm-no-external-module3-runtime", result.stdout)
+
+    def test_no_then_failed_or_declined_removal_blocks_dispatch(self):
+        result = invoke("cloud-computing-soa", "module3", "n\n", STUB_FAIL)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("STUB_REMOVAL_CALLED", result.stdout)
+        self.assertNotIn("ARG=", result.stdout)
+        self.assertIn("cleanup remains in_progress", result.stderr)
+
+    def test_unknown_answer_never_offers_removal(self):
+        result = invoke("cloud-computing-soa", "module3", "unknown\n", STUB_OK)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("STUB_REMOVAL_CALLED", result.stdout)
+        self.assertNotIn("ARG=", result.stdout)
+
+    def test_yes_never_calls_removal(self):
+        result = invoke("cloud-computing-soa", "module3", "y\n", STUB_OK)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("STUB_REMOVAL_CALLED", result.stdout)
 
 
 if __name__ == "__main__":

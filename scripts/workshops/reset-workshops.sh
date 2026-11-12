@@ -376,12 +376,13 @@ case "$cleanup_workshop" in
     if [[ "$cleanup_workshop" == cloud-computing-soa &&
           "$cleanup_module" == module3 ]]; then
       printf '%s\n' \
-        'Module 3 external runtime cleanup is not implemented.' \
+        'Module 3 external runtime cleanup is not part of this reset stage.' \
         'Continue ONLY if this entire cycle published/inspected teaching files only.' \
         'No organiser or participant may have created Module 3 Docker/Compose,' \
         'Kubernetes, NFS or persistent-storage exercise resources on any host.' \
         'This is operator attestation, NOT automated resource verification.' \
-        'If resources exist or their absence is unknown, decline and contact the administrator.'
+        'If resources may exist, answer N to remove the Module 3 runtime now' \
+        '(the same action as Module 3 menu option 12).'
       printf 'Confirm no external Module 3 exercise resources were created [y/N]: '
       runtime_answer=""
       if ! read -r runtime_answer; then
@@ -390,6 +391,34 @@ case "$cleanup_workshop" in
       case "$runtime_answer" in
         y|Y|yes|YES)
           runtime_reset_args+=(--confirm-no-external-module3-runtime)
+          ;;
+        n|N|no|NO|"")
+          if ! declare -F module3_runtime_removal >/dev/null; then
+            module3_runtime_removal() {
+              local module3_dir="${SCRIPT_DIR:-}/cloud-computing-soa"
+              [[ -r "$module3_dir/module3-runtime.sh" ]] || {
+                printf 'ERROR: Module 3 runtime helper not found: %s\n' \
+                  "$module3_dir/module3-runtime.sh" >&2
+                return 3
+              }
+              (
+                set +u
+                # shellcheck disable=SC2034  # read by the sourced Module 3 library
+                CLOUD_MODULE3_DIR="$module3_dir"
+                # shellcheck source=/dev/null
+                source "$module3_dir/module3-runtime.sh"
+                cloud_module3_runtime_reset_confirmed
+              )
+            }
+          fi
+          printf '%s\n' \
+            'Module 3 runtime resources may exist; offering removal now.'
+          if module3_runtime_removal; then
+            printf '%s\n' 'Module 3 runtime removed; continuing the reset.'
+            runtime_reset_args+=(--confirm-no-external-module3-runtime)
+          else
+            fail 'Module 3 runtime removal was declined or failed; cleanup remains in_progress.'
+          fi
           ;;
         *)
           fail 'Module 3 external-resource absence not confirmed; cleanup remains in_progress.'
