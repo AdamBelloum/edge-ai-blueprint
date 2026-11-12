@@ -36,10 +36,9 @@ class LocalCleanupWiringTests(unittest.TestCase):
     def test_fl_runs_worker_then_local_then_workspace_boundary(self):
         result, calls = run_wiring(context())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[1], "--runtime-only --module spark")
+        self.assertEqual(len(calls), 2)
         self.assertTrue(calls[0].startswith("FL_DATA "))
-        self.assertTrue(calls[2].startswith("FL_LOCAL --repository-root "))
+        self.assertTrue(calls[1].startswith("FL_LOCAL --repository-root "))
         self.assertLess(
             result.stdout.index("FL worker-data cleanup verified"),
             result.stdout.index("Local FL partition cleanup verified"),
@@ -52,9 +51,8 @@ class LocalCleanupWiringTests(unittest.TestCase):
     def test_local_failure_preserves_exit_status_and_blocks_workspace(self):
         result, calls = run_wiring(context(), local_status=17)
         self.assertEqual(result.returncode, 17)
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[1], "--runtime-only --module spark")
-        self.assertTrue(calls[2].startswith("FL_LOCAL "))
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1].startswith("FL_LOCAL "))
         self.assertNotIn("EVENT workspace-boundary", result.stdout)
         self.assertIn("cleanup remains in_progress", result.stderr)
 
@@ -68,8 +66,7 @@ class LocalCleanupWiringTests(unittest.TestCase):
     def test_missing_local_helper_blocks_workspace(self):
         result, calls = run_wiring(context(), local_status=None)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1], "--runtime-only --module spark")
+        self.assertEqual(len(calls), 1)
         self.assertIn("Missing FL partition cleanup helper", result.stderr)
         self.assertNotIn("EVENT workspace-boundary", result.stdout)
 
@@ -94,19 +91,16 @@ class LocalCleanupWiringTests(unittest.TestCase):
                 data.update(workshop_type=selected, workshop_module=module)
                 result, calls = run_wiring(data)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(len(calls), 3)
-                self.assertEqual(calls[1], "--runtime-only --module spark")
-                self.assertTrue(calls[2].startswith("FL_LOCAL "))
+                self.assertEqual(len(calls), 2)
+                self.assertTrue(calls[1].startswith("FL_LOCAL "))
 
-    def test_spark_failure_blocks_local_cleanup_and_workspace(self):
+    def test_fl_reset_never_invokes_spark_cleanup(self):
+        # A failing Spark helper is irrelevant: it is never called for FL.
         result, calls = run_wiring(context(), spark_status=23)
-        self.assertEqual(result.returncode, 23)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls), 2)
-        self.assertTrue(calls[0].startswith("FL_DATA "))
-        self.assertEqual(calls[1], "--runtime-only --module spark")
-        self.assertFalse(any(call.startswith("FL_LOCAL ") for call in calls))
-        self.assertNotIn("EVENT workspace-boundary", result.stdout)
-        self.assertIn("cleanup remains in_progress", result.stderr)
+        self.assertFalse(any("--module spark" in call for call in calls))
+        self.assertIn("EVENT workspace-boundary", result.stdout)
 
 
 class LocalPartitionHelperTests(unittest.TestCase):

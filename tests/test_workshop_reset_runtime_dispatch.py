@@ -153,7 +153,7 @@ class RuntimeDispatchTests(unittest.TestCase):
         })
         result, calls = run_dispatch(data)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ["--runtime-only --module openmp-01-basics", "--runtime-only --module spark"])
+        self.assertEqual(calls, ["--runtime-only --module openmp-01-basics"])
         self.assertIn("hpc / openmp-01-basics", result.stdout)
 
     def test_teardown_failure_stops_before_workspace_boundary(self):
@@ -201,7 +201,7 @@ class RuntimeDispatchTests(unittest.TestCase):
         )
         result, calls = run_dispatch(data)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ["--runtime-only --module mpi-01-basics", "--runtime-only --module spark"])
+        self.assertEqual(calls, ["--runtime-only --module mpi-01-basics"])
         self.assertIn("hpc / mpi-01-basics", result.stdout)
         self.assertIn("EVENT workspace-boundary", result.stdout)
 
@@ -227,7 +227,7 @@ class RuntimeDispatchTests(unittest.TestCase):
                 )
                 result, calls = run_dispatch(data, namespace_exported=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(calls, ["--runtime-only --module " + module, "--runtime-only --module spark"])
+                self.assertEqual(calls, ["--runtime-only --module " + module])
                 self.assertIn("EVENT workspace-boundary", result.stdout)
 
     def test_captured_remote_failure_is_visible_and_preserves_status(self):
@@ -289,10 +289,10 @@ class RuntimeDispatchTests(unittest.TestCase):
                     expected = "--runtime-only --module " + module
                     if is_cloud_module3:
                         expected += " --confirm-no-external-module3-runtime"
-                    self.assertEqual(calls, [expected, "--runtime-only --module spark"])
+                    self.assertEqual(calls, [expected])
                     self.assertIn(workshop + " / " + module, result.stdout)
 
-    def test_neutral_and_fl_include_publication_independent_spark_cleanup(self):
+    def test_neutral_and_fl_never_invoke_spark_cleanup(self):
         for workshop in ("none", "federated-learning"):
             with self.subTest(workshop=workshop):
                 data = spark_context()
@@ -302,11 +302,11 @@ class RuntimeDispatchTests(unittest.TestCase):
                 )
                 result, calls = run_dispatch(data)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any("--module spark" in c for c in calls))
                 if workshop == "none":
-                    self.assertEqual(calls, ["--runtime-only --module spark"])
+                    self.assertEqual(calls, [])
                 else:
-                    self.assertEqual(len(calls), 2)
-                    self.assertEqual(calls[1], "--runtime-only --module spark")
+                    self.assertEqual(len(calls), 1)
                     self.assertTrue(
                         calls[0].startswith("FL_DATA -i mock-inventory ")
                     )
@@ -365,7 +365,6 @@ class RuntimeDispatchTests(unittest.TestCase):
         self.assertEqual(calls, [
             "--runtime-only --module module3 "
             "--confirm-no-external-module3-runtime",
-            "--runtime-only --module spark"
         ])
         self.assertIn("EVENT workspace-boundary", result.stdout)
 
@@ -442,44 +441,43 @@ class RuntimeDispatchTests(unittest.TestCase):
         )
 
 
-class UnpublishedSparkResetTests(unittest.TestCase):
-    """Reset must cover Spark independently of published workshop selection."""
+class SparkResetScopeTests(unittest.TestCase):
+    """Spark cleanup belongs to the saved big-data:spark route only."""
 
-    def test_neutral_selection_still_dispatches_spark_cleanup(self):
-        data = spark_context()
-        data.update(
-            cleanup_workshop_type="none",
-            cleanup_workshop_module="none",
+    def test_failing_spark_helper_is_irrelevant_for_neutral_and_fl(self):
+        for workshop in ("none", "federated-learning"):
+            with self.subTest(workshop=workshop):
+                data = spark_context()
+                data.update(
+                    cleanup_workshop_type=workshop,
+                    cleanup_workshop_module="none",
+                )
+                result, calls = run_dispatch(data, teardown_status=7)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any("--module spark" in c for c in calls))
+                self.assertIn("EVENT workspace-boundary", result.stdout)
+
+    def test_other_workshops_run_only_their_own_module(self):
+        cases = (
+            ("hpc", "openmp-01-basics"),
+            ("introduction-to-ai", "module1"),
+            ("cloud-computing-soa", "module1"),
         )
-        result, calls = run_dispatch(data)
+        for workshop, module in cases:
+            with self.subTest(workshop=workshop):
+                data = spark_context()
+                data.update(
+                    cleanup_workshop_type=workshop,
+                    cleanup_workshop_module=module,
+                )
+                result, calls = run_dispatch(data)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls, ["--runtime-only --module " + module])
+
+    def test_saved_spark_route_calls_spark_reset_exactly_once(self):
+        result, calls = run_dispatch(spark_context())
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["--runtime-only --module spark"])
-        self.assertIn("EVENT workspace-boundary", result.stdout)
-
-    def test_unpublished_spark_cleanup_failure_blocks_reset(self):
-        data = spark_context()
-        data.update(
-            cleanup_workshop_type="none",
-            cleanup_workshop_module="none",
-        )
-        result, calls = run_dispatch(data, teardown_status=7)
-        self.assertEqual(result.returncode, 7)
-        self.assertEqual(calls, ["--runtime-only --module spark"])
-        self.assertNotIn("EVENT workspace-boundary", result.stdout)
-
-    def test_other_selected_workshop_does_not_skip_spark_cleanup(self):
-        data = spark_context()
-        data.update(
-            cleanup_workshop_type="hpc",
-            cleanup_workshop_module="openmp-01-basics",
-        )
-        result, calls = run_dispatch(data)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertCountEqual(calls, [
-            "--runtime-only --module openmp-01-basics",
-            "--runtime-only --module spark",
-        ])
-        self.assertIn("EVENT workspace-boundary", result.stdout)
 
 
 if __name__ == "__main__":
