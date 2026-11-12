@@ -422,9 +422,28 @@ requirements = root / "app" / "requirements.lock"
 manifest_path = root / "data" / "partition-manifest.json"
 partition_path = root / "data" / "train.csv"
 
-for required in (client, requirements, manifest_path, partition_path):
+for required in (client, requirements):
     if not required.is_file():
         raise SystemExit(f"missing worker runtime asset: {required}")
+
+for line in requirements.read_text(encoding="utf-8").splitlines():
+    line = line.strip()
+    if line and not line.startswith("#") and "==" not in line:
+        raise SystemExit(f"unlocked requirement: {line}")
+
+# Partition data is prepared later by the workshop organiser, so its absence is
+# not a deployment defect. A partial state is still a failure.
+manifest_present = manifest_path.is_file()
+partition_present = partition_path.is_file()
+if manifest_present != partition_present:
+    raise SystemExit("partial partition state: manifest and train.csv must both exist or both be absent")
+if not manifest_present:
+    print(f"runtime_root={root}")
+    print(f"group_id={group_id}")
+    print(f"client_sha256={hashlib.sha256(client.read_bytes()).hexdigest()}")
+    print("partition_state=not-prepared")
+    print("worker_runtime_integrity=PASSED")
+    raise SystemExit(0)
 
 with manifest_path.open(encoding="utf-8") as handle:
     manifest = json.load(handle)
@@ -449,11 +468,6 @@ if rows != expected_rows:
     raise SystemExit(
         f"partition row count {rows} differs from manifest {expected_rows}"
     )
-
-for line in requirements.read_text(encoding="utf-8").splitlines():
-    line = line.strip()
-    if line and not line.startswith("#") and "==" not in line:
-        raise SystemExit(f"unlocked requirement: {line}")
 
 print(f"runtime_root={root}")
 print(f"group_id={group_id}")
