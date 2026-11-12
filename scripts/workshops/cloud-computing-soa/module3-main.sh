@@ -52,6 +52,8 @@ run_cloud_module3_menu() {
     workshop_ui_section "EXERCISE RUNTIME"
     workshop_ui_option 9 "Start beginner containerization runtime on assigned VMs"
     workshop_ui_option 10 "Show beginner containerization runtime status"
+    workshop_ui_option 11 "Preview Module 3 runtime reset - no changes"
+    workshop_ui_option 12 "Reset Module 3 runtime - DESTRUCTIVE: deletes runtime data and egress policies"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -77,10 +79,14 @@ run_cloud_module3_menu() {
            printf 'Module 3 runtime start did not complete.\n' >&2 ;;
       10) cloud_module3_runtime_status ||
             printf 'Module 3 runtime status check failed.\n' >&2 ;;
+      11) cloud_module3_runtime_reset reset-plan ||
+            printf 'Module 3 runtime reset preview failed.\n' >&2 ;;
+      12) cloud_module3_runtime_reset_confirmed ||
+            printf 'Module 3 runtime reset did not complete.\n' >&2 ;;
       4) cloud_module3_show_deployment_status ||
            printf 'Deployed status check failed.\n' >&2 ;;
       0) return 0 ;;
-      *) printf 'Choose 0 through 10.\n' >&2 ;;
+      *) printf 'Choose 0 through 12.\n' >&2 ;;
     esac
   done
 }
