@@ -18,6 +18,26 @@ MANAGED = {
     "digitafrica.eu/module": "spark",
 }
 HELPER = "digitafrica-spark-credential-code"
+PROFILES = {
+    "spark": {
+        "managed": MANAGED,
+        "helper": HELPER,
+        "secret_prefix": "digitafrica-spark-direct-",
+        "group_label": "digitafrica.eu/spark-group",
+        "credential_directory": "spark-direct",
+    },
+    "module3": {
+        "managed": {
+            "digitafrica.eu/managed-by": "organiser",
+            "digitafrica.eu/workshop": "cloud-computing-soa",
+            "digitafrica.eu/module": "module3-containerization-orchestration",
+        },
+        "helper": "digitafrica-module3-direct-code",
+        "secret_prefix": "digitafrica-module3-direct-",
+        "group_label": "digitafrica.eu/module3-group",
+        "credential_directory": "module3-direct",
+    },
+}
 
 
 class Blocked(Exception):
@@ -54,7 +74,9 @@ def check_secret(current, desired):
     return "preserve"
 
 
-def desired_secret(namespace, request):
+def desired_secret(namespace, request, profile_name="spark"):
+    profile = PROFILES.get(profile_name)
+    require(profile is not None, "invalid_credential_profile")
     group = request["group_id"]
     require(re.fullmatch(r"group_[0-9]{2,}", group), "invalid_group_id")
     require(bool(request["worker"]) and bool(request["worker_node"]), "missing_worker_binding")
@@ -64,11 +86,18 @@ def desired_secret(namespace, request):
         value = base64.b64decode(entry["content_b64"], validate=True)
         require(0 < len(value) <= 16384 and hashlib.sha256(value).hexdigest() == entry["sha256"],
                 "credential_payload_checksum_mismatch")
-    encoded = base64.b64encode(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).decode()
+    payload = deepcopy(request)
+    expected_directory = profile["credential_directory"]
+    if "credential_directory" in payload:
+        require(payload["credential_directory"] == expected_directory,
+                "invalid_credential_directory")
+    elif profile_name == "module3":
+        payload["credential_directory"] = expected_directory
+    encoded = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).decode()
     return {"apiVersion": "v1", "kind": "Secret", "type": "Opaque", "immutable": True,
-        "metadata": {"name": "digitafrica-spark-direct-" + group.replace("_", "-"),
+        "metadata": {"name": profile["secret_prefix"] + group.replace("_", "-"),
                      "namespace": namespace,
-                     "labels": {**MANAGED, "digitafrica.eu/spark-group": group}},
+                     "labels": {**profile["managed"], profile["group_label"]: group}},
         "data": {"request.json": encoded}}
 
 
@@ -78,25 +107,30 @@ def stage(request):
             and re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", namespace), "invalid_namespace")
     operation = request.get("operation", "plan")
     require(operation in ("plan", "apply", "verify"), "invalid_operation")
+    profile_name = request.get("profile", "spark")
+    require(isinstance(profile_name, str) and profile_name in PROFILES,
+            "invalid_credential_profile")
+    profile = PROFILES[profile_name]
     requests = request["requests"]
     require(bool(requests), "no_validated_requests")
     require(len({r["group_id"] for r in requests}) == len(requests), "duplicate_group")
     require(len({r["worker"] for r in requests}) == len(requests), "duplicate_worker")
     plans = []
     for item in requests:
-        desired = desired_secret(namespace, item)
+        desired = desired_secret(namespace, item, profile_name)
         action = check_secret(existing(namespace, "secret", desired["metadata"]["name"]), desired)
         plans.append((item, desired, action))
     code = request["helper_code"]
     require(isinstance(code, str) and bool(code), "missing_reconciler_code")
-    current_helper = existing(namespace, "configmap", HELPER)
+    current_helper = existing(namespace, "configmap", profile["helper"])
     helper = {"apiVersion": "v1", "kind": "ConfigMap",
-        "metadata": {"name": HELPER, "namespace": namespace, "labels": MANAGED},
+        "metadata": {"name": profile["helper"], "namespace": namespace,
+                     "labels": profile["managed"]},
         "data": {"reconcile_credentials.py": code}}
     helper_action = "create"
     if current_helper is not None:
         labels = current_helper.get("metadata", {}).get("labels", {})
-        require(all(labels.get(k) == v for k, v in MANAGED.items()), "helper_configmap_ownership_conflict")
+        require(all(labels.get(k) == v for k, v in profile["managed"].items()), "helper_configmap_ownership_conflict")
         require(set(current_helper.get("data", {})) == {"reconcile_credentials.py"}
                 and not current_helper.get("binaryData"), "helper_configmap_unexpected_contents")
         helper_action = "preserve" if current_helper["data"] == helper["data"] else "update"
@@ -128,6 +162,69 @@ def stage(request):
 def self_test():
     import unittest
     class Tests(unittest.TestCase):
+        def valid_request(self):
+            credentials = {}
+            for name, value in (("login_key", b"fixture-login"),
+                                ("known_hosts", b"fixture-host-key")):
+                credentials[name] = {
+                    "content_b64": base64.b64encode(value).decode(),
+                    "sha256": hashlib.sha256(value).hexdigest(),
+                }
+            return {
+                "operation": "apply", "worker": "worker-1",
+                "group_id": "group_01", "worker_node": "node-1",
+                "credentials": credentials,
+            }
+
+        def test_spark_profile_preserves_existing_resource_and_payload(self):
+            desired = desired_secret("digitafrica", self.valid_request())
+            payload = json.loads(base64.b64decode(desired["data"]["request.json"]))
+            self.assertEqual(desired["metadata"]["name"],
+                             "digitafrica-spark-direct-group-01")
+            self.assertNotIn("credential_directory", payload)
+
+        def test_module3_profile_is_separate_and_sets_directory(self):
+            desired = desired_secret("digitafrica", self.valid_request(), "module3")
+            payload = json.loads(base64.b64decode(desired["data"]["request.json"]))
+            self.assertEqual(desired["metadata"]["name"],
+                             "digitafrica-module3-direct-group-01")
+            self.assertEqual(payload["credential_directory"], "module3-direct")
+            self.assertEqual(desired["metadata"]["labels"]["digitafrica.eu/workshop"],
+                             "cloud-computing-soa")
+
+        def test_module3_rejects_spark_directory(self):
+            request = self.valid_request()
+            request["credential_directory"] = "spark-direct"
+            with self.assertRaisesRegex(Blocked, "invalid_credential_directory"):
+                desired_secret("digitafrica", request, "module3")
+
+        def _stage_plan(self, profile, helper_labels_profile):
+            helper = {"metadata": {"labels": dict(PROFILES[helper_labels_profile]["managed"])},
+                      "data": {"reconcile_credentials.py": "print('x')"}}
+            def fake_existing(namespace, kind, name):
+                return helper if kind == "configmap" else None
+            original = globals()["existing"]
+            globals()["existing"] = fake_existing
+            try:
+                return stage({"namespace": "digitafrica", "operation": "plan", "profile": profile,
+                              "requests": [self.valid_request()], "helper_code": "print('x')"})
+            finally:
+                globals()["existing"] = original
+
+        def test_module3_accepts_module3_labelled_helper(self):
+            self._stage_plan("module3", "module3")
+
+        def test_module3_rejects_spark_labelled_helper(self):
+            with self.assertRaisesRegex(Blocked, "helper_configmap_ownership_conflict"):
+                self._stage_plan("module3", "spark")
+
+        def test_spark_accepts_spark_labelled_helper(self):
+            self._stage_plan("spark", "spark")
+
+        def test_spark_rejects_module3_labelled_helper(self):
+            with self.assertRaisesRegex(Blocked, "helper_configmap_ownership_conflict"):
+                self._stage_plan("spark", "module3")
+
         def setUp(self):
             self.desired = {"metadata": {"labels": {**MANAGED, "digitafrica.eu/spark-group": "group_01"}},
                 "type": "Opaque", "immutable": True, "data": {"request.json": "Zml4dHVyZQ=="}}
