@@ -1,0 +1,2 @@
+# Module 3 notebook SSH-tunnel dependency.
+paramiko==5.1.0

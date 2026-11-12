@@ -92,7 +92,7 @@ class IntroductionToAIRuntimeTests(unittest.TestCase):
             )
         self.assertEqual(mounts["home"], "/home/jovyan")
         script = runtime["args"][0]
-        self.assertIn('requirements="/runtime/$workshop_type/requirements.lock"', script)
+        self.assertIn('requirements="/runtime/$runtime_profile/requirements.lock"', script)
         self.assertIn(
             'python -m pip install --user --no-cache-dir --requirement "$requirements"',
             script,

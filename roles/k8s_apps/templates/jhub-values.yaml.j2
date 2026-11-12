@@ -582,23 +582,34 @@ singleuser:
             exit 0
           fi
 
-          requirements="/runtime/$workshop_type/requirements.lock"
+          workshop_module=none
+          if [ -f /state/workshop_module ]; then
+            workshop_module="$(tr -d '\r\n' < /state/workshop_module)"
+          fi
+
+          runtime_profile="$workshop_type"
+          if [ "$workshop_type" = "cloud-computing-soa" ] && \
+             [ "$workshop_module" = "module3" ]; then
+            runtime_profile=cloud-computing-soa-module3
+          fi
+
+          requirements="/runtime/$runtime_profile/requirements.lock"
           if [ ! -f "$requirements" ]; then
-            echo "[runtime] No dependency profile for $workshop_type; installation skipped."
+            echo "[runtime] No dependency profile for $runtime_profile; installation skipped."
             exit 0
           fi
 
-          runtime_dir="/home/jovyan/.local/share/digitafrica/runtime/$workshop_type"
+          runtime_dir="/home/jovyan/.local/share/digitafrica/runtime/$runtime_profile"
           marker="$runtime_dir/requirements.sha256"
           expected="$(sha256sum "$requirements" | cut -d " " -f1)"
 
           if [ "$(cat "$marker" 2>/dev/null || true)" != "$expected" ]; then
-            echo "[runtime] Installing locked $workshop_type dependencies."
+            echo "[runtime] Installing locked $runtime_profile dependencies."
             python -m pip install --user --no-cache-dir --requirement "$requirements"
             mkdir -p "$runtime_dir"
             printf "%s\n" "$expected" > "$marker"
           else
-            echo "[runtime] Locked $workshop_type dependencies are already available."
+            echo "[runtime] Locked $runtime_profile dependencies are already available."
           fi
 
           python -m pip check
