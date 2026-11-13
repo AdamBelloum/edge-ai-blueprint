@@ -38,6 +38,30 @@ for index, host in enumerate(hosts, start=1):
 PY
 }
 
+# Run the Module 3 endpoint store (organiser reference file).
+# CLOUD_MODULE3_ENDPOINTS_PATH is a test hook; unset uses the store default.
+cloud_module3_runtime_endpoints() {
+  local store="${CLOUD_MODULE3_DIR:-}/module3_endpoints.py"
+  local -a path_args=()
+
+  [[ -n "${CLOUD_MODULE3_DIR:-}" ]] || {
+    echo "Module 3 endpoint store: CLOUD_MODULE3_DIR is not set." >&2
+    return 3
+  }
+  [[ -f "$store" ]] || {
+    echo "Module 3 endpoint store not found: $store" >&2
+    return 3
+  }
+  command -v python3 >/dev/null 2>&1 || {
+    echo "Module 3 endpoint store requires python3 on the control host." >&2
+    return 3
+  }
+  if [[ -n "${CLOUD_MODULE3_ENDPOINTS_PATH:-}" ]]; then
+    path_args=(--path "$CLOUD_MODULE3_ENDPOINTS_PATH")
+  fi
+  python3 "$store" ${path_args[@]+"${path_args[@]}"} "$@"
+}
+
 cloud_module3_runtime_record_target() {
   local group_id="$1" inventory_alias="$2"
   local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/digitafrica/module3-runtime"
@@ -264,6 +288,8 @@ ips = [str(ipaddress.IPv4Address(
 )) for item in containers]
 print("MODULE3_POLICY_TARGET", group_id, *ips)
 ' "$group_id" "$project"
+  printf 'AUTH_ENDPOINT=%s\nSHORTENER_ENDPOINT=%s\n' \
+    "$AUTH_HOST_PORT" "$SHORTENER_HOST_PORT"
 
 elif [[ "$operation" == "status" ]]; then
   if [[ ! -e "$runtime_dir" && ! -L "$runtime_dir" ]]; then
@@ -422,10 +448,26 @@ POLICY_JSON
 printf '%s' '${manifest_b64}' | base64 -d | k3s kubectl apply -f -"
 }
 
+cloud_module3_runtime_endpoint_value() {
+  local key="$1" output="$2" line value="" count=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}="* ]]; then
+      count=$((count + 1))
+      value="${line#"${key}="}"
+    fi
+  done <<< "$output"
+
+  [[ "$count" -eq 1 ]] || return 1
+  [[ -n "$value" && "$value" != *[[:space:]=]* ]] || return 1
+  printf '%s\n' "$value"
+}
+
 cloud_module3_runtime_run() {
   local operation="$1" targets group_id inventory_alias script
   local archive_b64="" failures=0
   local repo_root asset_dir remote_output endpoint_line auth_ip shortener_ip
+  local auth_endpoint shortener_endpoint
 
   [[ -n "${WORKSHOP_INVENTORY:-}" && -n "${WORKSHOP_WORKER_GROUP:-}" ]] || {
     echo "Module 3 runtime requires loaded workshop inventory context." >&2
@@ -493,6 +535,22 @@ cloud_module3_runtime_run() {
       printf '%s\n' "$remote_output" >&2
       failures=1
       continue
+    fi
+
+    if [[ "$operation" == "start" ]]; then
+      if auth_endpoint="$(cloud_module3_runtime_endpoint_value \
+        AUTH_ENDPOINT "$remote_output")" &&
+        shortener_endpoint="$(cloud_module3_runtime_endpoint_value \
+          SHORTENER_ENDPOINT "$remote_output")"; then
+        cloud_module3_runtime_endpoints save "$WORKSHOP_INVENTORY" \
+          "$group_id" "$inventory_alias" "$auth_endpoint" "$shortener_endpoint" || {
+          echo "Could not save Module 3 endpoint reference for ${group_id}." >&2
+          failures=1
+        }
+      else
+        echo "Missing or ambiguous Module 3 endpoint lines for ${group_id}; endpoint reference not updated." >&2
+        failures=1
+      fi
     fi
 
     if [[ "$operation" == "start" ]]; then

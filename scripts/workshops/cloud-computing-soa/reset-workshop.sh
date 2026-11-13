@@ -54,6 +54,26 @@ case "$3" in
       'Operator confirmed no external Module 3 exercise resources were created.' \
       'No Docker, Compose, Kubernetes or NFS resources are inspected or removed.' \
       'External-resource absence is operator-attested, not automatically verified.'
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    endpoint_path_args=()
+    if [[ -n "${CLOUD_MODULE3_ENDPOINTS_PATH:-}" ]]; then
+      endpoint_path_args=(--path "$CLOUD_MODULE3_ENDPOINTS_PATH")
+    fi
+    endpoints_file="$(python3 "$script_dir/module3_endpoints.py" \
+      ${endpoint_path_args[@]+"${endpoint_path_args[@]}"} path)" || {
+      printf '%s\n' 'ERROR: Could not resolve the Module 3 endpoint file path.' >&2
+      exit 3
+    }
+    [[ -n "$endpoints_file" ]] || {
+      printf '%s\n' 'ERROR: Module 3 endpoint file path is empty.' >&2
+      exit 3
+    }
+    rm -f -- "$endpoints_file" || {
+      printf 'ERROR: Could not remove Module 3 endpoint file: %s\n' "$endpoints_file" >&2
+      exit 3
+    }
+    printf 'Module 3 endpoint file cleanup done (removed if present): %s\n' \
+      "$endpoints_file"
     ;;
   module4)
     printf '%s\n' \
