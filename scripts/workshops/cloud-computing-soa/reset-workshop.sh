@@ -5,8 +5,8 @@ set -euo pipefail
 usage() {
   printf '%s\n' \
     'Usage: reset-workshop.sh --runtime-only --module module1|module2|module3|module4|module5' \
-    'Module 3 accepts --confirm-no-external-module3-runtime only after operator review.' \
-    'Without that confirmation, Modules 3/4 refuse external cleanup.' \
+    'Module 3 removes its own exercise runtime after explicit organiser confirmation.' \
+    'Module 4 refuses external cleanup until its resources and ownership are established.' \
     'Participant server/home cleanup and neutral reconciliation remain global.' \
     'Full workshop reset is not verified by this script.'
 }
@@ -16,7 +16,7 @@ if [[ $# -eq 1 && ( "$1" == --help || "$1" == -h ) ]]; then
   exit 0
 fi
 
-if [[ $# -ne 3 && $# -ne 4 ]]; then
+if [[ $# -ne 3 ]]; then
   usage >&2
   exit 2
 fi
@@ -25,17 +25,6 @@ fi
   exit 2
 }
 
-# This is operator attestation, not automated external-resource discovery.
-CONFIRMED_NO_EXTERNAL_RUNTIME=false
-if [[ $# -eq 4 ]]; then
-  [[ "$3" == module3 &&
-     "$4" == --confirm-no-external-module3-runtime ]] || {
-    usage >&2
-    exit 2
-  }
-  CONFIRMED_NO_EXTERNAL_RUNTIME=true
-fi
-
 case "$3" in
   module1|module2)
     printf '%s\n' \
@@ -43,18 +32,27 @@ case "$3" in
       'No additional external runtime teardown is implemented.'
     ;;
   module3)
-    if [[ "$CONFIRMED_NO_EXTERNAL_RUNTIME" != true ]]; then
-      printf '%s\n' \
-        'ERROR: Module 3 Docker/Kubernetes/NFS cleanup is not implemented.' \
-        'Target resources and ownership must be established first.' >&2
-      exit 3
-    fi
-    printf '%s\n' \
-      'Cloud runtime reset boundary: module=module3, teaching-file-only cycle.' \
-      'Operator confirmed no external Module 3 exercise resources were created.' \
-      'No Docker, Compose, Kubernetes or NFS resources are inspected or removed.' \
-      'External-resource absence is operator-attested, not automatically verified.'
     script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    printf '%s\n' \
+      'Cloud runtime reset boundary: module=module3.' \
+      'Removing the Module 3 exercise runtime after explicit organiser confirmation...'
+    module3_runtime_removal() {
+      (
+        set +u
+        CLOUD_MODULE3_DIR="$script_dir" &&
+          source "$script_dir/../lib/workshop-context.sh" &&
+          load_workshop_context &&
+          source "$script_dir/../../lib/common.sh" &&
+          source "$script_dir/module3-runtime.sh" &&
+          cloud_module3_runtime_reset_confirmed
+      )
+    }
+    module3_runtime_removal || {
+      printf '%s\n' \
+        'ERROR: Module 3 runtime removal was declined or failed; cleanup remains in_progress.' >&2
+      exit 3
+    }
+    printf '%s\n' 'Module 3 runtime removed; cleaning the endpoint reference.'
     endpoint_path_args=()
     if [[ -n "${CLOUD_MODULE3_ENDPOINTS_PATH:-}" ]]; then
       endpoint_path_args=(--path "$CLOUD_MODULE3_ENDPOINTS_PATH")

@@ -290,6 +290,9 @@ print("MODULE3_POLICY_TARGET", group_id, *ips)
 ' "$group_id" "$project"
   printf 'AUTH_ENDPOINT=%s\nSHORTENER_ENDPOINT=%s\n' \
     "$AUTH_HOST_PORT" "$SHORTENER_HOST_PORT"
+  # Ansible strips the final stdout newline and appends stderr directly, so
+  # keep a last marker line to leave the endpoint lines intact.
+  printf '%s\n' 'MODULE3_REMOTE_END'
 
 elif [[ "$operation" == "status" ]]; then
   if [[ ! -e "$runtime_dir" && ! -L "$runtime_dir" ]]; then
@@ -820,8 +823,7 @@ cloud_module3_runtime_reset_confirmed() {
     "  - Compose containers, networks and named volumes (service data such as user and URL records), on current and previously recorded worker targets" \
     "  - Compose-built images without a custom tag (docker compose down --rmi local)" \
     "  - runtime directories, including generated authentication keys" \
-    "  - every module3-group-N-runtime-egress NetworkPolicy in namespace digitafrica, for any group" \
-    "Option 11 previews the reset without changing anything."
+    "  - every module3-group-N-runtime-egress NetworkPolicy in namespace digitafrica, for any group"
   confirm "Permanently delete this Module 3 runtime state" ||
     return 1
   cloud_module3_runtime_reset reset

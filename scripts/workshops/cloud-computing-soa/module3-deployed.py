@@ -41,7 +41,7 @@ def execute(payload, read=load, run=subprocess.run):
     operation = payload["operation"]
     mode = payload["mode"]
     require(mode in MODES, "Invalid Module 3 mode.")
-    require(operation in ("check", "status", "publish", "release"),
+    require(operation in ("check", "status", "publish", "release", "route"),
             "Invalid Module 3 operation.")
     kubectl = ["k3s", "kubectl", "-n", namespace]
 
@@ -49,6 +49,39 @@ def execute(payload, read=load, run=subprocess.run):
         return read(kubectl + [
             "get", "configmap", "digitafrica-workshop-state", "-o", "json"
         ]).get("data", {})
+
+    if operation == "route":
+        # Route-only write: no readiness gates, no mode, no participant exposure.
+        snapshot = read(kubectl + [
+            "get", "configmap", "digitafrica-workshop-state", "-o", "json"
+        ])
+        current = snapshot.get("data", {})
+        active = current.get("workshop_type", "none")
+        require(active in ("", "none", "cloud-computing-soa"),
+                "Another workshop is active; Module 3 cleanup route not saved.")
+        require(current.get("cleanup_status") not in ("in_progress", "failed"),
+                "Workshop cleanup is incomplete; Module 3 cleanup route not saved.")
+        if (active, current.get("workshop_module")) == (
+                "cloud-computing-soa", "module3"):
+            print("Module 3 cleanup route already saved.")
+            return
+        version = snapshot.get("metadata", {}).get("resourceVersion")
+        require(bool(version), "Cannot determine workshop-state resource version.")
+        patch = [
+            {"op": "test", "path": "/metadata/resourceVersion", "value": version}
+        ] + [
+            {"op": "add", "path": "/data/" + key, "value": value}
+            for key, value in (("workshop_type", "cloud-computing-soa"),
+                               ("workshop_module", "module3"))
+        ]
+        result = run(kubectl + [
+            "patch", "configmap", "digitafrica-workshop-state",
+            "--type=json", "-p", json.dumps(patch)
+        ], capture_output=True, text=True)
+        require(result.returncode == 0,
+                "Cleanup route update failed; recheck active workshop state.")
+        print("Module 3 cleanup route saved.")
+        return
 
     if operation == "status":
         current = state()

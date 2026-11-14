@@ -37,23 +37,20 @@ run_cloud_module3_menu() {
   local choice mode
   while true; do
     workshop_ui_heading "Cloud SOA / Module 3 - Containerization and Orchestration"
-    workshop_ui_warning "Docker/Compose and Kubernetes runtime NOT VALIDATED."
     workshop_ui_section "CHECKS"
     workshop_ui_option 1 "Check local assets - all levels"
     workshop_ui_option 2 "Show integration status - offline"
     workshop_ui_option 3 "Check publication readiness"
     workshop_ui_option 4 "Show deployed delivery status"
-    workshop_ui_section "PUBLICATION"
-    workshop_ui_option 5 "Publish Beginner workshop: teaching files only; runtime NOT VALIDATED"
-    workshop_ui_option 6 "Publish Intermediate workshop: learner TODO teaching files; runtime NOT VALIDATED"
-    workshop_ui_option 7 "Publish Advanced workshop: specification and Module 2 services; runtime NOT VALIDATED"
-    workshop_ui_section "AFTER THE WORKSHOP"
-    workshop_ui_option 8 "Release reference solutions: intermediate or advanced track"
     workshop_ui_section "EXERCISE RUNTIME"
-    workshop_ui_option 9 "Start beginner containerization runtime on assigned VMs"
-    workshop_ui_option 10 "Show beginner containerization runtime status"
-    workshop_ui_option 11 "Preview Module 3 runtime reset - no changes"
-    workshop_ui_option 12 "Reset Module 3 runtime - DESTRUCTIVE: deletes runtime data and egress policies"
+    workshop_ui_option 5 "Start beginner containerization runtime on assigned VMs"
+    workshop_ui_option 6 "Show beginner containerization runtime status"
+    workshop_ui_section "PUBLICATION"
+    workshop_ui_option 7 "Publish Beginner workshop: teaching files only"
+    workshop_ui_option 8 "Publish Intermediate workshop: learner TODO teaching files"
+    workshop_ui_option 9 "Publish Advanced workshop: specification and Module 2 services"
+    workshop_ui_section "AFTER THE WORKSHOP"
+    workshop_ui_option 10 "Release reference solutions: intermediate or advanced track"
     printf '\n'
     workshop_ui_option 0 "Back to Cloud Computing SOA"
     workshop_ui_prompt
@@ -67,26 +64,22 @@ run_cloud_module3_menu() {
             printf 'Delivery readiness check failed.\n' >&2
         fi
         ;;
-      5) cloud_module3_activate_selected_mode beginner ||
-           printf 'Beginner publication did not complete.\n' >&2 ;;
-      6) cloud_module3_activate_selected_mode intermediate ||
-           printf 'Intermediate publication did not complete.\n' >&2 ;;
-      7) cloud_module3_activate_selected_mode advanced ||
-           printf 'Advanced publication did not complete.\n' >&2 ;;
-      8) cloud_module3_release_solutions ||
-           printf 'Solution release did not complete.\n' >&2 ;;
-      9) cloud_module3_runtime_start ||
-           printf 'Module 3 runtime start did not complete.\n' >&2 ;;
-      10) cloud_module3_runtime_status ||
-            printf 'Module 3 runtime status check failed.\n' >&2 ;;
-      11) cloud_module3_runtime_reset reset-plan ||
-            printf 'Module 3 runtime reset preview failed.\n' >&2 ;;
-      12) cloud_module3_runtime_reset_confirmed ||
-            printf 'Module 3 runtime reset did not complete.\n' >&2 ;;
       4) cloud_module3_show_deployment_status ||
            printf 'Deployed status check failed.\n' >&2 ;;
+      5) cloud_module3_ensure_route && cloud_module3_runtime_start ||
+           printf 'Module 3 runtime start did not complete.\n' >&2 ;;
+      6) cloud_module3_runtime_status ||
+           printf 'Module 3 runtime status check failed.\n' >&2 ;;
+      7) cloud_module3_activate_selected_mode beginner ||
+           printf 'Beginner publication did not complete.\n' >&2 ;;
+      8) cloud_module3_activate_selected_mode intermediate ||
+           printf 'Intermediate publication did not complete.\n' >&2 ;;
+      9) cloud_module3_activate_selected_mode advanced ||
+           printf 'Advanced publication did not complete.\n' >&2 ;;
+      10) cloud_module3_release_solutions ||
+            printf 'Solution release did not complete.\n' >&2 ;;
       0) return 0 ;;
-      *) printf 'Choose 0 through 12.\n' >&2 ;;
+      *) printf 'Choose 0 through 10.\n' >&2 ;;
     esac
   done
 }
@@ -261,6 +254,12 @@ cloud_module3_check_activation_readiness() {
 cloud_module3_set_workshop_state() {
   # Revalidate delivery configuration after organiser confirmation.
   cloud_module3_run_deployed publish "$1"
+}
+
+# Save the Module 3 cleanup route before any runtime state is created, so a
+# later global reset finds it even if the workflow is interrupted.
+cloud_module3_ensure_route() {
+  cloud_module3_run_deployed route beginner
 }
 
 cloud_module3_show_deployment_status() {

@@ -22,7 +22,8 @@ COMPANION_CALLS = {"big-data": ["credentials --execute", "exports --execute"]}
 
 def run_wrapper(workshop, helper_path, arguments, status=0, missing=False,
                 credentials_status=0, omit_companions=False,
-                exports_check_status=0, exports_status=0, omit_exports=False):
+                exports_check_status=0, exports_status=0, omit_exports=False,
+                seed_endpoints=False):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         wrapper = directory / "reset-workshop.sh"
@@ -35,6 +36,17 @@ def run_wrapper(workshop, helper_path, arguments, status=0, missing=False,
             wrapper,
         )
         log = directory / "calls.log"
+        if workshop == "cloud-computing-soa":
+            shutil.copy2(
+                ROOT / "scripts/workshops/cloud-computing-soa"
+                / "module3_endpoints.py",
+                directory / "module3_endpoints.py",
+            )
+        # Isolate Module 3 endpoint state from the operator's real home.
+        endpoints_file = directory / "state" / "endpoints.tsv"
+        if seed_endpoints:
+            endpoints_file.parent.mkdir(parents=True, exist_ok=True)
+            endpoints_file.write_text("seeded\n")
         if not missing:
             helper = directory / helper_path
             helper.parent.mkdir(parents=True, exist_ok=True)
@@ -71,12 +83,15 @@ def run_wrapper(workshop, helper_path, arguments, status=0, missing=False,
             MOCK_CREDENTIALS_STATUS=str(credentials_status),
             MOCK_EXPORT_CHECK_STATUS=str(exports_check_status),
             MOCK_EXPORT_STATUS=str(exports_status),
+            CLOUD_MODULE3_ENDPOINTS_PATH=str(endpoints_file),
+            XDG_STATE_HOME=str(directory / "state"),
         )
         result = subprocess.run(
             ["bash", str(wrapper), *arguments],
             env=environment, capture_output=True, text=True, timeout=10,
         )
         calls = log.read_text().splitlines() if log.exists() else []
+        result.endpoints_file_exists = endpoints_file.exists()
         return result, calls
 
 
@@ -197,16 +212,7 @@ class ModuleResetBoundaryTests(unittest.TestCase):
                     self.assertIn("module=" + module, result.stdout)
                     self.assertIn("NOT verified", result.stdout)
 
-    def test_module3_explicit_no_external_runtime_confirmation(self):
-        result, calls = self.invoke(
-            "cloud-computing-soa",
-            ["--runtime-only", "--module", "module3",
-             "--confirm-no-external-module3-runtime"],
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, [])
-        self.assertIn("operator-attested", result.stdout)
-        self.assertIn("NOT verified", result.stdout)
+
 
     def test_module3_confirmation_is_scoped_and_rejects_unknown_options(self):
         for module, option in (
@@ -224,7 +230,7 @@ class ModuleResetBoundaryTests(unittest.TestCase):
                 self.assertEqual(calls, [])
 
     def test_unimplemented_external_cleanup_is_refused(self):
-        for module in ("module3", "module4"):
+        for module in ("module4",):
             with self.subTest(module=module):
                 result, calls = self.invoke(
                     "cloud-computing-soa",

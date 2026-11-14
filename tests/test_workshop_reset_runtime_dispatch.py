@@ -18,7 +18,8 @@ BLOCK = SOURCE.split(START, 1)[1].split(END, 1)[0]
 
 def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
                  fl_cleanup_status=0, local_cleanup_status=None, answer="",
-                 consume_stdin=False, remote_stdout="", namespace_exported=True):
+                 consume_stdin=False, remote_stdout="", namespace_exported=True,
+                 module3_removal_status=0):
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         script_dir = directory
@@ -64,6 +65,13 @@ def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
             )
             wrapper.chmod(0o700)
 
+        (directory / "cloud-computing-soa" / "module3-runtime.sh").write_text(
+            'cloud_module3_runtime_reset_confirmed() {\n'
+            '    printf "MODULE3_REMOVAL\\n" >> "$MOCK_TEARDOWN_LOG"\n'
+            '    return "$MOCK_MODULE3_REMOVAL_STATUS"\n'
+            '}\n'
+        )
+
         k3s = fake_bin / "k3s"
         k3s.write_text(
             '#!/bin/sh\n'
@@ -81,6 +89,7 @@ def run_dispatch(data, teardown_status=0, remote_status=0, duplicate=False,
             "INVENTORY_PATH": "mock-inventory",
             "WORKER_GROUP": "mock-workers",
             "MOCK_FL_CLEANUP_STATUS": str(fl_cleanup_status),
+            "MOCK_MODULE3_REMOVAL_STATUS": str(module3_removal_status),
             "MOCK_LOCAL_CLEANUP_STATUS": str(local_cleanup_status),
             "DIGITAFRICA_NAMESPACE": "mock-namespace",
             "MOCK_STATE": json.dumps({"data": data}),
@@ -282,14 +291,15 @@ class RuntimeDispatchTests(unittest.TestCase):
                     is_cloud_module3 = (
                         workshop == "cloud-computing-soa" and module == "module3"
                     )
-                    result, calls = run_dispatch(
-                        data, answer="y\n" if is_cloud_module3 else ""
-                    )
+                    result, calls = run_dispatch(data)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     expected = "--runtime-only --module " + module
+                    expected_calls = [expected]
                     if is_cloud_module3:
-                        expected += " --confirm-no-external-module3-runtime"
-                    self.assertEqual(calls, [expected])
+                        expected_calls = [
+                            expected,
+                        ]
+                    self.assertEqual(calls, expected_calls)
                     self.assertIn(workshop + " / " + module, result.stdout)
 
     def test_neutral_and_fl_never_invoke_spark_cleanup(self):
@@ -340,64 +350,19 @@ class RuntimeDispatchTests(unittest.TestCase):
                     cleanup_workshop_type="cloud-computing-soa",
                     cleanup_workshop_module=module,
                 )
-                result, calls = run_dispatch(
-                    data, teardown_status=3,
-                    answer="y\n" if module == "module3" else "",
-                )
+                result, calls = run_dispatch(data, teardown_status=3)
                 self.assertEqual(result.returncode, 3)
                 expected = "--runtime-only --module " + module
+                expected_calls = [expected]
                 if module == "module3":
-                    expected += " --confirm-no-external-module3-runtime"
-                self.assertEqual(calls, [expected])
+                    expected_calls = [
+                        expected,
+                    ]
+                self.assertEqual(calls, expected_calls)
                 self.assertNotIn("EVENT workspace-boundary", result.stdout)
                 self.assertIn("cleanup remains in_progress", result.stderr)
 
-    def test_backend_cannot_consume_module3_attestation(self):
-        data = {
-            "cleanup_status": "in_progress",
-            "cleanup_workshop_type": "cloud-computing-soa",
-            "cleanup_workshop_module": "module3",
-        }
-        result, calls = run_dispatch(
-            data, answer="y\n", consume_stdin=True
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, [
-            "--runtime-only --module module3 "
-            "--confirm-no-external-module3-runtime",
-        ])
-        self.assertIn("EVENT workspace-boundary", result.stdout)
 
-    def test_backend_isolation_does_not_approve_decline_or_eof(self):
-        data = {
-            "cleanup_status": "in_progress",
-            "cleanup_workshop_type": "cloud-computing-soa",
-            "cleanup_workshop_module": "module3",
-        }
-        for answer in ("n\n", "\n", ""):
-            with self.subTest(answer=answer):
-                result, calls = run_dispatch(
-                    data, answer=answer, consume_stdin=True
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(calls, [])
-                self.assertNotIn("EVENT workspace-boundary", result.stdout)
-                self.assertIn("cleanup remains in_progress", result.stderr)
-
-    def test_module3_without_attestation_blocks_helper_and_workspace(self):
-        for answer in ("", "\n", "n\n", "unknown\n"):
-            with self.subTest(answer=answer):
-                data = spark_context()
-                data.update(
-                    cleanup_workshop_type="cloud-computing-soa",
-                    cleanup_workshop_module="module3",
-                    cleanup_cloud_module3_delivery_scope="teaching-files-only",
-                )
-                result, calls = run_dispatch(data, answer=answer)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(calls, [])
-                self.assertNotIn("EVENT workspace-boundary", result.stdout)
-                self.assertIn("cleanup remains in_progress", result.stderr)
 
     def test_unknown_modules_are_rejected_before_helper_execution(self):
         for workshop in (
