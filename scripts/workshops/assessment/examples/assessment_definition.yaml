@@ -1,0 +1,155 @@
+# ============================================================
+# assessment_definition.yaml
+# Declarative question definition for the Workshop Assessment
+# System.  Compile with:
+#   python3 build_exam.py assessment_definition.yaml
+# ============================================================
+
+assessment_title: "Machine Learning Foundations Exam"
+mode: "timed"
+duration_minutes: 30
+max_cell_retries: 3
+
+questions:
+
+  # ── Pure markdown — context / theory block ────────────────
+  - id: "intro"
+    type: "markdown"
+    content: |
+      ### Part 1: Conceptual Overview
+
+      Read the scenario below before answering the following questions.
+
+      You are given a dataset where the positive class forms a **circular ring**
+      around the negative class in 2D feature space.  Three models have been
+      trained on this data:
+
+      | Model | Architecture            |
+      |-------|-------------------------|
+      | A     | Logistic Regression     |
+      | B     | 1-hidden-layer MLP      |
+      | C     | 2-hidden-layer deep MLP |
+
+  # ── Q&A — multiple choice ─────────────────────────────────
+  - id: "q1"
+    type: "qa"
+    content: >
+      What happens to the decision boundary of **Model A** (0-hidden-layer
+      linear model) on this circular dataset?
+    options:
+      - "Rigid straight line"
+      - "Curves around inner circle"
+      - "Wraps tightly around each class"
+      - "Collapses to a single point"
+    correct_answer: "Rigid straight line"
+    max_runs: 2
+
+  # ── Q&A — short text answer ───────────────────────────────
+  - id: "q2"
+    type: "qa"
+    content: >
+      A model achieves 100 % training accuracy but only 55 % test accuracy.
+      Name the phenomenon responsible.
+    correct_answer: "overfitting"
+    max_runs: 2
+
+  # ── Code — practical fix ──────────────────────────────────
+  - id: "q3"
+    type: "code"
+    content: |
+      The feature list below is missing the **squared polynomial terms** required
+      to allow a linear model to fit the circular boundary.
+
+      Modify `features` so that it also contains `"X1_sq"` and `"X2_sq"`,
+      then run the cell to validate your answer.
+    initial_code: |
+      # TODO: add "X1_sq" and "X2_sq" to the feature list
+      features = ["X1", "X2"]
+    max_runs: 3
+    validation_assertion: '"X1_sq" in features and "X2_sq" in features'
+
+  # ── Code — hyperparameter tuning ─────────────────────────
+  - id: "q4"
+    type: "code"
+    content: |
+      The cell below trains a small MLP.  Adjust `hidden_units` and
+      `learning_rate` so that the model reaches **≥ 85 % accuracy** on
+      `X_test`.  You have **3 attempts**.
+    initial_code: |
+      import numpy as np
+
+      # Synthetic circular dataset
+      np.random.seed(42)
+      n = 400
+      r = np.random.rand(n)
+      theta = 2 * np.pi * np.random.rand(n)
+      X = np.column_stack([r * np.cos(theta), r * np.sin(theta)])
+      y = (r > 0.5).astype(int)
+
+      X_train, X_test = X[:300], X[300:]
+      y_train, y_test = y[:300], y[300:]
+
+      # ── TODO: tune these values ──────────────────────────
+      hidden_units  = 4      # try increasing this
+      learning_rate = 0.01   # try different values
+
+      # Simple 1-layer perceptron training loop (NumPy)
+      W1 = np.random.randn(2, hidden_units) * 0.1
+      b1 = np.zeros(hidden_units)
+      W2 = np.random.randn(hidden_units, 1) * 0.1
+      b2 = 0.0
+
+      def sigmoid(z): return 1 / (1 + np.exp(-z))
+
+      for _ in range(2000):
+          h  = sigmoid(X_train @ W1 + b1)
+          p  = sigmoid(h @ W2 + b2)
+          dL = p - y_train.reshape(-1, 1)
+          W2 -= learning_rate * h.T @ dL / len(y_train)
+          b2 -= learning_rate * dL.mean()
+          dh  = (dL @ W2.T) * h * (1 - h)
+          W1 -= learning_rate * X_train.T @ dh / len(y_train)
+          b1 -= learning_rate * dh.mean(axis=0)
+
+      h_test = sigmoid(X_test @ W1 + b1)
+      p_test = sigmoid(h_test @ W2 + b2)
+      accuracy = ((p_test > 0.5).flatten() == y_test).mean()
+      print(f"Test accuracy: {accuracy:.1%}")
+    max_runs: 3
+    validation_assertion: "accuracy >= 0.85"
+
+  # ── Open question — qualitative explanation ───────────────
+  - id: "q5"
+    type: "open_question"
+    content: |
+      Explain **in your own words** why a logistic regression model (no hidden
+      layers) cannot correctly classify the circular ring dataset described in
+      the introduction, even with unlimited training time.
+
+      Your answer should reference:
+      * The concept of a **linear decision boundary**.
+      * Why **feature engineering** (adding polynomial terms) can help.
+      * One alternative architectural solution.
+
+  # ── Markdown — section separator ─────────────────────────
+  - id: "part2_header"
+    type: "markdown"
+    content: |
+      ---
+      ### Part 2: Practical Hyperparameter Analysis
+
+      The following questions ask you to reason about training dynamics.
+
+  # ── Q&A — multiple choice ─────────────────────────────────
+  - id: "q6"
+    type: "qa"
+    content: >
+      Which optimiser typically converges fastest on a small dataset with
+      noisy gradients?
+    options:
+      - "Vanilla SGD"
+      - "SGD with momentum"
+      - "Adam"
+      - "LBFGS"
+    correct_answer: "Adam"
+    max_runs: 2

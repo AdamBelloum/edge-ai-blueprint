@@ -1,0 +1,10 @@
+{
+  "_comment": "assessment_config.json — overrides YAML top-level keys where present.",
+  "assessment_title": "Machine Learning Foundations Exam",
+  "mode": "timed",
+  "duration_minutes": 30,
+  "allow_manual_submit": true,
+  "max_cell_retries": 3,
+  "target_notebook": "assessment_ml.ipynb",
+  "scripts_dir": "/opt/workshop-assessment/scripts"
+}
