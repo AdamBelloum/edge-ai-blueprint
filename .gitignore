@@ -34,3 +34,9 @@ scripts/workshops/*.bak
 
 # Local FL recovery evidence; never commit generated records.
 /data/fl-recovery/
+
+# Workshop assessment answer models; never commit.
+workshop_assets/**/assessment/*answer_model*
+
+# Workshop assessment material (questions, notebooks, answer models): private, never commit.
+workshop_assets/**/assessment/
