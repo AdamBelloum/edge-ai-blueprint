@@ -650,9 +650,9 @@ run_cloud_computing_soa_menu() {
     workshop_ui_section "SELECT A MODULE"
     workshop_ui_option 1 "Module 1 - REST API"
     workshop_ui_option 2 "Module 2 - Microservices and JWT Authentication"
-    workshop_ui_option 3 "Module 3 - Containerization and Orchestration: teaching-file delivery; runtime NOT VALIDATED"
-    workshop_ui_option 4 "Module 4 - OpenStack - TODO"
-    workshop_ui_option 5 "Module 5 - OpenFaaS: offline rehearsal only; live readiness NOT VALIDATED"
+    workshop_ui_option 3 "Module 3 - Containerization and Orchestration: teaching-file delivery"
+    workshop_ui_option 4 "Module 4 - OpenStack - STATUS: TODO"
+    workshop_ui_option 5 "Module 5 - OpenFaaS: offline rehearsal only; STATUS: live readiness NOT VALIDATED"
     printf '\n'
     workshop_ui_option 0 "Back to workshops"
     workshop_ui_prompt

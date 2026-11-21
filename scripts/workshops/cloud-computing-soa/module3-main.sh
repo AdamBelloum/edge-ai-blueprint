@@ -42,7 +42,7 @@ run_cloud_module3_menu() {
     workshop_ui_option 2 "Show integration status - offline"
     workshop_ui_option 3 "Check publication readiness"
     workshop_ui_option 4 "Show deployed delivery status"
-    workshop_ui_section "EXERCISE RUNTIME"
+    workshop_ui_section "RUNTIME SETUP"
     workshop_ui_option 5 "Start beginner containerization runtime on assigned VMs"
     workshop_ui_option 6 "Show beginner containerization runtime status"
     workshop_ui_section "PUBLICATION"
