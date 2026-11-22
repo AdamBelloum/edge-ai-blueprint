@@ -97,6 +97,7 @@ Actions:
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
   flower                  Open the Flower lifecycle manager.
+  assessment              Open the Assessment menu (create and publish exams; grading and badges TODO).
 
 Options:
   --mode beginner|advanced
@@ -363,7 +364,7 @@ while (($#)); do
       ADMIN_CLIENT_SECRET_FILE="${2:-}"
       shift 2
       ;;
-    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module3-readiness|cloud-module3-deployment-status|cloud-module3-publish|cloud-module3-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower)
+    menu|initialise-identities|issue-credentials|status|module1-publish|module1-check|module2-publish|module2-check|module2-release-solutions|module3-publish|module3-check|module3-release-solutions|cloud-module1-publish|cloud-module1-check|cloud-module1-release-solutions|cloud-module2-publish|cloud-module2-check|cloud-module2-release-solutions|cloud-module3-check|cloud-module3-status|cloud-module3-readiness|cloud-module3-deployment-status|cloud-module3-publish|cloud-module3-release-solutions|cloud-module5-check|cloud-module5-status|cloud-module5-publish|spark-prepare|spark-publish|spark-status|spark-release-solutions|hpc-prepare|hpc-openmp-publish|hpc-status|reconcile-applications|fl-prepare|reset|reset-participants|release-solutions|flower|assessment)
       [[ "$ACTION" == menu ]] || fail 'Specify one action only.'
       ACTION="$1"
       shift
@@ -583,8 +584,10 @@ run_main_menu() {
     workshop_ui_option 2 "Reconcile workshop applications"
     workshop_ui_section "WORKSHOPS"
     workshop_ui_option 3 "Select workshops"
+    workshop_ui_section "ASSESSMENT"
+    workshop_ui_option 4 "Assessment"
     workshop_ui_section "CLEANUP"
-    workshop_ui_option 4 "Reset workshop cycle"
+    workshop_ui_option 5 "Reset workshop cycle"
     printf '\n'
     workshop_ui_option 0 "Exit"
     workshop_ui_prompt
@@ -594,9 +597,10 @@ run_main_menu() {
       1) run_initialisation_menu ;;
       2) run_application_reconciliation ;;
       3) run_workshops_menu ;;
-      4) run_reset_menu ;;
+      4) run_assessment_menu ;;
+      5) run_reset_menu ;;
       0) exit 0 ;;
-      *) printf 'Choose 0, 1, 2, 3, or 4.\n' >&2 ;;
+      *) printf 'Choose 0, 1, 2, 3, 4, or 5.\n' >&2 ;;
     esac
   done
 }
@@ -619,6 +623,8 @@ source "$SCRIPT_DIR/controllers/cloud_computing_soa.sh"
 source "$SCRIPT_DIR/controllers/big_data.sh"
 # shellcheck source=controllers/hpc.sh
 source "$SCRIPT_DIR/controllers/hpc.sh"
+# shellcheck source=controllers/assessment.sh
+source "$SCRIPT_DIR/controllers/assessment.sh"
 
 # Dispatch only after all dependencies and controllers have been loaded.
 # Interactive menus require a terminal; explicit actions remain scriptable.
@@ -675,5 +681,9 @@ case "$ACTION" in
   flower)
     [[ -t 0 ]] || fail 'The flower action requires an interactive terminal.'
     run_flower_manager_menu
+    ;;
+  assessment)
+    [[ -t 0 ]] || fail 'The assessment action requires an interactive terminal.'
+    run_assessment_menu
     ;;
 esac
