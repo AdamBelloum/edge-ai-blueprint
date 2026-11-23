@@ -11,8 +11,11 @@ notebook of every group from the worker VMs into:
   workshop_assets/<workshop>/<module-dir>/assessment/submissions/
   <group>_<workshop>_<module-dir>_<YYYYMMDD>.ipynb   (date is UTC)
 
-Read-only on the workers: nothing is changed or deleted there. Participant-
-controlled paths are never followed through symlinks. Copies are verified by
+Participant data on the workers is only read: it is never changed or deleted.
+A temporary root-owned scratch copy (/var/tmp/assessment-collect.*) is made on
+each worker and removed afterwards (best effort: after a failure or interruption
+it may remain for an administrator to remove). Symlinks in participant-controlled
+paths are refused, but races are not fully excluded. Copies are verified by
 SHA-256 and as notebooks; identical earlier collections are reported as
 "already collected"; different content under the same name gets _HHMM (UTC).
 Entries that fail verification are reported and not collected.
@@ -147,7 +150,7 @@ printf '%s\n' \
   "Inventory:    $DIGITAFRICA_INVENTORY" \
   "Worker group: $DIGITAFRICA_DEPLOYMENT_WORKER_GROUP" \
   "Destination:  $dest" \
-  'Workers are read-only: nothing is changed or deleted there.' \
+  'Workers:      participant data is only read; a temporary root scratch copy is made and removed.' \
   'Dates in file names are UTC (harvest timestamps).'
 
 playbook_rc=0
@@ -182,6 +185,6 @@ esac
 if (( status == 0 )); then
   printf 'Collection complete.\n'
 else
-  printf 'Files that passed verification were still collected.\n' >&2
+  printf 'Only entries reported above as "collected" or "already collected" were placed; check the Summary line.\n' >&2
 fi
 exit "$status"
