@@ -1,6 +1,8 @@
 ---
-# Fetch the latest harvested exam notebook per group from the worker VMs.
-# Read-only on the workers: nothing is changed or deleted there.
+# Collect the latest harvested exam notebook per group from the worker VMs.
+# Participant data is never modified or deleted. A root-side helper selects and
+# copies files without following symlinks into a root-owned scratch directory;
+# only that scratch directory is fetched, then removed.
 # Files go to a private staging directory on the control node; naming,
 # verification and final placement are handled by collect-submissions.sh.
 - name: Collect latest assessment submissions per group
@@ -10,6 +12,7 @@
   vars:
     ansible_python_interpreter: auto_silent
     assessment_storage_root: /var/lib/rancher/k3s/storage
+    assessment_helper: "{{ playbook_dir }}/../scripts/workshops/assessment/collect_harvest.py"
   tasks:
     - name: Validate inputs
       ansible.builtin.assert:
@@ -21,59 +24,55 @@
           - assessment_exam_stem is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
         quiet: true
 
-    - name: List harvested notebooks (regular files only, strict path pattern)
-      ansible.builtin.command:
-        argv:
-          - find
-          - "{{ assessment_storage_root }}"
-          - -maxdepth
-          - "5"
-          - -type
-          - f
-          - -size
-          - -50M
-          - -regextype
-          - posix-extended
-          - -regex
-          - "{{ assessment_storage_root }}/pvc-[^/]+_digitafrica_claim-group-[0-9]+---[^/]+/\\.assessment/submissions/group_[0-9]+/[A-Za-z0-9._-]+_[0-9]{8}T[0-9]{6}\\.ipynb"
-          - -name
-          - "{{ assessment_exam_stem }}_*.ipynb"
-          - -print
-      register: assessment_found
+    - name: Select and copy the latest submissions without following symlinks
+      ansible.builtin.script:
+        cmd: "{{ assessment_helper }} --root {{ assessment_storage_root }} --stem {{ assessment_exam_stem }}"
+      register: assessment_helper_run
       changed_when: false
 
-    - name: Start with no selection
+    - name: Parse the helper manifest
       ansible.builtin.set_fact:
-        assessment_latest: {}
+        assessment_manifest: "{{ assessment_helper_run.stdout | from_json }}"
 
-    - name: Select the latest submission per group (group taken from the PVC name)
-      ansible.builtin.set_fact:
-        assessment_latest: >-
-          {%- set grp = item | regex_search('claim-(group-[0-9]+)---', '\\1') | first | replace('-', '_') -%}
-          {%- set ts = item | regex_search('_([0-9]{8}T[0-9]{6})\\.ipynb$', '\\1') | first -%}
-          {%- if grp not in assessment_latest or assessment_latest[grp].timestamp < ts -%}
-          {{ assessment_latest | combine({grp: {'timestamp': ts, 'path': item}}) }}
-          {%- else -%}
-          {{ assessment_latest }}
-          {%- endif -%}
-      loop: "{{ assessment_found.stdout_lines }}"
-      when: >-
-        (item | basename) ==
-        (assessment_exam_stem ~ '_' ~ (item | basename)[-21:-6] ~ '.ipynb')
+    - name: Validate the helper manifest
+      ansible.builtin.assert:
+        that:
+          - assessment_manifest.out_dir is none or assessment_manifest.out_dir is match('^/var/tmp/assessment-collect\.[A-Za-z0-9_]+$')
+          - (assessment_manifest['items'] | length == 0) or (assessment_manifest.out_dir is not none)
+          - (assessment_manifest['items'] | map(attribute='name') | select('match', '^group_[0-9]+_[0-9]{8}T[0-9]{6}\.ipynb$') | list | length) == (assessment_manifest['items'] | length)
+          - (assessment_manifest['items'] | map(attribute='sha256') | select('match', '^[0-9a-f]{64}$') | list | length) == (assessment_manifest['items'] | length)
+        quiet: true
 
-    - name: Fetch the selected notebooks into the staging directory
-      ansible.builtin.fetch:
-        src: "{{ item.value.path }}"
-        dest: "{{ assessment_staging_dir }}/{{ inventory_hostname }}/{{ item.key }}_{{ item.value.timestamp }}.ipynb"
-        flat: true
-        validate_checksum: true
-      loop: "{{ assessment_latest | dict2items }}"
-      loop_control:
-        label: "{{ item.key }} {{ item.value.timestamp }}"
+    - name: Fetch the copies and the manifest, then remove the worker scratch directory
+      when: assessment_manifest.out_dir is not none
+      block:
+        - name: Fetch into the staging directory
+          ansible.builtin.fetch:
+            src: "{{ assessment_manifest.out_dir }}/{{ item }}"
+            dest: "{{ assessment_staging_dir }}/{{ inventory_hostname }}/{{ item }}"
+            flat: true
+            validate_checksum: true
+          loop: "{{ (assessment_manifest['items'] | map(attribute='name') | list + ['manifest.json']) if assessment_manifest['items'] else [] }}"
+      always:
+        - name: Remove the worker scratch directory (never participant data)
+          ansible.builtin.file:
+            path: "{{ assessment_manifest.out_dir }}"
+            state: absent
+
+    - name: Report problems found by the helper
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ assessment_manifest.problems }}"
+      when: assessment_manifest.problems | length > 0
 
     - name: Summary
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}:
-          {{ (assessment_latest | dict2items | map(attribute='key') | sort | join(', '))
-             if assessment_latest else 'no matching submissions' }}
+          {{ (assessment_manifest['items'] | map(attribute='group') | sort | join(', '))
+             if assessment_manifest['items'] else 'no matching submissions' }}
+
+    - name: Mark this host failed if the helper refused or skipped anything
+      ansible.builtin.assert:
+        that: assessment_manifest.problems | length == 0
+        fail_msg: "{{ inventory_hostname }}: the helper reported problems (see above); the run is incomplete"
+        quiet: true
