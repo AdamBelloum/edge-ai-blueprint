@@ -1,0 +1,79 @@
+---
+# Fetch the latest harvested exam notebook per group from the worker VMs.
+# Read-only on the workers: nothing is changed or deleted there.
+# Files go to a private staging directory on the control node; naming,
+# verification and final placement are handled by collect-submissions.sh.
+- name: Collect latest assessment submissions per group
+  hosts: "{{ assessment_worker_group }}"
+  become: true
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: auto_silent
+    assessment_storage_root: /var/lib/rancher/k3s/storage
+  tasks:
+    - name: Validate inputs
+      ansible.builtin.assert:
+        that:
+          - assessment_worker_group is match('^[A-Za-z_][A-Za-z0-9_-]*$')
+          - assessment_staging_dir is match('^/[A-Za-z0-9/_.-]+$')
+          - assessment_storage_root is match('^/[A-Za-z0-9/_.-]+$')
+          - assessment_exam_stem is defined
+          - assessment_exam_stem is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+        quiet: true
+
+    - name: List harvested notebooks (regular files only, strict path pattern)
+      ansible.builtin.command:
+        argv:
+          - find
+          - "{{ assessment_storage_root }}"
+          - -maxdepth
+          - "5"
+          - -type
+          - f
+          - -size
+          - -50M
+          - -regextype
+          - posix-extended
+          - -regex
+          - "{{ assessment_storage_root }}/pvc-[^/]+_digitafrica_claim-group-[0-9]+---[^/]+/\\.assessment/submissions/group_[0-9]+/[A-Za-z0-9._-]+_[0-9]{8}T[0-9]{6}\\.ipynb"
+          - -name
+          - "{{ assessment_exam_stem }}_*.ipynb"
+          - -print
+      register: assessment_found
+      changed_when: false
+
+    - name: Start with no selection
+      ansible.builtin.set_fact:
+        assessment_latest: {}
+
+    - name: Select the latest submission per group (group taken from the PVC name)
+      ansible.builtin.set_fact:
+        assessment_latest: >-
+          {%- set grp = item | regex_search('claim-(group-[0-9]+)---', '\\1') | first | replace('-', '_') -%}
+          {%- set ts = item | regex_search('_([0-9]{8}T[0-9]{6})\\.ipynb$', '\\1') | first -%}
+          {%- if grp not in assessment_latest or assessment_latest[grp].timestamp < ts -%}
+          {{ assessment_latest | combine({grp: {'timestamp': ts, 'path': item}}) }}
+          {%- else -%}
+          {{ assessment_latest }}
+          {%- endif -%}
+      loop: "{{ assessment_found.stdout_lines }}"
+      when: >-
+        (item | basename) ==
+        (assessment_exam_stem ~ '_' ~ (item | basename)[-21:-6] ~ '.ipynb')
+
+    - name: Fetch the selected notebooks into the staging directory
+      ansible.builtin.fetch:
+        src: "{{ item.value.path }}"
+        dest: "{{ assessment_staging_dir }}/{{ inventory_hostname }}/{{ item.key }}_{{ item.value.timestamp }}.ipynb"
+        flat: true
+        validate_checksum: true
+      loop: "{{ assessment_latest | dict2items }}"
+      loop_control:
+        label: "{{ item.key }} {{ item.value.timestamp }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ (assessment_latest | dict2items | map(attribute='key') | sort | join(', '))
+             if assessment_latest else 'no matching submissions' }}
