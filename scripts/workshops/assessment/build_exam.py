@@ -457,9 +457,13 @@ def _submission_cell(config: Dict[str, Any]) -> Any:
     source = textwrap.dedent("""\
         # ══════════════════════════════════════════════════════════════
         # SUBMIT — Run this cell when you have finished the exam.
-        # This will save your answers and lock the notebook.
+        # This submits your answers and locks the notebook.
+        # Run it only in YOUR personal copy, after its first cell.
         # ══════════════════════════════════════════════════════════════
-        _session.submit()
+        if globals().get("_session") is None:
+            print("Nothing was submitted. Open your personal exam copy, run its first cell, then run this cell there.")
+        else:
+            _session.submit()
     """)
     cell = new_code_cell(source)
     cell.metadata["tags"] = ["assessment-submit"]
