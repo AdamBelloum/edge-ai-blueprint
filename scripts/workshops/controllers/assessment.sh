@@ -9,8 +9,9 @@
 # Status:
 #   1) Create exam   - implemented via the manager (build_exam.py)
 #   2) Publish exam  - implemented (typed review gates, single-host ConfigMap publish)
-#   3) Grade exam    - TODO
-#   4) Create badge  - TODO
+#   3) Collect submissions - implemented via collect-submissions.sh (read-only fetch)
+#   4) Grade exam    - TODO
+#   5) Create badge  - TODO
 
 ASSESSMENT_CONTROLLER_DIR="$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
@@ -391,6 +392,28 @@ assessment_controller_publish_exam() {
   return 0
 }
 
+# Collect the latest submitted notebook per group from the workers into
+# workshop_assets/. The wrapper is interactive and loads its own context.
+assessment_controller_collect_submissions() {
+  local script="${ASSESSMENT_CONTROLLER_DIR}/../assessment/collect-submissions.sh"
+  local rc=0
+
+  if [[ ! -t 0 ]]; then
+    printf 'Collecting submissions requires an interactive terminal.\n' >&2
+    return 0
+  fi
+  if [[ ! -r "$script" ]]; then
+    printf 'Collect script not found or unreadable: %s\n' "$script" >&2
+    return 0
+  fi
+  bash "$script" || rc=$?
+  if (( rc != 0 )); then
+    printf 'Collect submissions did not complete (exit code %s). See messages above.\n' \
+      "$rc" >&2
+  fi
+  return 0
+}
+
 run_assessment_menu() {
   local choice
 
@@ -398,8 +421,9 @@ run_assessment_menu() {
     workshop_ui_heading "ASSESSMENT"
     workshop_ui_option 1 "Create exam    (build exam notebook from a question file)"
     workshop_ui_option 2 "Publish exam   (make a reviewed exam available to participants)"
-    workshop_ui_option 3 "Grade exam     (TODO)"
-    workshop_ui_option 4 "Create badge   (TODO)"
+    workshop_ui_option 3 "Collect submissions (fetch latest notebook per group)"
+    workshop_ui_option 4 "Grade exam     (TODO)"
+    workshop_ui_option 5 "Create badge   (TODO)"
     workshop_ui_option 0 "Back"
     workshop_ui_prompt
 
@@ -411,8 +435,9 @@ run_assessment_menu() {
     case "$choice" in
       1) assessment_controller_invoke "Create exam" generate-menu ;;
       2) assessment_controller_publish_exam ;;
-      3) printf 'Grade exam is not implemented yet (TODO).\n' ;;
-      4) printf 'Create badge is not implemented yet (TODO).\n' ;;
+      3) assessment_controller_collect_submissions ;;
+      4) printf 'Grade exam is not implemented yet (TODO).\n' ;;
+      5) printf 'Create badge is not implemented yet (TODO).\n' ;;
       0) return 0 ;;
       *) printf 'Invalid selection: %s\n' "$choice" >&2 ;;
     esac
