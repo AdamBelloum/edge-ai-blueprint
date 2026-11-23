@@ -223,6 +223,33 @@ REMOTE_STATE
     return 1
   fi
 
+  local exam_type exam_module
+  if [[ "$exam_path" =~ /workshop_assets/([^/]+)/([^/]+)/assessment/[^/]+$ ]]; then
+    exam_type="${BASH_REMATCH[1]}"
+    exam_module="${BASH_REMATCH[2]%%-*}"
+  else
+    printf 'Exam is not under workshop_assets/<workshop>/<module>/assessment/. Nothing was published.\n' >&2
+    return 1
+  fi
+  if [[ "$exam_type" != "$active_type" || "$exam_module" != "$active_module" ]]; then
+    printf '\nWARNING: this exam belongs to %s/%s, but the active workshop is %s/%s.\n' \
+      "$exam_type" "$exam_module" "$active_type" "$active_module" >&2
+    printf '%s\n' \
+      'Participants will receive it in their home folder, but the data or services' \
+      'it relies on may not be available in the active workshop.' \
+      'Publishing replaces the exam currently offered to every participant.' >&2
+    if [[ ! -t 0 ]]; then
+      printf 'An interactive terminal is required to publish across workshops. Nothing was published.\n' >&2
+      return 2
+    fi
+    local cross=""
+    read -rp 'Type CROSS-PUBLISH to publish this exam anyway: ' cross || cross=""
+    if [[ "$cross" != "CROSS-PUBLISH" ]]; then
+      log 'Publication cancelled: cross-workshop publication not confirmed.'
+      return 2
+    fi
+  fi
+
   print_heading "Publish exam to participants"
   printf 'Exam file : %s\nSize      : %s bytes\nSHA-256   : %s\n' \
     "$notebook_name" "$size_bytes" "$sha256"

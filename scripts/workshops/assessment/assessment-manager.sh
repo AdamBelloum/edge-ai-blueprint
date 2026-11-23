@@ -16,7 +16,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_PROJECT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 BUILDER_SCRIPT="${SCRIPT_DIR}/build_exam.py"
 ASSETS_ROOT="${ROOT_PROJECT}/workshop_assets"
-EXAMS_DIR="${ASSETS_ROOT}/assessment/exams"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 SELECTED=""
 
@@ -117,25 +116,45 @@ cmd_list() {
   done < <(find "${adir}" -maxdepth 1 -type f | sort)
 }
 
+# Copy an organiser-supplied question file into the module assessment folder.
+# The original is kept. Only regular, non-symlink .yaml/.yml files are accepted.
+intake_question_file() {
+  local adir="$1" src base dest
+  log "Store question files in: ${adir}"
+  read -rp "Full path of a question file to copy there (blank = cancel): " src || return 1
+  [[ -n "${src}" ]] || return 1
+  [[ -f "${src}" && ! -L "${src}" && -r "${src}" ]] || { err "Not a readable regular file: ${src}"; return 1; }
+  case "${src}" in *.yaml|*.yml) ;; *) err "Question file must end in .yaml or .yml"; return 1 ;; esac
+  base="$(basename "${src}")"
+  [[ "${base}" =~ ^[A-Za-z0-9._-]+$ ]] || { err "File name may contain only letters, digits, '.', '_' and '-'."; return 1; }
+  dest="${adir}/${base}"
+  if [[ -e "${dest}" ]] && ! confirm "Overwrite existing ${base}"; then return 1; fi
+  install -m 0600 -- "${src}" "${dest}" || { err "Cannot copy to ${dest}"; return 1; }
+  log "Copied to: ${dest}"
+}
+
 cmd_generate() {
   local adir qfile stem out num_questions
   local -a qfiles=() build_args=()
 
   adir="$(resolve_assessment_dir "$1" "$2")" || return 1
   [[ -f "${BUILDER_SCRIPT}" ]] || { err "Generator not found: ${BUILDER_SCRIPT}"; return 1; }
-  [[ -d "${adir}" ]] || { warn "Assessment directory not found: ${adir}"; return 0; }
+  mkdir -p "${adir}" || { err "Cannot create ${adir}"; return 1; }
+  log "Question files and exams for this module are stored in: ${adir}"
 
   mapfile -t qfiles < <(question_files "${adir}")
   if (( ${#qfiles[@]} == 0 )); then
-    warn "No question files (*.yaml, *.yml) in ${adir}. Nothing to generate."
-    return 0
+    warn "No question files (*.yaml, *.yml) in ${adir}."
+    intake_question_file "${adir}" || { log "No question file added. Nothing to generate."; return 0; }
+    mapfile -t qfiles < <(question_files "${adir}")
+    (( ${#qfiles[@]} > 0 )) || { log "Nothing to generate."; return 0; }
   fi
 
   log "Question files for '$1' / '$2':"
   select_item "Select question file" "${qfiles[@]}" || { log "Generation cancelled."; return 0; }
   qfile="${SELECTED}"
   stem="$(basename "${qfile%.*}")"
-  out="${EXAMS_DIR}/${stem}_exam.ipynb"
+  out="${adir}/${stem}_exam.ipynb"
 
   while true; do
     read -rp "Number of questions to include (blank = all): " num_questions || return 1
@@ -161,7 +180,6 @@ cmd_generate() {
     return 0
   fi
 
-  mkdir -p "${EXAMS_DIR}" || { err "Cannot create ${EXAMS_DIR}"; return 1; }
   "${PYTHON_BIN}" "${BUILDER_SCRIPT}" "${build_args[@]}"
   log "Generated: ${out}"
   log "Next: review ${out} manually. It is NOT verified answer-free beyond the generator's own checks."
@@ -246,19 +264,25 @@ cmd_publish_menu() {
 cmd_select_exam() {
   local result_file="$1"
   local -a exams=()
+  local exams_dir rc=0
 
   [[ -f "${result_file}" && ! -L "${result_file}" && -w "${result_file}" ]] || {
     err "Result file must be an existing, writable, regular file: ${result_file}"
     return 2
   }
-  [[ -d "${EXAMS_DIR}" ]] || {
-    err "No exams directory: ${EXAMS_DIR}. Create an exam first."
+  select_assessment_target || rc=$?
+  if (( rc == 1 )); then log "Selection cancelled."; return 1; fi
+  if (( rc != 0 )); then return "${rc}"; fi
+  exams_dir="$(resolve_assessment_dir "${TARGET_WORKSHOP}" "${TARGET_MODULE}")" || return 1
+  log "Selected: ${TARGET_WORKSHOP} / ${TARGET_MODULE_DIR}"
+  [[ -d "${exams_dir}" ]] || {
+    err "No exams directory: ${exams_dir}. Create an exam first."
     return 1
   }
 
-  mapfile -t exams < <(find "${EXAMS_DIR}" -maxdepth 1 -type f -name '*_exam.ipynb' | sort)
+  mapfile -t exams < <(find "${exams_dir}" -maxdepth 1 -type f -name '*_exam.ipynb' | sort)
   if (( ${#exams[@]} == 0 )); then
-    err "No *_exam.ipynb files in ${EXAMS_DIR}. Create an exam first."
+    err "No *_exam.ipynb files in ${exams_dir}. Create an exam first."
     return 1
   fi
 
@@ -267,7 +291,7 @@ cmd_select_exam() {
     log "Exam found: $(basename "${SELECTED}")"
   else
     [[ -t 0 ]] || { err "Several exams exist; an interactive terminal is required to select one."; return 2; }
-    log "Several exams found in ${EXAMS_DIR}:"
+    log "Several exams found in ${exams_dir}:"
     select_item "Select the exam to publish" "${exams[@]}" || { log "Selection cancelled."; return 1; }
   fi
 

@@ -442,6 +442,10 @@ singleuser:
         configMap:
           name: digitafrica-assessment-exam
           optional: true
+      - name: digitafrica-assessment-tools
+        configMap:
+          name: digitafrica-assessment-tools
+          optional: true
 {% include 'workshop-hooks/cloud-module3-volumes.yaml.j2' %}
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
       - name: digitafrica-runtime-module5-node
@@ -508,6 +512,9 @@ singleuser:
 {% endif %}
       - name: digitafrica-seed-beginner
         mountPath: /seed
+        readOnly: true
+      - name: digitafrica-assessment-tools
+        mountPath: /opt/workshop-assessment/scripts
         readOnly: true
 
   initContainers:

@@ -506,6 +506,37 @@
     - workshop_assets
     - workshop_application_reconciliation
 
+- name: Ensure workshop assessment staging directory exists on central node
+  ansible.builtin.file:
+    path: /opt/digitafrica/k8s-notebooks/assessment
+    state: directory
+    mode: "0755"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Stage workshop assessment runtime module on central node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/workshops/assessment/assessment_tools.py"
+    dest: /opt/digitafrica/k8s-notebooks/assessment/assessment_tools.py
+    mode: "0644"
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
+- name: Create/update workshop assessment tools ConfigMap
+  ansible.builtin.shell: |
+    set -euo pipefail
+    k3s kubectl -n {{ digitafrica_deployment.digitafrica_namespace }} \
+      create configmap digitafrica-assessment-tools \
+      --from-file=assessment_tools.py=/opt/digitafrica/k8s-notebooks/assessment/assessment_tools.py \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  tags:
+    - workshop_assets
+    - workshop_application_reconciliation
+
 - name: Publish Module 5 assets only when explicitly enabled
   ansible.builtin.include_tasks:
     file: openfaas-assets.yml
