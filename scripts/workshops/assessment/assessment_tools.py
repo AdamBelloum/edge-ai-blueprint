@@ -223,30 +223,62 @@ def create_individual_copy(template_name=None, scripts_dir=None, duration_minute
         except Exception:
             pass
 
+    def _copy_status(stem_):
+        sp = pathlib.Path(_state_path(f"{stem_}.ipynb"))
+        if not sp.exists():
+            return "not opened yet"
+        try:
+            st = json.loads(sp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "in progress"
+        return "already SUBMITTED (locked)" if st.get("submitted") else "in progress"
+
+    def _ask(prompt, valid, hint):
+        for _ in range(3):
+            reply = input(prompt).strip().lower()
+            if reply in valid:
+                return reply
+            print(f"'{reply}' is not a valid answer. {hint}")
+        return None
+
     if _taken(base):
-        while True:
-            choice = input(
-                f"A personal copy for '{name}' already exists ({base}.ipynb).\n"
-                "  [R] Resume it (it is mine)\n"
-                "  [N] Create a NEW copy (a different person with the same name)\n"
-                "  [C] Cancel\n"
-                "Choice: ").strip().lower()
-            if choice in ("r", "n", "c"):
-                break
-        if choice == "c":
+        copies = [base]
+        k = 2
+        while _taken(f"{base}-{k}"):
+            copies.append(f"{base}-{k}")
+            k += 1
+        print(f"A personal copy already exists for the name '{name}'.")
+        print("(Names that differ only in capitals, spaces or hyphens count as the same name.)")
+        print("Existing copies:")
+        for idx, s in enumerate(copies, 1):
+            print(f"  {idx}. {s}.ipynb - {_copy_status(s)}")
+        print("Do NOT type your name again. Answer with ONE of:")
+        print("  a number from the list : continue that copy - it is yours")
+        print("  N : you are a different person with the same name - create a new copy")
+        print("  C : cancel, nothing is created")
+        valid = {str(x) for x in range(1, len(copies) + 1)} | {"n", "c"}
+        choice = _ask("Your answer (number, N or C): ", valid,
+                      "Type a number from the list, N or C (not your name).")
+        if choice is None:
+            print("No valid answer. Nothing was created. Run this cell again.")
             return None
-        if choice == "r":
-            existing = directory / f"{base}.ipynb"
+        if choice == "c":
+            print("Cancelled. Nothing was created.")
+            return None
+        if choice != "n":
+            chosen = copies[int(choice) - 1]
+            existing = directory / f"{chosen}.ipynb"
             if not existing.exists():
                 print("The copy file is missing. Tell the organiser; nothing was changed.")
                 return None
-            print("Resuming your existing copy. Open it and run its first cell.")
+            if _copy_status(chosen).startswith("already SUBMITTED"):
+                print("This copy was already submitted and is locked; it cannot be edited.")
+                print("If you need another attempt, tell the organiser.")
+            else:
+                print("Resuming your existing copy. Open it and run its first cell.")
             _show_link(str(existing))
             return str(existing)
-        n = 2
-        while _taken(f"{base}-{n}"):
-            n += 1
-        stem = f"{base}-{n}"
+        stem = f"{base}-{k}"
 
     target = directory / f"{stem}.ipynb"
     nb = json.loads(template.read_text(encoding="utf-8"))
