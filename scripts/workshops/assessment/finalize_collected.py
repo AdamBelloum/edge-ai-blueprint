@@ -91,24 +91,64 @@ def ensure_private(path):
         os.close(fd)
 
 
+def _slug(name):
+    import unicodedata
+    text = unicodedata.normalize(
+        "NFKC", unicodedata.normalize("NFKC", name).strip().casefold())
+    out = []
+    for ch in text:
+        if ch.isalnum() or unicodedata.category(ch).startswith("M"):
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-")
+
+
+def valid_person(person):
+    """A participant slug exactly as assessment_tools.participant_slug() makes it."""
+    try:
+        return bool(person) and len(person.encode("utf-8")) <= 80 and _slug(person) == person
+    except (UnicodeError, TypeError):
+        return False
+
+
+def show(text):
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    return str(text).encode(enc, "backslashreplace").decode(enc)
+
+
+def scratch_name(group, person, ts):
+    """ASCII-only staging name; the real person name travels in the manifest."""
+    if not person:
+        return "%s_%s.ipynb" % (group, ts)
+    return "%s_p%s_%s.ipynb" % (group, hashlib.sha256(person.encode("utf-8")).hexdigest()[:16], ts)
+
+
+def label(cand):
+    return cand["group"] + (" [%s]" % show(cand["person"]) if cand["person"] else "")
+
+
 def verify_item(hdir, host, item, problems, failed):
     try:
         group, ts, name = item["group"], item["timestamp"], item["name"]
         sha, size = item["sha256"], item["size"]
+        person = item["person"] if "person" in item else ""
     except (KeyError, TypeError):
         problems.append("%s: malformed manifest entry" % host)
         return None
     if not (isinstance(group, str) and GROUP_RE.match(group)
             and isinstance(ts, str) and TS_RE.match(ts) and valid_timestamp(ts)
-            and name == "%s_%s.ipynb" % (group, ts)
+            and isinstance(person, str) and (person == "" or valid_person(person))
+            and name == scratch_name(group, person, ts)
             and isinstance(sha, str) and SHA_RE.match(sha)
             and is_int(size) and size > 0):
         problems.append("%s: manifest entry has unexpected values" % host)
         return None
 
     def fail(reason):
-        failed.add(group)
-        problems.append("%s/%s: not collected (%s)" % (host, group, reason))
+        failed.add((group, person))
+        problems.append("%s/%s%s: not collected (%s)"
+                        % (host, group, (" [%s]" % show(person)) if person else "", reason))
 
     try:
         data = read_regular(os.path.join(hdir, name), MAX_BYTES)
@@ -127,7 +167,7 @@ def verify_item(hdir, host, item, problems, failed):
     if not valid:
         fail("not a valid notebook")
         return None
-    return {"group": group, "timestamp": ts, "sha256": sha, "host": host, "data": data}
+    return {"group": group, "person": person, "timestamp": ts, "sha256": sha, "host": host, "data": data}
 
 
 def load_candidates(staging, problems):
@@ -161,18 +201,19 @@ def load_candidates(staging, problems):
 
 
 def select_latest(candidates, failed, problems):
-    by_group = {}
+    by_key = {}
     for cand in candidates:
-        by_group.setdefault(cand["group"], []).append(cand)
+        by_key.setdefault((cand["group"], cand["person"]), []).append(cand)
     selected = []
-    for group in sorted(by_group):
-        if group in failed:
-            continue  # a copy of this group failed verification; do not fall back
-        newest = max(c["timestamp"] for c in by_group[group])
-        top = [c for c in by_group[group] if c["timestamp"] == newest]
+    for key in sorted(by_key):
+        if key in failed:
+            continue  # a copy of this group/person failed verification; do not fall back
+        label_ = key[0] + (" [%s]" % show(key[1]) if key[1] else "")
+        newest = max(c["timestamp"] for c in by_key[key])
+        top = [c for c in by_key[key] if c["timestamp"] == newest]
         if len({c["sha256"] for c in top}) > 1:
             problems.append("%s: conflicting copies with timestamp %s on hosts %s; not collected"
-                            % (group, newest, ", ".join(sorted(c["host"] for c in top))))
+                            % (label_, newest, ", ".join(sorted(c["host"] for c in top))))
             continue
         selected.append(top[0])
     return selected
@@ -289,12 +330,14 @@ def main():
         prepare_dest(dest)
     for cand in selected:
         prefix = "%s_%s_%s_" % (cand["group"], args.workshop, args.module_dir)
+        if cand["person"]:
+            prefix += cand["person"] + "_"
         try:
             status, name, note = place(dest, cand, prefix, problems)
         except (OSError, ValueError) as exc:
-            problems.append("%s: not collected (%s)" % (cand["group"], clean(exc)))
+            problems.append("%s: not collected (%s)" % (label(cand), clean(exc)))
             continue
-        print("%-17s %s -> %s%s" % (status, cand["group"], name, note))
+        print("%-17s %s -> %s%s" % (status, label(cand), show(name), note))
         if status == "collected":
             collected += 1
         else:

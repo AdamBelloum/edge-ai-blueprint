@@ -5,7 +5,7 @@
 # only that scratch directory is fetched, then removed.
 # Files go to a private staging directory on the control node; naming,
 # verification and final placement are handled by collect-submissions.sh.
-- name: Collect latest assessment submissions per group
+- name: Collect latest assessment submissions per group and participant
   hosts: "{{ assessment_worker_group }}"
   become: true
   gather_facts: false
@@ -39,7 +39,7 @@
         that:
           - assessment_manifest.out_dir is none or assessment_manifest.out_dir is match('^/var/tmp/assessment-collect\.[A-Za-z0-9_]+$')
           - (assessment_manifest['items'] | length == 0) or (assessment_manifest.out_dir is not none)
-          - (assessment_manifest['items'] | map(attribute='name') | select('match', '^group_[0-9]+_[0-9]{8}T[0-9]{6}\.ipynb$') | list | length) == (assessment_manifest['items'] | length)
+          - (assessment_manifest['items'] | map(attribute='name') | select('match', '^group_[0-9]+(_p[0-9a-f]{16})?_[0-9]{8}T[0-9]{6}\.ipynb$') | list | length) == (assessment_manifest['items'] | length)
           - (assessment_manifest['items'] | map(attribute='sha256') | select('match', '^[0-9a-f]{64}$') | list | length) == (assessment_manifest['items'] | length)
         quiet: true
 
@@ -68,7 +68,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}:
-          {{ (assessment_manifest['items'] | map(attribute='group') | sort | join(', '))
+          {{ (assessment_manifest['items'] | map(attribute='group') | unique | sort | join(', '))
              if assessment_manifest['items'] else 'no matching submissions' }}
 
     - name: Mark this host failed if the helper refused or skipped anything

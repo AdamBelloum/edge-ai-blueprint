@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Organiser tool: collect the latest harvested exam notebook of every group.
+# Organiser tool: collect the latest harvested exam notebook of every participant (per group).
 set -euo pipefail
 
 usage() {
@@ -7,9 +7,11 @@ usage() {
 Usage: collect-submissions.sh
 
 Interactively select a workshop/module exam, then collect the latest harvested
-notebook of every group from the worker VMs into:
+notebook of every participant (per group) from the worker VMs into:
   workshop_assets/<workshop>/<module-dir>/assessment/submissions/
-  <group>_<workshop>_<module-dir>_<YYYYMMDD>.ipynb   (date is UTC)
+  <group>_<workshop>_<module-dir>_<person>_<YYYYMMDD>.ipynb   (date is UTC)
+<person> is the name slug from the participant's personal exam copy. Exams
+without personal copies (older exams) are collected per group, without <person>.
 
 Participant data on the workers is only read: it is never changed or deleted.
 A temporary root-owned scratch copy (/var/tmp/assessment-collect.*) is made on
@@ -27,7 +29,10 @@ problem, nothing is finalized (the latest submission could be on that worker).
 
 Exit status: 0 clean, 1 failed or incomplete, 2 usage or missing prerequisite.
 
-Limits: the exam is identified only by its file name (the harvest stem). The
+Limits: a person is identified only by the name slug in the harvest file name;
+two people who enter the same name are told apart only by the -2, -3 suffix
+chosen when the copy was created. The exam is identified only by its file name
+(the harvest stem). The
 workers cannot prove which publication a notebook belongs to, and files in
 participant homes are participant-writable and not authoritative.
 USAGE

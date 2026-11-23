@@ -232,10 +232,36 @@ def _setup_cell(config: Dict[str, Any]) -> Any:
         )
         print(_session.status_message())
     """)
+    tags = ["assessment-setup"]
+    if config.get("individual_copies", True):
+        # Group workshops: each person works in a personal copy of this template.
+        source = textwrap.dedent(f"""\
+            # ══════════════════════════════════════════════════════════════
+            # SETUP CELL — Run this cell FIRST.
+            # It asks for your name and creates YOUR personal copy of this exam.
+            # Then open that copy and run its first cell.
+            # ══════════════════════════════════════════════════════════════
+            import sys, os
+
+            _SCRIPTS_DIR = os.environ.get("ASSESSMENT_SCRIPTS_DIR", {scripts_dir!r})
+            if _SCRIPTS_DIR not in sys.path:
+                sys.path.insert(0, _SCRIPTS_DIR)
+
+            from assessment_tools import create_individual_copy
+
+            _session = None
+            create_individual_copy(
+                scripts_dir=_SCRIPTS_DIR,
+                duration_minutes={duration},
+                mode={mode!r},
+                allow_manual_submit={allow_manual},
+            )
+        """)
+        tags.append("assessment-template")
     cell = new_code_cell(source)
     cell.metadata["editable"] = False
     cell.metadata["deletable"] = False
-    cell.metadata["tags"] = ["assessment-setup"]
+    cell.metadata["tags"] = tags
     return cell
 
 

@@ -48,8 +48,41 @@ def close_all(fds):
         os.close(fd)
 
 
+def _slug(name):
+    import unicodedata
+    text = unicodedata.normalize(
+        "NFKC", unicodedata.normalize("NFKC", name).strip().casefold())
+    out = []
+    for ch in text:
+        if ch.isalnum() or unicodedata.category(ch).startswith("M"):
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-")
+
+
+def valid_person(person):
+    """A participant slug exactly as assessment_tools.participant_slug() makes it."""
+    try:
+        return bool(person) and len(person.encode("utf-8")) <= 80 and _slug(person) == person
+    except (UnicodeError, TypeError):
+        return False
+
+
+def show(text):
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    return str(text).encode(enc, "backslashreplace").decode(enc)
+
+
+def scratch_name(group, person, ts):
+    """ASCII-only staging name; the real person name travels in the manifest."""
+    if not person:
+        return "%s_%s.ipynb" % (group, ts)
+    return "%s_p%s_%s.ipynb" % (group, hashlib.sha256(person.encode("utf-8")).hexdigest()[:16], ts)
+
+
 def find_candidates(storage_fd, stem, problems):
-    pattern = re.compile(r"^" + re.escape(stem) + r"_([0-9]{8}T[0-9]{6})\.ipynb$")
+    pattern = re.compile(r"^" + re.escape(stem) + r"(?:_([^_/]+))?_([0-9]{8}T[0-9]{6})\.ipynb$")
     found = {}
     for pvc in list_names(storage_fd):
         match = PVC_RE.match(pvc)
@@ -79,8 +112,14 @@ def find_candidates(storage_fd, stem, problems):
                     for fname in list_names(gchain[-1]):
                         m = pattern.match(fname)
                         if m:
-                            found.setdefault(group, []).append(
-                                {"timestamp": m.group(1), "pvc": pvc, "gdir": gdir, "fname": fname})
+                            person = m.group(1) or ""
+                            if person and not valid_person(person):
+                                problems.append("%s: submission with invalid participant name skipped (%s)"
+                                                % (group, show(fname)))
+                                continue
+                            found.setdefault((group, person), []).append(
+                                {"timestamp": m.group(2), "pvc": pvc, "gdir": gdir,
+                                 "fname": fname, "person": person})
                 finally:
                     close_all(gchain)
         finally:
@@ -150,23 +189,24 @@ def main():
     try:
         found = find_candidates(storage_fd, args.stem, problems)
         selected = []
-        for group in sorted(found):
-            newest = max(c["timestamp"] for c in found[group])
-            top = [c for c in found[group] if c["timestamp"] == newest]
+        for group, person in sorted(found):
+            newest = max(c["timestamp"] for c in found[(group, person)])
+            top = [c for c in found[(group, person)] if c["timestamp"] == newest]
             if len(top) > 1:
-                problems.append("ambiguous: %s has %d PVCs with timestamp %s; skipped" % (group, len(top), newest))
+                problems.append("ambiguous: %s%s has %d PVCs with timestamp %s; skipped"
+                                % (group, (" [%s]" % show(person)) if person else "", len(top), newest))
                 continue
-            selected.append((group, top[0]))
+            selected.append((group, person, top[0]))
         if selected and not args.dry_run:
             out_dir = tempfile.mkdtemp(prefix="assessment-collect.", dir="/var/tmp")
-        for group, cand in selected:
-            name = "%s_%s.ipynb" % (group, cand["timestamp"])
+        for group, person, cand in selected:
+            name = scratch_name(group, person, cand["timestamp"])
             try:
                 sha, size = read_candidate(storage_fd, cand, os.path.join(out_dir, name) if out_dir else None)
             except (OSError, ValueError) as exc:
                 problems.append("%s: not collected (%s)" % (group, getattr(exc, "strerror", None) or exc))
                 continue
-            items.append({"group": group, "timestamp": cand["timestamp"], "name": name,
+            items.append({"group": group, "person": person, "timestamp": cand["timestamp"], "name": name,
                           "sha256": sha, "size": size, "pvc": cand["pvc"]})
     finally:
         os.close(storage_fd)

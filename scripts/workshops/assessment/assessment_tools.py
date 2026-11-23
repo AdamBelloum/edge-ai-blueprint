@@ -103,6 +103,195 @@ def _save_state(notebook_id: str, state: Dict[str, Any]) -> None:
 # AssessmentSession
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def participant_slug(name: str, max_bytes: int = 80) -> str:
+    """
+    Filesystem-safe, Unicode-preserving slug for a participant name.
+
+    Letters/digits of any script and combining marks are kept (case-folded);
+    every other run of characters becomes one hyphen.  Returns "" when nothing
+    usable remains.
+    """
+    import unicodedata
+    text = unicodedata.normalize(
+        "NFKC", unicodedata.normalize("NFKC", str(name)).strip().casefold())
+    out = []
+    for ch in text:
+        if ch.isalnum() or unicodedata.category(ch).startswith("M"):
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    slug = "".join(out).strip("-")
+    while len(slug.encode("utf-8")) > max_bytes:
+        slug = slug[:-1]
+    return slug.strip("-")
+
+
+def _individual_setup_source(notebook_path, participant_name, scripts_dir,
+                             duration_minutes, mode, allow_manual_submit) -> str:
+    return "\n".join([
+        "# " + "=" * 62,
+        "# SETUP CELL - personal exam copy. Run this cell FIRST.",
+        "# " + "=" * 62,
+        "import sys, os",
+        "",
+        f'_SCRIPTS_DIR = os.environ.get("ASSESSMENT_SCRIPTS_DIR", {str(scripts_dir)!r})',
+        "if _SCRIPTS_DIR not in sys.path:",
+        "    sys.path.insert(0, _SCRIPTS_DIR)",
+        "",
+        "from assessment_tools import AssessmentSession",
+        "",
+        "_session = AssessmentSession.start(",
+        f"    notebook_path={str(notebook_path)!r},",
+        f"    participant_name={str(participant_name)!r},",
+        f"    duration_minutes={duration_minutes!r},",
+        f"    mode={mode!r},",
+        f"    allow_manual_submit={allow_manual_submit!r},",
+        ")",
+        "print(_session.status_message())",
+        "",
+    ])
+
+
+def _find_exam_templates(directory):
+    """Notebooks in *directory* whose setup cell is tagged 'assessment-template'."""
+    found = []
+    for p in sorted(pathlib.Path(directory).glob("*.ipynb")):
+        try:
+            nb = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for c in nb.get("cells", []):
+            if "assessment-template" in c.get("metadata", {}).get("tags", []):
+                found.append(p)
+                break
+    return found
+
+
+def create_individual_copy(template_name=None, scripts_dir=None, duration_minutes=None,
+                           mode="manual", allow_manual_submit=True, directory=None):
+    """
+    Ask for the participant's name and create a personal copy of the exam
+    template next to it.  Never overwrites an existing copy.  Returns the copy
+    path (str) or None.
+    """
+    from urllib.parse import quote
+
+    directory = pathlib.Path(directory or os.getcwd())
+    if template_name is None:
+        found = _find_exam_templates(directory)
+        if len(found) != 1:
+            print("WARNING: expected exactly one exam template in %s, found %d." % (directory, len(found)))
+            print("Open this notebook from the folder where the exam was delivered; "
+                  "if this persists, tell the organiser. Nothing was created.")
+            return None
+        template_name = found[0].name
+    template = directory / template_name
+    if not template.is_file():
+        print(f"WARNING: exam template '{template_name}' not found in {directory}.")
+        print("Open the exam from its original location and run this cell again.")
+        return None
+    scripts_dir = scripts_dir or SCRIPTS_DIR
+
+    name = slug = ""
+    for _ in range(3):
+        raw = input("Enter your full name (this creates your personal copy of the exam): ")
+        name = " ".join("".join(c for c in raw if c.isprintable() or c.isspace()).split())[:80]
+        slug = participant_slug(name)
+        if slug:
+            break
+        print("Please enter a name containing at least one letter or digit.")
+    else:
+        print("No valid name entered. Run this cell again.")
+        return None
+
+    def _taken(stem):
+        return ((directory / f"{stem}.ipynb").exists()
+                or _state_path(f"{stem}.ipynb").exists())
+
+    base = f"{template.stem}_{slug}"
+    stem = base
+
+    def _show_link(path):
+        print(f"Your personal exam copy: {path}")
+        try:
+            rel = os.path.relpath(path, pathlib.Path.home())
+            if not rel.startswith(".."):
+                prefix = os.environ.get("JUPYTERHUB_SERVICE_PREFIX", "/").rstrip("/") + "/"
+                url = prefix + "lab/tree/" + quote(rel)
+                from IPython.display import HTML, display
+                display(HTML(f'<a href="{url}" target="_blank">Open your personal exam copy</a>'))
+        except Exception:
+            pass
+
+    if _taken(base):
+        while True:
+            choice = input(
+                f"A personal copy for '{name}' already exists ({base}.ipynb).\n"
+                "  [R] Resume it (it is mine)\n"
+                "  [N] Create a NEW copy (a different person with the same name)\n"
+                "  [C] Cancel\n"
+                "Choice: ").strip().lower()
+            if choice in ("r", "n", "c"):
+                break
+        if choice == "c":
+            return None
+        if choice == "r":
+            existing = directory / f"{base}.ipynb"
+            if not existing.exists():
+                print("The copy file is missing. Tell the organiser; nothing was changed.")
+                return None
+            print("Resuming your existing copy. Open it and run its first cell.")
+            _show_link(str(existing))
+            return str(existing)
+        n = 2
+        while _taken(f"{base}-{n}"):
+            n += 1
+        stem = f"{base}-{n}"
+
+    target = directory / f"{stem}.ipynb"
+    nb = json.loads(template.read_text(encoding="utf-8"))
+    src = _individual_setup_source(target, name, scripts_dir, duration_minutes,
+                                   mode, allow_manual_submit)
+    replaced = 0
+    for cell in nb.get("cells", []):
+        if (cell.get("cell_type") == "code"
+                and "assessment-setup" in cell.get("metadata", {}).get("tags", [])):
+            cell["source"] = src.splitlines(keepends=True)
+            cell["metadata"]["tags"] = ["assessment-setup"]
+            cell["outputs"] = []
+            cell["execution_count"] = None
+            replaced += 1
+    if replaced != 1:
+        print("Template has no unique setup cell; nothing was created. Tell the organiser.")
+        return None
+    nb.setdefault("metadata", {})["assessment_individual"] = {
+        "name": name,
+        "slug": stem[len(template.stem) + 1:],
+        "template": template_name,
+        "created": datetime.datetime.utcnow().isoformat(),
+        "account": os.environ.get("JUPYTERHUB_USER") or getpass.getuser(),
+    }
+    try:
+        with open(target, "x", encoding="utf-8") as fh:
+            json.dump(nb, fh, indent=1, ensure_ascii=False)
+            fh.write("\n")
+    except FileExistsError:
+        print("A file with that name appeared meanwhile; nothing overwritten. Run the cell again.")
+        return None
+    except OSError as exc:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        print(f"Could not create your copy: {exc}")
+        return None
+
+    print(f"Created your personal copy for: {name}")
+    print("Open it, run its FIRST cell, and do the exam there (not in this template).")
+    _show_link(str(target))
+    return str(target)
+
+
 _CURRENT_SESSION: Optional["AssessmentSession"] = None
 
 
@@ -140,6 +329,7 @@ class AssessmentSession:
         duration_minutes: Optional[int] = None,
         mode: str = "manual",
         allow_manual_submit: bool = True,
+        participant_name: Optional[str] = None,
     ) -> "AssessmentSession":
         """
         Initialise (or resume) a session for the current user.
@@ -172,6 +362,16 @@ class AssessmentSession:
                     or getpass.getuser())
 
         state = _load_state(notebook_id)
+
+        # Per-individual copies: remember exactly which file belongs to this
+        # session so that submit() never has to guess the notebook.
+        if notebook_path:
+            state["notebook_path"] = os.path.abspath(os.path.expanduser(notebook_path))
+        if participant_name and not state.get("participant"):
+            state["participant"] = participant_name
+            state["participant_slug"] = participant_slug(participant_name)
+        if notebook_path or participant_name:
+            _save_state(notebook_id, state)
 
         # First-time initialisation
         if state["start_time"] is None:
@@ -242,8 +442,14 @@ class AssessmentSession:
             self._state["submission_time"] = datetime.datetime.utcnow().isoformat()
             _save_state(self.notebook_id, self._state)
 
-            # Determine notebook path
-            nb_path = os.environ.get("ASSESSMENT_NOTEBOOK") or self._detect_notebook_path()
+            # Determine notebook path.  Individual copies use the path recorded
+            # at start(); never fall back to "newest notebook" for them.
+            nb_path = self._state.get("notebook_path")
+            if not (nb_path and os.path.exists(nb_path)):
+                if self._state.get("participant"):
+                    nb_path = None
+                else:
+                    nb_path = os.environ.get("ASSESSMENT_NOTEBOOK") or self._detect_notebook_path()
             harvested = False
             if nb_path:
                 harvested = self._harvest(nb_path)
