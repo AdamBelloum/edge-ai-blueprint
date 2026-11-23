@@ -25,7 +25,7 @@ Entries that fail verification are reported and not collected.
 Default is fail-closed: if any worker fails, is unreachable or reports a
 problem, nothing is finalized (the latest submission could be on that worker).
   --allow-partial   finalize what was fetched anyway; results may NOT be the
-                    latest submission of every group, and the run exits 1.
+                    latest submission of every participant, and the run exits 1.
 
 Exit status: 0 clean, 1 failed or incomplete, 2 usage or missing prerequisite.
 
@@ -179,7 +179,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$finalizer" \
 status=0
 if (( playbook_rc != 0 )); then
   printf 'PARTIAL (--allow-partial): a worker failed or reported problems (ansible exit code %s).\n' "$playbook_rc" >&2
-  printf 'WARNING: collected files may NOT be the latest submission of every group.\n' >&2
+  printf 'WARNING: collected files may NOT be the latest submission of every participant.\n' >&2
   status=1
 fi
 case "$final_rc" in

@@ -392,7 +392,7 @@ assessment_controller_publish_exam() {
   return 0
 }
 
-# Collect the latest submitted notebook per group from the workers into
+# Collect the latest submitted notebook per participant from the workers into
 # workshop_assets/. The wrapper is interactive and loads its own context.
 assessment_controller_collect_submissions() {
   local script="${ASSESSMENT_CONTROLLER_DIR}/../assessment/collect-submissions.sh"
@@ -421,7 +421,7 @@ run_assessment_menu() {
     workshop_ui_heading "ASSESSMENT"
     workshop_ui_option 1 "Create exam    (build exam notebook from a question file)"
     workshop_ui_option 2 "Publish exam   (make a reviewed exam available to participants)"
-    workshop_ui_option 3 "Collect submissions (fetch latest notebook per group)"
+    workshop_ui_option 3 "Collect submissions (fetch latest notebook per participant)"
     workshop_ui_option 4 "Grade exam     (TODO)"
     workshop_ui_option 5 "Create badge   (TODO)"
     workshop_ui_option 0 "Back"
