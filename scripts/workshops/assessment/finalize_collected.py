@@ -12,6 +12,7 @@ are reported and skipped; nothing is deleted anywhere. Notebook content is never
 Exit status: 0 clean, 3 finished with problems, 1 fatal error.
 """
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -34,13 +35,36 @@ def clean(text, limit=300):
     return re.sub(r"[^\x20-\x7e]", "?", str(text))[:limit]
 
 
-def read_regular(path, limit):
-    """Read a regular file without following a symlink at the final component."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+def is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def valid_timestamp(ts):
+    try:
+        datetime.datetime.strptime(ts, "%Y%m%dT%H%M%S")
+    except ValueError:
+        return False
+    return True
+
+
+def open_regular(path):
+    """Open read-only: no symlink at the final component, never blocks on a FIFO,
+    and only a regular file is accepted. Returns (fd, fstat result)."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise ValueError("not a regular file")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, st
+
+
+def read_regular(path, limit):
+    """Read a regular file (see open_regular) up to a size limit."""
+    fd, st = open_regular(path)
+    try:
         if st.st_size > limit:
             raise ValueError("file too large")
         with os.fdopen(fd, "rb") as handle:
@@ -54,6 +78,19 @@ def read_regular(path, limit):
     return data
 
 
+def ensure_private(path):
+    """Set mode 0600 on an existing regular file via its descriptor.
+    Returns True if the mode had to be changed."""
+    fd, st = open_regular(path)
+    try:
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            os.fchmod(fd, 0o600)
+            return True
+        return False
+    finally:
+        os.close(fd)
+
+
 def verify_item(hdir, host, item, problems, failed):
     try:
         group, ts, name = item["group"], item["timestamp"], item["name"]
@@ -62,10 +99,10 @@ def verify_item(hdir, host, item, problems, failed):
         problems.append("%s: malformed manifest entry" % host)
         return None
     if not (isinstance(group, str) and GROUP_RE.match(group)
-            and isinstance(ts, str) and TS_RE.match(ts)
+            and isinstance(ts, str) and TS_RE.match(ts) and valid_timestamp(ts)
             and name == "%s_%s.ipynb" % (group, ts)
             and isinstance(sha, str) and SHA_RE.match(sha)
-            and isinstance(size, int)):
+            and is_int(size) and size > 0):
         problems.append("%s: manifest entry has unexpected values" % host)
         return None
 
@@ -83,7 +120,7 @@ def verify_item(hdir, host, item, problems, failed):
         return None
     try:
         nb = json.loads(data)
-        valid = (isinstance(nb, dict) and isinstance(nb.get("nbformat"), int)
+        valid = (isinstance(nb, dict) and is_int(nb.get("nbformat"))
                  and isinstance(nb.get("cells"), list))
     except ValueError:
         valid = False
@@ -147,15 +184,35 @@ def candidate_names(prefix, ts):
         yield "%s%s_%s_%d.ipynb" % (prefix, day, hhmm, n)
 
 
-def place(dest, cand, prefix):
+def existing_pattern(prefix):
+    """Exactly the names candidate_names() can produce for this prefix."""
+    return re.compile(r"^" + re.escape(prefix)
+                      + r"[0-9]{8}(?:_[0-9]{4}(?:_[0-9]{1,2})?)?\.ipynb$")
+
+
+def place(dest, cand, prefix, problems):
+    """Returns (status, name, note)."""
+    group = cand["group"]
+    pattern = existing_pattern(prefix)
     for existing in sorted(os.listdir(dest)):
-        if existing.startswith(prefix) and existing.endswith(".ipynb"):
+        if not pattern.match(existing):
+            continue
+        path = os.path.join(dest, existing)
+        try:
+            found = hashlib.sha256(read_regular(path, MAX_BYTES)).hexdigest()
+        except (OSError, ValueError) as exc:
+            problems.append("%s: could not check existing %s for duplicates (%s)"
+                            % (group, clean(existing), clean(exc)))
+            continue
+        if found == cand["sha256"]:
+            note = ""
             try:
-                found = hashlib.sha256(read_regular(os.path.join(dest, existing), MAX_BYTES)).hexdigest()
-            except (OSError, ValueError):
-                continue
-            if found == cand["sha256"]:
-                return "already collected", existing
+                if ensure_private(path):
+                    note = " (permissions corrected to 0600)"
+            except (OSError, ValueError) as exc:
+                problems.append("%s: could not set 0600 on existing %s (%s)"
+                                % (group, clean(existing), clean(exc)))
+            return "already collected", existing, note
     fd, tmp = tempfile.mkstemp(prefix=".incoming.", dir=dest)  # mode 0600
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -168,9 +225,22 @@ def place(dest, cand, prefix):
                 os.link(tmp, final)  # never overwrites an existing name
             except FileExistsError:
                 continue
-            if hashlib.sha256(read_regular(final, MAX_BYTES)).hexdigest() != cand["sha256"]:
-                raise ValueError("verification of %s failed after writing" % name)
-            return "collected", name
+            try:
+                ok = hashlib.sha256(read_regular(final, MAX_BYTES)).hexdigest() == cand["sha256"]
+            except (OSError, ValueError):
+                ok = False
+            if not ok:
+                removed = False
+                try:
+                    # remove only our own just-created link, never any other file
+                    if os.path.samestat(os.lstat(tmp), os.lstat(final)):
+                        os.unlink(final)
+                        removed = True
+                except OSError:
+                    pass
+                raise ValueError("verification of %s failed after writing; %s"
+                                 % (name, "new copy removed" if removed else "copy left in place, check it"))
+            return "collected", name, ""
         raise ValueError("no free file name")
     finally:
         os.unlink(tmp)
@@ -212,11 +282,11 @@ def main():
     for cand in selected:
         prefix = "%s_%s_%s_" % (cand["group"], args.workshop, args.module_dir)
         try:
-            status, name = place(dest, cand, prefix)
+            status, name, note = place(dest, cand, prefix, problems)
         except (OSError, ValueError) as exc:
             problems.append("%s: not collected (%s)" % (cand["group"], clean(exc)))
             continue
-        print("%-17s %s -> %s" % (status, cand["group"], name))
+        print("%-17s %s -> %s%s" % (status, cand["group"], name, note))
         if status == "collected":
             collected += 1
         else:
