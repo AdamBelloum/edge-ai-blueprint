@@ -131,7 +131,7 @@ def verify_item(hdir, host, item, problems, failed):
 
 
 def load_candidates(staging, problems):
-    candidates, failed = [], set()
+    candidates, failed, incomplete = [], set(), False
     for host in sorted(os.listdir(staging)):
         hdir = os.path.join(staging, host)
         if not HOST_RE.match(host) or os.path.islink(hdir) or not os.path.isdir(hdir):
@@ -148,14 +148,16 @@ def load_candidates(staging, problems):
                 raise ValueError("unexpected manifest structure")
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             problems.append("%s: unusable manifest (%s)" % (host, clean(exc)))
+            incomplete = True
             continue
         for msg in helper_problems:
             problems.append("%s: worker reported: %s" % (host, clean(msg)))
+            incomplete = True
         for item in items:
             cand = verify_item(hdir, host, item, problems, failed)
             if cand:
                 candidates.append(cand)
-    return candidates, failed
+    return candidates, failed, incomplete
 
 
 def select_latest(candidates, failed, problems):
@@ -262,6 +264,8 @@ def main():
     ap.add_argument("--dest", required=True)
     ap.add_argument("--workshop", required=True)
     ap.add_argument("--module-dir", required=True)
+    ap.add_argument("--allow-incomplete", action="store_true",
+                    help="place verified copies even if a host manifest was unusable or a worker reported problems")
     args = ap.parse_args()
 
     if not WORKSHOP_RE.match(args.workshop) or not MODULE_RE.match(args.module_dir):
@@ -273,8 +277,12 @@ def main():
         sys.exit("ERROR: staging directory missing or a symlink")
 
     problems = []
-    candidates, failed = load_candidates(args.staging, problems)
+    candidates, failed, incomplete = load_candidates(args.staging, problems)
     selected = select_latest(candidates, failed, problems)
+    if incomplete and not args.allow_incomplete:
+        problems.append("host data incomplete or unusable, so the latest submission cannot be established; "
+                        "nothing was placed (--allow-incomplete overrides)")
+        selected = []
 
     collected = already = 0
     if selected:
