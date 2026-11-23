@@ -39,7 +39,15 @@ from typing import Any, Callable, Dict, Optional
 
 # ── Path constants ────────────────────────────────────────────────────────────
 SCRIPTS_DIR:  str = os.environ.get("ASSESSMENT_SCRIPTS_DIR", "/opt/workshop-assessment/scripts")
-HARVEST_DIR:  str = os.environ.get("ASSESSMENT_HARVEST_DIR", "/opt/workshop-assessment/submissions")
+def _default_harvest_dir() -> str:
+    """Legacy host folder if usable, otherwise a folder in the user's workspace."""
+    legacy = "/opt/workshop-assessment/submissions"
+    if os.path.isdir(legacy) and os.access(legacy, os.W_OK):
+        return legacy
+    return str(pathlib.Path.home() / ".assessment" / "submissions")
+
+
+HARVEST_DIR:  str = os.environ.get("ASSESSMENT_HARVEST_DIR") or _default_harvest_dir()
 STATE_DIR:    pathlib.Path = pathlib.Path.home() / ".assessment"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -159,7 +167,9 @@ class AssessmentSession:
             notebook_path = cls._detect_notebook_path()
 
         notebook_id = pathlib.Path(notebook_path).name if notebook_path else "unknown_notebook"
-        username = os.environ.get("ASSESSMENT_USERNAME") or getpass.getuser()
+        username = (os.environ.get("ASSESSMENT_USERNAME")
+                    or os.environ.get("JUPYTERHUB_USER")
+                    or getpass.getuser())
 
         state = _load_state(notebook_id)
 
@@ -234,13 +244,14 @@ class AssessmentSession:
 
             # Determine notebook path
             nb_path = os.environ.get("ASSESSMENT_NOTEBOOK") or self._detect_notebook_path()
+            harvested = False
             if nb_path:
-                self._harvest(nb_path)
+                harvested = self._harvest(nb_path)
                 self._lock_notebook(nb_path)
 
             tag = "AUTO" if auto else "MANUAL"
             logger.info("[%s] Submission complete for %s", tag, self._state["username"])
-            print("\n✅  Submission recorded.  Your work has been saved securely.")
+            print("\n✅  " + ("Submission recorded.  Your work has been saved securely." if harvested else "Submission recorded locally, but the archive copy failed - tell the organiser."))
             print(f"    Username  : {self._state['username']}")
             print(f"    Submitted : {self._state['submission_time']} UTC")
 
@@ -299,7 +310,7 @@ class AssessmentSession:
         dur = (self._state.get("duration_minutes") or 0) * 60
         return max(0, int((dur - self._elapsed_seconds()) / 60))
 
-    def _harvest(self, nb_path: str) -> None:
+    def _harvest(self, nb_path: str) -> bool:
         """Copy the notebook to the instructor's submission harvest directory."""
         username = self._state["username"]
         dest_dir = pathlib.Path(HARVEST_DIR) / username
@@ -311,14 +322,16 @@ class AssessmentSession:
             # Also copy the state file for auditing
             shutil.copy2(str(_state_path(self.notebook_id)), dest_dir / f"{dest_name}.state.json")
             logger.info("Notebook harvested to %s", dest_dir / dest_name)
-        except PermissionError as exc:
+            return True
+        except OSError as exc:
             logger.error("Could not write to harvest dir %s: %s", dest_dir, exc)
+            return False
 
     def _lock_notebook(self, nb_path: str) -> None:
-        """Set notebook permissions to 000 (inaccessible) after submission."""
+        """Make the notebook read-only (chmod 444) after submission."""
         try:
-            os.chmod(nb_path, 0o000)
-            logger.info("Notebook locked (chmod 000): %s", nb_path)
+            os.chmod(nb_path, 0o444)
+            logger.info("Notebook locked read-only (chmod 444): %s", nb_path)
         except PermissionError as exc:
             logger.error("Could not lock notebook %s: %s", nb_path, exc)
 
@@ -345,7 +358,9 @@ class AssessmentSession:
 
         # 3. Scan the user's home for the most recently modified .ipynb
         home = pathlib.Path.home()
-        candidates = sorted(home.glob("*.ipynb"), key=os.path.getmtime, reverse=True)
+        exam_dir = home / "assessment"
+        search_dir = exam_dir if exam_dir.is_dir() else home
+        candidates = sorted(search_dir.glob("*.ipynb"), key=os.path.getmtime, reverse=True)
         return str(candidates[0]) if candidates else None
 
     @staticmethod

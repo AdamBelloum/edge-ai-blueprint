@@ -438,6 +438,14 @@ singleuser:
       - name: digitafrica-seed-cloud-computing-soa-module2-tests
         configMap:
           name: digitafrica-notebooks-cloud-computing-soa-module2-tests
+      - name: digitafrica-assessment-exam
+        configMap:
+          name: digitafrica-assessment-exam
+          optional: true
+      - name: digitafrica-assessment-tools
+        configMap:
+          name: digitafrica-assessment-tools
+          optional: true
 {% include 'workshop-hooks/cloud-module3-volumes.yaml.j2' %}
 {% if cloud_module5_delivery_enabled | default(false) | bool %}
       - name: digitafrica-runtime-module5-node
@@ -504,6 +512,9 @@ singleuser:
 {% endif %}
       - name: digitafrica-seed-beginner
         mountPath: /seed
+        readOnly: true
+      - name: digitafrica-assessment-tools
+        mountPath: /opt/workshop-assessment/scripts
         readOnly: true
 
   initContainers:
@@ -1545,6 +1556,44 @@ singleuser:
           fi
           # END CLOUD MODULE 5 SEEDING
 
+          # BEGIN ASSESSMENT EXAM SEEDING
+          # Optional generic exam published by the organiser. Delivered only when the
+          # published workshop context matches the active state. Existing files are kept.
+          assessment_source=/seed/assessment/exam
+          assessment_workspace=/home/jovyan/assessment
+          if [ -f "$assessment_source/exam.ipynb" ] \
+            && [ -f "$assessment_source/notebook_name" ] \
+            && [ -f "$assessment_source/workshop_type" ] \
+            && [ -f "$assessment_source/workshop_module" ]; then
+            assessment_exam_name="$(tr -d '\r\n' < "$assessment_source/notebook_name")"
+            assessment_exam_type="$(tr -d '\r\n' < "$assessment_source/workshop_type")"
+            assessment_exam_module="$(tr -d '\r\n' < "$assessment_source/workshop_module")"
+            assessment_exam_name_valid=false
+            case "$assessment_exam_name" in
+              [A-Za-z0-9]*.ipynb)
+                case "$assessment_exam_name" in
+                  *[!A-Za-z0-9._-]*) ;;
+                  *) assessment_exam_name_valid=true ;;
+                esac
+                ;;
+            esac
+            if [ "$assessment_exam_name_valid" != "true" ]; then
+              echo "[seed] WARNING: published assessment exam has an invalid name; not delivered." >&2
+            elif [ "$assessment_exam_type" != "$workshop_type" ] || [ "$assessment_exam_module" != "$workshop_module" ]; then
+              echo "[seed] Published assessment exam belongs to another workshop context; not delivered."
+            else
+              mkdir -p "$assessment_workspace"
+              chown 1000:100 "$assessment_workspace"
+              chmod 0755 "$assessment_workspace"
+              copy_seed_file \
+                "$assessment_source/exam.ipynb" \
+                "$assessment_workspace/$assessment_exam_name" \
+                false
+              echo "[seed] assessment exam delivered: $assessment_exam_name"
+            fi
+          fi
+          # END ASSESSMENT EXAM SEEDING
+
           echo "[seed] workshop type: $workshop_type"
           echo "[seed] workshop module: $workshop_module"
           echo "[seed] workshop mode: $mode"
@@ -1619,6 +1668,9 @@ singleuser:
           mountPath: /seed/cloud-computing-soa/module5
           readOnly: true
 {% endif %}
+        - name: digitafrica-assessment-exam
+          mountPath: /seed/assessment/exam
+          readOnly: true
         # This is the user PVC mount, made predictable via volumeNameTemplate: home.
         - name: home
           mountPath: /home/jovyan
