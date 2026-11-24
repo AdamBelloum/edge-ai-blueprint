@@ -12,6 +12,11 @@ notebook of every participant (per group) from the worker VMs into:
   <group>_<workshop>_<module-dir>_<person>_<YYYYMMDD>.ipynb   (date is UTC)
 <person> is the name slug from the participant's personal exam copy. Exams
 without personal copies (older exams) are collected per group, without <person>.
+When available, each notebook is accompanied by <name>.ipynb.state.json: the answers
+the exam functions had recorded by submit time (choices, text answers and a snapshot
+of code-cell variables). It is a fallback only: it contains no source code and may be
+absent, stale or incomplete. A missing or unusable one is reported as a WARNING and
+does not fail the collection.
 
 Participant data on the workers is only read: it is never changed or deleted.
 A temporary root-owned scratch copy (/var/tmp/assessment-collect.*) is made on
@@ -174,7 +179,7 @@ fi
 final_rc=0
 PYTHONDONTWRITEBYTECODE=1 python3 "$finalizer" \
   --staging "$stage" --dest "$dest" \
-  --workshop "$workshop" --module-dir "$module_dir" || final_rc=$?
+  --workshop "$workshop" --module-dir "$module_dir" | tee "$work/finalize.out" || final_rc=$?
 
 status=0
 if (( playbook_rc != 0 )); then
@@ -188,7 +193,13 @@ case "$final_rc" in
   *) printf 'ERROR: verification and placement failed (exit code %s).\n' "$final_rc" >&2; status=1 ;;
 esac
 if (( status == 0 )); then
-  printf 'Collection complete.\n'
+  warning_count="$(grep -c '^WARNING:' "$work/finalize.out" || true)"
+  if [[ "$warning_count" =~ ^[0-9]+$ ]] && (( warning_count > 0 )); then
+    printf 'Collection complete, with %s recorded-answer warning(s) (see WARNING lines above).\n' "$warning_count"
+    printf 'The notebooks were collected, but some recorded answers may not have been.\n'
+  else
+    printf 'Collection complete.\n'
+  fi
 else
   printf 'Only entries reported above as "collected" or "already collected" were placed; check the Summary line.\n' >&2
 fi
