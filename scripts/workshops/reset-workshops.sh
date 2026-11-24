@@ -473,5 +473,17 @@ printf '%s\n' \
   'RESET COMPLETE — supported cleanup stages and neutral release reconciliation succeeded.' \
   'Participant workspaces were removed; identity handling followed the selected account option.'
 
+# Collected assessment submissions are organiser output outside Kubernetes state.
+# Warn and ask separately; never removed automatically, even with --yes.
+# Exams, questions and solutions are not managed here.
+ASSESSMENT_RESET_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/assessment/reset-assessment-artifacts.sh"
+if [[ -x $ASSESSMENT_RESET_HELPER ]]; then
+  if ! "$ASSESSMENT_RESET_HELPER"; then
+    warn "Collected assessment submissions remain or could not be checked; the reset itself completed. Re-run: $ASSESSMENT_RESET_HELPER"
+  fi
+else
+  warn "Assessment reset helper missing or not executable: $ASSESSMENT_RESET_HELPER"
+fi
+
 warn 'Automated verification covers neutral release configuration and rollout, not effective Hub configuration or fresh notebook startup.'
 warn 'Cloud module 5 cleanup covers offline rehearsal only; any live external deployment requires separate verified cleanup.'
