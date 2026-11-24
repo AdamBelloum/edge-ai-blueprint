@@ -8,7 +8,7 @@
 #
 # Status:
 #   1) Create exam   - implemented via the manager (build_exam.py)
-#   2) Publish exam  - implemented (typed review gates, single-host ConfigMap publish)
+#   2) Publish exam  - implemented (y/N confirmation, single-host ConfigMap publish)
 #   3) Collect submissions - implemented via collect-submissions.sh (read-only fetch)
 #   4) Grade exam    - TODO
 #   5) Create badge  - TODO
@@ -44,7 +44,7 @@ assessment_controller_invoke() {
 
 # Publish one reviewed exam notebook for subsequently started participant servers.
 # Gates: interactive terminal, safe path/name/size, exactly one inventory host, a
-# publishable active workshop, then typed REVIEWED and PUBLISH confirmations.
+# publishable active workshop, then one y/N confirmation (default No).
 # The notebook is staged by Ansible copy into a per-run root-only directory (never
 # in command arguments), checksum-verified on the host and applied as the
 # digitafrica-assessment-exam ConfigMap.
@@ -129,7 +129,7 @@ python3 -c "$guard_py" remove --name "$stage_name" --dev "$stage_dev" \
 }
 
 assessment_controller_publish_exam_run() {
-  local result_file exam_path notebook_name size_bytes sha256 review typed rc=0
+  local result_file exam_path notebook_name size_bytes sha256 typed rc=0
   local state_script state_output active_type active_module active_cleanup
   local stage_id stage_dir stage_script remote_script
   local pinned_host stage_name stage_output stage_rec stage_host_id stage_rc guard_source
@@ -261,16 +261,11 @@ REMOTE_STATE
     'Existing participant copies are not replaced or revoked.' \
     'ConfigMap contents are readable by cluster users with access to this namespace.' \
     'Publish only a notebook that contains no answers or expected results.'
-  read -rp 'Type REVIEWED to confirm the notebook is answer-free: ' review || review=""
-  if [[ "$review" != "REVIEWED" ]]; then
-    log 'Publication cancelled: review not confirmed.'
-    return 2
-  fi
-  read -rp "Type PUBLISH to publish to ${active_type}/${active_module}: " typed || typed=""
-  if [[ "$typed" != "PUBLISH" ]]; then
-    log 'Publication cancelled.'
-    return 2
-  fi
+  read -rp "Confirm this notebook has no answers, then publish to ${active_type}/${active_module}? [y/N]: " typed || typed=""
+  case "$typed" in
+    y|Y|yes|YES|Yes) ;;
+    *) log 'Publication cancelled.'; return 2 ;;
+  esac
 
   stage_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
   if [[ ! "$stage_id" =~ ^[0-9a-f]{32}$ ]]; then
