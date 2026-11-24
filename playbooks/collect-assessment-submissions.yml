@@ -5,6 +5,8 @@
 # only that scratch directory is fetched, then removed.
 # Files go to a private staging directory on the control node; naming,
 # verification and final placement are handled by collect-submissions.sh.
+# Matching '<archive>.state.json' recorded-answer files are fetched best effort;
+# trouble with them is only ever a warning.
 - name: Collect latest assessment submissions per group and participant
   hosts: "{{ assessment_worker_group }}"
   become: true
@@ -41,6 +43,8 @@
           - (assessment_manifest['items'] | length == 0) or (assessment_manifest.out_dir is not none)
           - (assessment_manifest['items'] | map(attribute='name') | select('match', '^group_[0-9]+(_p[0-9a-f]{16})?_[0-9]{8}T[0-9]{6}\.ipynb$') | list | length) == (assessment_manifest['items'] | length)
           - (assessment_manifest['items'] | map(attribute='sha256') | select('match', '^[0-9a-f]{64}$') | list | length) == (assessment_manifest['items'] | length)
+          - (assessment_manifest['items'] | selectattr('state', 'defined') | map(attribute='state') | map(attribute='name') | select('match', '^group_[0-9]+(_p[0-9a-f]{16})?_[0-9]{8}T[0-9]{6}\.ipynb\.state\.json$') | list | length) == (assessment_manifest['items'] | selectattr('state', 'defined') | list | length)
+          - (assessment_manifest['items'] | selectattr('state', 'defined') | map(attribute='state') | map(attribute='sha256') | select('match', '^[0-9a-f]{64}$') | list | length) == (assessment_manifest['items'] | selectattr('state', 'defined') | list | length)
         quiet: true
 
     - name: Fetch the copies and the manifest, then remove the worker scratch directory
@@ -53,6 +57,20 @@
             flat: true
             validate_checksum: true
           loop: "{{ (assessment_manifest['items'] | map(attribute='name') | list + ['manifest.json']) if assessment_manifest['items'] else [] }}"
+        - name: Fetch recorded-answer files (best effort; a failure is only a warning)
+          ansible.builtin.fetch:
+            src: "{{ assessment_manifest.out_dir }}/{{ item }}"
+            dest: "{{ assessment_staging_dir }}/{{ inventory_hostname }}/{{ item }}"
+            flat: true
+            validate_checksum: true
+          loop: "{{ assessment_manifest['items'] | selectattr('state', 'defined') | map(attribute='state') | map(attribute='name') | list }}"
+          register: assessment_state_fetch
+          ignore_errors: true
+
+        - name: Report recorded-answer files that could not be fetched
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }}: recorded-answer file not fetched (notebooks unaffected): {{ assessment_state_fetch.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='item') | list }}"
+          when: assessment_state_fetch.results | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0
       always:
         - name: Remove the worker scratch directory (never participant data)
           ansible.builtin.file:
@@ -63,6 +81,11 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: {{ assessment_manifest.problems }}"
       when: assessment_manifest.problems | length > 0
+
+    - name: Report recorded-answer warnings from the helper (notebooks are still collected)
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ assessment_manifest['warnings'] }}"
+      when: (assessment_manifest['warnings'] | default([])) | length > 0
 
     - name: Summary
       ansible.builtin.debug:
