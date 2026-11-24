@@ -23,6 +23,7 @@ import tempfile
 
 MAX_BYTES = 50 * 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_STATE_BYTES = 1024 * 1024
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 GROUP_RE = re.compile(r"^group_[0-9]+$")
 TS_RE = re.compile(r"^[0-9]{8}T[0-9]{6}$")
@@ -167,7 +168,9 @@ def verify_item(hdir, host, item, problems, failed):
     if not valid:
         fail("not a valid notebook")
         return None
-    return {"group": group, "person": person, "timestamp": ts, "sha256": sha, "host": host, "data": data}
+    state, notes = load_state(hdir, item, person)
+    return {"group": group, "person": person, "timestamp": ts, "sha256": sha, "host": host,
+            "data": data, "state": state, "state_notes": notes}
 
 
 def load_candidates(staging, problems):
@@ -215,7 +218,8 @@ def select_latest(candidates, failed, problems):
             problems.append("%s: conflicting copies with timestamp %s on hosts %s; not collected"
                             % (label_, newest, ", ".join(sorted(c["host"] for c in top))))
             continue
-        selected.append(top[0])
+        # identical notebooks on several hosts: prefer the copy that has a usable sidecar
+        selected.append(next((c for c in top if c["state"]), top[0]))
     return selected
 
 
@@ -289,6 +293,73 @@ def place(dest, cand, prefix, problems):
         os.unlink(tmp)
 
 
+def load_state(hdir, item, person):
+    """Optional recorded-answer sidecar. Returns (dict or None, [notes]).
+    Any trouble is only a note: the notebook itself is still collected."""
+    meta = item.get("state")
+    if not meta:
+        return None, ["no recorded-answer file (.state.json) came with this submission"]
+    try:
+        sname, ssha, ssize = meta["name"], meta["sha256"], meta["size"]
+        if not (sname == item["name"] + ".state.json"
+                and isinstance(ssha, str) and SHA_RE.match(ssha)
+                and is_int(ssize) and 0 < ssize <= MAX_STATE_BYTES):
+            raise ValueError("unexpected manifest values")
+        data = read_regular(os.path.join(hdir, sname), MAX_STATE_BYTES)
+        if len(data) != ssize or hashlib.sha256(data).hexdigest() != ssha:
+            raise ValueError("checksum or size mismatch")
+        doc = json.loads(data)
+        if not isinstance(doc, dict):
+            raise ValueError("not a JSON object")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return None, ["recorded-answer file not usable (%s)" % clean(exc)]
+    notes = []
+    if person:
+        who = doc.get("participant")
+        if not (isinstance(who, str) and _slug(who) == person):
+            notes.append("participant name in the recorded-answer file differs from the notebook's; kept")
+    return {"data": data, "sha256": ssha}, notes
+
+
+def link_new(dest, data, final_name):
+    """Create dest/final_name (mode 0600) with data, never overwriting. False if the name exists."""
+    fd, tmp = tempfile.mkstemp(prefix=".incoming.", dir=dest)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(tmp, os.path.join(dest, final_name))
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        os.unlink(tmp)
+
+
+def place_state(dest, nb_name, cand, warnings):
+    """Place the sidecar next to the collected notebook. Returns 'collected',
+    'already present' or None. Trouble becomes a warning; nothing is overwritten."""
+    state = cand["state"]
+    if not state:
+        return None
+    sname = nb_name + ".state.json"
+    path = os.path.join(dest, sname)
+    try:
+        created = link_new(dest, state["data"], sname)
+        found = hashlib.sha256(read_regular(path, MAX_STATE_BYTES)).hexdigest()
+        if found != state["sha256"]:
+            warnings.append("%s: %s differs from the collected recorded-answer file; existing file kept, "
+                            "not overwritten" % (label(cand), clean(sname)))
+            return None
+        ensure_private(path)
+        return "collected" if created else "already present"
+    except (OSError, ValueError) as exc:
+        warnings.append("%s: could not place recorded-answer file (%s)" % (label(cand), clean(exc)))
+        return None
+
+
 def prepare_dest(dest):
     if os.path.lexists(dest):
         if not stat.S_ISDIR(os.lstat(dest).st_mode):
@@ -325,7 +396,8 @@ def main():
                         "nothing was placed (--allow-incomplete overrides)")
         selected = []
 
-    collected = already = 0
+    collected = already = s_new = s_have = 0
+    warnings = []
     if selected:
         prepare_dest(dest)
     for cand in selected:
@@ -342,6 +414,19 @@ def main():
             collected += 1
         else:
             already += 1
+        for note in cand["state_notes"]:
+            warnings.append("%s: %s" % (label(cand), note))
+        sstatus = place_state(dest, name, cand, warnings)
+        if sstatus:
+            print("%-17s recorded answers: %s" % ("", sstatus))
+            if sstatus == "collected":
+                s_new += 1
+            else:
+                s_have += 1
+    for line in warnings:
+        print("WARNING: %s" % line)
+    print("Recorded-answer files: %d collected, %d already present, %d warning(s)"
+          % (s_new, s_have, len(warnings)))
     for line in problems:
         print("PROBLEM: %s" % line)
     print("Summary: %d collected, %d already collected, %d problem(s)" % (collected, already, len(problems)))
