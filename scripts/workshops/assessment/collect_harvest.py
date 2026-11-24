@@ -5,6 +5,7 @@ Runs as root. Everything below the PVC directory is participant-controlled, so
 no path component is ever resolved through a symlink: every level is opened
 with O_NOFOLLOW relative to the directory descriptor of its parent.
 Prints a JSON manifest on stdout. Never modifies or deletes participant data.
+An optional '<archive>.state.json' recorded-answer sidecar is read the same way.
 """
 import argparse
 import hashlib
@@ -16,6 +17,7 @@ import sys
 import tempfile
 
 MAX_BYTES = 50 * 1024 * 1024
+MAX_STATE_BYTES = 1024 * 1024
 PVC_RE = re.compile(r"^pvc-[^/]+_digitafrica_claim-(group-[0-9]+)---[^/]+$")
 GROUP_DIR_RE = re.compile(r"^group_[0-9]+$")
 STEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -127,18 +129,18 @@ def find_candidates(storage_fd, stem, problems):
     return found
 
 
-def read_candidate(storage_fd, cand, out_path):
+def read_candidate(storage_fd, cand, out_path, fname=None, limit=MAX_BYTES):
     """Re-walk the path without following symlinks, hash (and optionally copy)."""
     chain = open_chain(storage_fd, [cand["pvc"], ".assessment", "submissions", cand["gdir"]])
     try:
-        fd = os.open(cand["fname"], FILE_FLAGS, dir_fd=chain[-1])
+        fd = os.open(fname or cand["fname"], FILE_FLAGS, dir_fd=chain[-1])
     finally:
         close_all(chain)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise ValueError("not a regular file")
-        if st.st_size > MAX_BYTES:
+        if st.st_size > limit:
             raise ValueError("file too large")
         src = os.fdopen(fd, "rb")
     except Exception:
@@ -155,7 +157,7 @@ def read_candidate(storage_fd, cand, out_path):
             if not chunk:
                 break
             size += len(chunk)
-            if size > MAX_BYTES:
+            if size > limit:
                 raise ValueError("file too large")
             digest.update(chunk)
             if dst:
@@ -173,6 +175,23 @@ def read_candidate(storage_fd, cand, out_path):
     return digest.hexdigest(), size
 
 
+def read_state(storage_fd, group, cand, name, out_dir, warnings):
+    """Optional '<archive>.state.json' beside the selected archive.
+    Missing is normal (older submissions); any other trouble is a warning, never a problem."""
+    out_path = os.path.join(out_dir, name + ".state.json") if out_dir else None
+    try:
+        sha, size = read_candidate(storage_fd, cand, out_path,
+                                   fname=cand["fname"] + ".state.json", limit=MAX_STATE_BYTES)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        warnings.append("%s%s: recorded-answer file not collected (%s)"
+                        % (group, (" [%s]" % show(cand["person"])) if cand["person"] else "",
+                           getattr(exc, "strerror", None) or exc))
+        return None
+    return {"name": name + ".state.json", "sha256": sha, "size": size}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", required=True)
@@ -183,6 +202,7 @@ def main():
         sys.exit("invalid --stem")
 
     problems = []
+    warnings = []
     items = []
     out_dir = None
     storage_fd = os.open(args.root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
@@ -206,11 +226,15 @@ def main():
             except (OSError, ValueError) as exc:
                 problems.append("%s: not collected (%s)" % (group, getattr(exc, "strerror", None) or exc))
                 continue
-            items.append({"group": group, "person": person, "timestamp": cand["timestamp"], "name": name,
-                          "sha256": sha, "size": size, "pvc": cand["pvc"]})
+            item = {"group": group, "person": person, "timestamp": cand["timestamp"], "name": name,
+                    "sha256": sha, "size": size, "pvc": cand["pvc"]}
+            state = read_state(storage_fd, group, cand, name, out_dir, warnings)
+            if state:
+                item["state"] = state
+            items.append(item)
     finally:
         os.close(storage_fd)
-    result = {"out_dir": out_dir, "items": items, "problems": problems}
+    result = {"out_dir": out_dir, "items": items, "problems": problems, "warnings": warnings}
     if out_dir:
         mfd = os.open(os.path.join(out_dir, "manifest.json"),
                       os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
