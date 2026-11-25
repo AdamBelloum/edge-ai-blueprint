@@ -245,6 +245,15 @@ def safe_identity(state, fallback):
     return fallback
 
 
+def safe_participant_name(state):
+    """Return only the explicitly supplied name, never an identity fallback."""
+    if isinstance(state, dict):
+        value = state.get("participant")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def safe_email(state):
     if isinstance(state, dict):
         value = state.get("participant_email")
@@ -678,6 +687,7 @@ def unusable_report(candidate, model_warnings, reason):
     }
     return {
         "identity": candidate["identity"],
+        "participant_name": safe_participant_name(candidate.get("state")),
         "participant_email": safe_email(candidate.get("state")),
         "stem": candidate["stem"],
         "notebook": candidate["notebook"].name if candidate["notebook"] else "(missing)",
@@ -752,6 +762,7 @@ def grade_candidate(candidate, model, model_warnings):
 
     return {
         "identity": candidate["identity"],
+        "participant_name": safe_participant_name(candidate.get("state")),
         "participant_email": safe_email(candidate.get("state")),
         "stem": candidate["stem"],
         "notebook": candidate["notebook"].name if candidate["notebook"] else "(missing)",
@@ -862,7 +873,8 @@ def prepare_output(path, harvest):
 def write_reports(reports, output_dir):
     buffer = io.StringIO(newline="")
     fields = [
-        "participant", "participant_email", "assessment_stem", "notebook", "status",
+        "participant", "participant_name", "participant_email",
+        "assessment_stem", "notebook", "status",
         "outcome", "correct_questions", "gradable_questions",
         "auto_score", "auto_max", "selected_max", "manual_count",
         "manual_items", "warnings",
@@ -876,6 +888,7 @@ def write_reports(reports, output_dir):
         )
         writer.writerow({
             "participant": report["identity"],
+            "participant_name": report["participant_name"],
             "participant_email": report["participant_email"],
             "assessment_stem": report["stem"],
             "notebook": report["notebook"],
