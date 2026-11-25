@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ninja-badge-issuer"
+version = "0.1.0"
+description = "Issue Ninja Badge PASS / PARTICIPATION badges to workshop participants"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+ninja-badge-issuer = "ninja_badge_issuer.cli:main"
+
+[tool.setuptools]
+packages = ["ninja_badge_issuer"]

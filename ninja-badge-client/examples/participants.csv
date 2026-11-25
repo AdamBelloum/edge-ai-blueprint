@@ -1,0 +1,5 @@
+name,email,assessment_status
+Ada Lovelace,ada@example.com,PASS
+Alan Turing,alan@example.com,FAIL
+Grace Hopper,grace@example.com,
+Edsger Dijkstra,edsger@example.com,No Show
