@@ -817,11 +817,115 @@ def record_choice(
     return None
 
 
-def record_code(cell_id: str, local_vars: Optional[Dict[str, Any]] = None) -> None:
+_PROBE_TIMEOUT_SEC = 2
+_PROBE_FORMAT = 1
+
+
+class _ProbeTimeout(BaseException):
+    """Raised by the SIGALRM guard when a probe runs too long."""
+
+
+def _json_native(value: Any):
+    """Return (ok, converted).  Only JSON-native data is accepted (tuples become lists)."""
+    import math
+    if value is None or isinstance(value, (bool, int, str)):
+        return True, value
+    if isinstance(value, float):
+        return (True, value) if math.isfinite(value) else (False, None)
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            ok, conv = _json_native(item)
+            if not ok:
+                return False, None
+            out.append(conv)
+        return True, out
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                return False, None
+            ok, conv = _json_native(item)
+            if not ok:
+                return False, None
+            out[key] = conv
+        return True, out
+    return False, None
+
+
+def _run_probes(local_vars, probes, probe_setup):
     """
-    Record a snapshot of the variables a participant's code produced, WITHOUT
-    grading it (exam mode).  Values are stored as truncated ``repr`` strings.
-    The submitted notebook itself (harvested at submission) holds the code.
+    Evaluate each probe expression against a copy of the participant's cell
+    locals, in order.  Results are data only; nothing is judged here.
+    """
+    import contextlib
+    import io
+    import signal
+
+    namespace = {k: v for k, v in (local_vars or {}).items() if not k.startswith("__")}
+    can_alarm = (hasattr(signal, "setitimer")
+                 and threading.current_thread() is threading.main_thread())
+
+    def _on_alarm(signum, frame):
+        raise _ProbeTimeout()
+
+    def _guarded(fn):
+        previous = None
+        if can_alarm:
+            previous = signal.signal(signal.SIGALRM, _on_alarm)
+            signal.setitimer(signal.ITIMER_REAL, _PROBE_TIMEOUT_SEC)
+        try:
+            return fn()
+        finally:
+            if can_alarm:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, previous)
+
+    results = []
+    setup_error = None
+    sink = io.StringIO()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        if probe_setup:
+            try:
+                _guarded(lambda: exec(compile(probe_setup, "<probe_setup>", "exec"), namespace))
+            except (Exception, _ProbeTimeout) as exc:
+                setup_error = type(exc).__name__
+        for expr in probes:
+            entry = {"probe": expr}
+            if setup_error:
+                entry["status"] = "setup_error"
+            else:
+                try:
+                    value = _guarded(lambda: eval(compile(expr, "<probe>", "eval"), namespace))
+                    try:
+                        ok, conv = _json_native(value)
+                    except RecursionError:
+                        ok, conv = False, None
+                    if ok:
+                        entry["status"] = "ok"
+                        entry["value"] = conv
+                    else:
+                        entry["status"] = "unserializable"
+                        entry["type"] = type(value).__name__
+                except _ProbeTimeout:
+                    entry["status"] = "timeout"
+                except Exception as exc:
+                    entry["status"] = "error"
+                    entry["error"] = type(exc).__name__
+            results.append(entry)
+    return {"results": results, "setup_error": setup_error, "timeout_guard": can_alarm}
+
+
+def record_code(cell_id: str, local_vars: Optional[Dict[str, Any]] = None,
+                probes: Optional[list] = None, probe_setup: Optional[str] = None) -> None:
+    """
+    Record what a participant's code produced, WITHOUT grading it (exam mode).
+
+    Without ``probes`` (old exams): a snapshot of truncated ``repr`` strings.
+    With ``probes``: the snapshot plus the recorded outputs of each probe
+    expression evaluated against the participant's cell locals.  The expected
+    values live only in the organiser's answer model; the grader compares
+    recorded outputs there.  Nothing about correctness is shown here.
     """
     snapshot: Dict[str, str] = {}
     for name, value in (local_vars or {}).items():
@@ -833,10 +937,20 @@ def record_code(cell_id: str, local_vars: Optional[Dict[str, Any]] = None) -> No
             text = "<unrepresentable>"
         snapshot[name] = text if len(text) <= 300 else text[:300] + "…"
 
+    payload: Any = snapshot
+    n_checks = 0
+    if probes:
+        outcome = _run_probes(local_vars, list(probes), probe_setup)
+        n_checks = len(outcome["results"])
+        payload = {"probe_format": _PROBE_FORMAT, "snapshot": snapshot,
+                   "probes": outcome["results"], "setup_error": outcome["setup_error"],
+                   "timeout_guard": outcome["timeout_guard"]}
+
     session = AssessmentSession.get_current()
     if session:
-        session.record_answer(cell_id, json.dumps(snapshot, sort_keys=True, ensure_ascii=False))
-    print(f"📝  Code for '{cell_id}' recorded ({len(snapshot)} variable(s)). "
+        session.record_answer(cell_id, json.dumps(payload, sort_keys=True, ensure_ascii=False))
+    extra = f", {n_checks} check(s) run" if n_checks else ""
+    print(f"📝  Code for '{cell_id}' recorded ({len(snapshot)} variable(s){extra}). "
           "Answers are not graded during the exam.")
     logger.info("[%s] Code answer recorded for cell %s.", getpass.getuser(), cell_id)
     return None

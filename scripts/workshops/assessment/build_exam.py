@@ -56,7 +56,105 @@ def info(msg: str) -> None: print(f"{_B}ℹ  {msg}{_RST}")
 # Schema validation
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VALID_TYPES = {"markdown", "qa", "code", "open_question"}
+VALID_TYPES = {"markdown", "qa", "code", "open_question", "cloze"}
+
+def _validate_cloze(q: Dict[str, Any], prefix: str, q_id: Any) -> List[str]:
+    """Validate a 'cloze' item: 2-4 numbered blanks, lettered word bank."""
+    import re
+    errs: List[str] = []
+    where = f"{prefix} (id={q_id})"
+    bank = q.get("word_bank")
+    blanks = q.get("blanks")
+
+    if not isinstance(bank, list) or not bank:
+        return [f"{where}: 'word_bank' must be a non-empty list."]
+    texts = [str(b).strip() for b in bank]
+    if any(not t for t in texts):
+        errs.append(f"{where}: 'word_bank' contains an empty entry.")
+    if len({t.lower() for t in texts}) != len(texts):
+        errs.append(f"{where}: 'word_bank' entries must be unique.")
+    if len(texts) > 26:
+        errs.append(f"{where}: 'word_bank' has more than 26 entries.")
+
+    if "answers" in q:
+        errs.append(f"{where}: 'answers' is not allowed in a cloze; correct "
+                    "letters belong only in the separate answer model.")
+    if isinstance(blanks, bool) or not isinstance(blanks, int) or not 2 <= blanks <= 4:
+        errs.append(f"{where}: 'blanks' must be an integer from 2 to 4.")
+        return errs
+    n = blanks
+    if len(texts) < n + 2:
+        errs.append(f"{where}: 'word_bank' needs at least 2 distractors "
+                    f"(>= {n + 2} entries for {n} blanks).")
+
+    markers = [int(m) for m in re.findall(r"\[(\d+)\]", str(q.get("content", "")))]
+    if sorted(markers) != list(range(1, n + 1)):
+        errs.append(f"{where}: 'content' must contain each marker [1]..[{n}] "
+                    f"exactly once (found {markers}).")
+
+    return errs
+
+
+PROBE_MAX = 8
+
+
+def _validate_probes(q: Dict[str, Any], prefix: str, q_id: Any, q_type: str) -> List[str]:
+    """
+    Validate the optional 'probes' / 'probe_setup' fields of a code question.
+
+    Probes are visible, expression-only call examples; their observed results
+    are recorded in the sidecar.  They must never carry an expected value.
+    """
+    has_probes = "probes" in q
+    has_setup = "probe_setup" in q
+    if not (has_probes or has_setup):
+        return []
+    where = f"{prefix} (id={q_id})"
+    if q_type != "code":
+        return [f"{where}: 'probes'/'probe_setup' are only allowed on type 'code'."]
+    errs: List[str] = []
+    if has_setup and not has_probes:
+        errs.append(f"{where}: 'probe_setup' requires 'probes'.")
+    if has_probes:
+        probes = q["probes"]
+        if not isinstance(probes, list) or not 1 <= len(probes) <= PROBE_MAX:
+            errs.append(f"{where}: 'probes' must be a list of 1-{PROBE_MAX} expressions.")
+        else:
+            seen: set = set()
+            for k, p in enumerate(probes, start=1):
+                tag = f"{where}: probes[{k}]"
+                if not isinstance(p, str) or not p or p != p.strip() or "\n" in p:
+                    errs.append(f"{tag} must be a non-empty one-line string with no leading/trailing spaces.")
+                    continue
+                if p in seen:
+                    errs.append(f"{tag} duplicates an earlier probe.")
+                seen.add(p)
+                try:
+                    tree = ast.parse(p, mode="eval")
+                except SyntaxError as exc:
+                    errs.append(f"{tag} is not a valid Python expression: {exc.msg}.")
+                    continue
+                body = tree.body
+                if isinstance(body, (ast.Compare, ast.BoolOp)) or (
+                    isinstance(body, ast.UnaryOp) and isinstance(body.op, ast.Not)
+                ):
+                    errs.append(f"{tag} must not compare or combine values; expected values never appear in the notebook.")
+                if not any(isinstance(n, ast.Call) for n in ast.walk(tree)):
+                    errs.append(f"{tag} must contain a call to the participant's code.")
+    if has_setup:
+        setup = q["probe_setup"]
+        if not isinstance(setup, str) or not setup.strip() or len(setup) > 2000:
+            errs.append(f"{where}: 'probe_setup' must be a non-empty string of at most 2000 characters.")
+        else:
+            try:
+                stree = ast.parse(setup)
+            except SyntaxError as exc:
+                errs.append(f"{where}: 'probe_setup' is not valid Python: {exc.msg}.")
+            else:
+                if any(isinstance(n, ast.Assert) for n in ast.walk(stree)):
+                    errs.append(f"{where}: 'probe_setup' must not contain assert statements.")
+    return errs
+
 
 def _validate_definition(defn: Dict[str, Any]) -> List[str]:
     """
@@ -112,9 +210,14 @@ def _validate_definition(defn: Dict[str, Any]) -> List[str]:
                     f"{prefix} (id={q_id}): 'options' must be a list."
                 )
 
+        if q_type == "cloze":
+            errors.extend(_validate_cloze(q, prefix, q_id))
+
         if q_type == "code":
             if "initial_code" not in q:
                 warn(f"{prefix} (id={q_id}): 'initial_code' not set — an empty stub will be used.")
+
+        errors.extend(_validate_probes(q, prefix, q_id, q_type))
 
     return errors
 
@@ -124,7 +227,7 @@ def _validate_definition(defn: Dict[str, Any]) -> List[str]:
 # Question selection (--num-questions)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SELECTABLE_TYPES = ("qa", "code", "open_question")
+SELECTABLE_TYPES = ("qa", "code", "open_question", "cloze")
 
 
 def _allocate_quotas(counts: Dict[str, int], n: int, rng: random.Random) -> Dict[str, int]:
@@ -389,6 +492,41 @@ def _qa_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
     return [md_cell, code_cell]
 
 
+def _runtime_supports_probes() -> bool:
+    """True if the sibling assessment_tools.py defines record_code(..., probes, probe_setup)."""
+    from pathlib import Path
+    tools = Path(__file__).with_name("assessment_tools.py")
+    try:
+        tree = ast.parse(tools.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "record_code":
+            names = {a.arg for a in node.args.args + node.args.kwonlyargs}
+            return {"probes", "probe_setup"} <= names
+    return False
+
+
+def _record_call(q: Dict[str, Any]) -> str:
+    """Source of the final record_code(...) call; identical to the old form without probes."""
+    q_id = q["id"]
+    probes = q.get("probes")
+    if not probes:
+        return f'record_code("{q_id}", locals())'
+    if not _runtime_supports_probes():
+        raise ValueError(
+            f"question {q_id}: 'probes' need an assessment_tools.record_code that accepts "
+            "probes/probe_setup; refusing to build a notebook that the runtime cannot record."
+        )
+    lines = ["record_code(", f'        "{q_id}", locals(),', "        probes=["]
+    lines += [f"            {p!r}," for p in probes]
+    lines.append("        ],")
+    if q.get("probe_setup"):
+        lines.append(f"        probe_setup={q['probe_setup']!r},")
+    lines.append("    )")
+    return "\n".join(lines)
+
+
 def _code_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
     """
     Returns [markdown prompt cell, code cell] for a practical coding question.
@@ -400,6 +538,7 @@ def _code_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
     max_runs = q.get("max_runs", default_max_runs)
     stub     = textwrap.dedent(q.get("initial_code", "# Write your solution here\npass")).strip("\n")
     body     = textwrap.indent(stub, "    ") if stub else "    pass"
+    record_call = _record_call(q)
 
     source = "\n".join([
         "from assessment_tools import limit_executions, record_code",
@@ -409,7 +548,7 @@ def _code_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
         "    # ── Your code below — edit freely inside this function ──",
         body,
         "",
-        f'    return record_code("{q_id}", locals())',
+        f"    return {record_call}",
         "",
         f"solve_{q_id}()",
         "",
@@ -423,6 +562,62 @@ def _code_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
     code_cell_obj = new_code_cell(source)
     code_cell_obj.metadata["tags"] = [f"question-{q_id}", "code-cell"]
     return [md_cell, code_cell_obj]
+
+
+def _cloze_cell(q: Dict[str, Any], default_max_runs: int) -> List[Any]:
+    """
+    Returns [markdown prompt cell, code answer cell] for a cloze item.
+
+    Answer-free: the cell only records the chosen letter per blank as
+    '<id>.<n>'.  All inputs are checked before anything is recorded, but the
+    saves are separate calls, so this is not atomic.  Correct letters live only
+    in the separate answer model used by the organiser-side grader.
+    """
+    q_id     = q["id"]
+    max_runs = q.get("max_runs", default_max_runs)
+    bank     = [str(b).strip() for b in q["word_bank"]]
+    letters  = [chr(65 + i) for i in range(len(bank))]
+    n        = int(q["blanks"])
+
+    bank_md = "\n".join(f"- **{l})** {t}" for l, t in zip(letters, bank))
+    prompt_md = (
+        f"### Question `{q_id}` *(Fill in the blanks)*\n\n"
+        f"{str(q['content']).strip()}\n\n"
+        f"**Word bank**\n\n{bank_md}\n\n"
+        "Choose one letter from the word bank for each blank. Your answers are "
+        "recorded when you run the cell below; all blanks must be filled."
+    )
+    md_cell = new_markdown_cell(prompt_md)
+    md_cell.metadata["editable"] = False
+    md_cell.metadata["deletable"] = False
+
+    picks = ", ".join(f'"{i}": blank_{i}' for i in range(1, n + 1))
+    lines = [
+        "from assessment_tools import limit_executions, record_choice",
+        "",
+        f'@limit_executions("{q_id}", max_runs={max_runs})',
+        f"def answer_{q_id}():",
+    ]
+    for i in range(1, n + 1):
+        lines.append(f'    blank_{i} = ""  # <-- letter for blank [{i}]')
+    lines += [
+        "",
+        f"    picks = {{{picks}}}",
+        f"    valid = {letters!r}",
+        "    cleaned = {k: str(v).strip().upper() for k, v in picks.items()}",
+        "    missing = [k for k, v in cleaned.items() if v not in valid]",
+        "    if missing:",
+        '        print("⚠️   Nothing recorded — choose a letter ({}) for blank(s): {}".format("/".join(valid), ", ".join("[" + k + "]" for k in missing)))',
+        "        return None",
+        "    for k, v in cleaned.items():",
+        f'        record_choice("{q_id}." + k, v, options=valid)',
+        "",
+        f"answer_{q_id}()",
+        "",
+    ]
+    code_cell = new_code_cell("\n".join(lines))
+    code_cell.metadata["tags"] = [f"question-{q_id}", "cloze-cell"]
+    return [md_cell, code_cell]
 
 
 def _open_question_cell(q: Dict[str, Any]) -> List[Any]:
@@ -523,6 +718,8 @@ def build_notebook(defn: Dict[str, Any], config: Dict[str, Any]) -> nbformat.Not
             cells.extend(_code_cell(q, default_max_runs))
         elif q_type == "open_question":
             cells.extend(_open_question_cell(q))
+        elif q_type == "cloze":
+            cells.extend(_cloze_cell(q, default_max_runs))
         else:
             warn(f"Unknown question type '{q_type}' for id='{q.get('id')}' — skipping.")
 
