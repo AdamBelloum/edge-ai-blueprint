@@ -144,7 +144,8 @@ class LiveNinjaBadgeClient:
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
 
     def _request(self, method: str, path: str, parameters: Optional[dict] = None) -> Any:
-        data = json.dumps({"parameters": parameters}).encode() if parameters is not None else None
+        # The live API reads fields from the top level of the body (verified with curl), not from the documented {"parameters": {...}} wrapper.
+        data = json.dumps(parameters).encode() if parameters is not None else None
         req = urllib.request.Request(
             self.base_url + path, data=data, method=method,
             headers={"Accept": "application/json", "Content-Type": "application/json",
