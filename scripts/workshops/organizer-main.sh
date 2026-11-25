@@ -97,7 +97,7 @@ Actions:
   reset-participants      Remove participant identities and credential exports only.
   release-solutions       Release advanced Federated Learning reference solutions.
   flower                  Open the Flower lifecycle manager.
-  assessment              Open the Assessment menu (create and publish exams, collect submissions; grading and badges TODO).
+  assessment              Open the Assessment menu (create and publish exams, collect submissions, create badges; grading TODO).
 
 Options:
   --mode beginner|advanced

@@ -11,7 +11,7 @@
 #   2) Publish exam  - implemented (y/N confirmation, single-host ConfigMap publish)
 #   3) Collect submissions - implemented via collect-submissions.sh (read-only fetch)
 #   4) Grade exam    - TODO
-#   5) Create badge  - TODO
+#   5) Create badge  - issue Ninja Badges from a reviewed summary.csv
 
 ASSESSMENT_CONTROLLER_DIR="$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd
@@ -409,6 +409,30 @@ assessment_controller_collect_submissions() {
   return 0
 }
 
+# Issue Ninja Badges from a reviewed grading summary. The wrapper is interactive,
+# exports the badge list, runs a dry run and asks for typed confirmation.
+assessment_controller_create_badges() {
+  local script="${ASSESSMENT_CONTROLLER_DIR}/../assessment/create-badges.sh"
+  local rc=0
+
+  if [[ ! -t 0 ]]; then
+    printf 'Creating badges requires an interactive terminal.\n' >&2
+    return 0
+  fi
+  if [[ ! -r "$script" ]]; then
+    printf 'Badge script not found or unreadable: %s\n' "$script" >&2
+    return 0
+  fi
+  bash "$script" || rc=$?
+  case "$rc" in
+    0) ;;
+    2) printf 'Badge creation cancelled or prerequisites missing. No badges were issued.\n' ;;
+    *) printf 'Badge creation did not complete (exit code %s). See messages above.\n' \
+         "$rc" >&2 ;;
+  esac
+  return 0
+}
+
 run_assessment_menu() {
   local choice
 
@@ -418,7 +442,7 @@ run_assessment_menu() {
     workshop_ui_option 2 "Publish exam   (make a reviewed exam available to participants)"
     workshop_ui_option 3 "Collect submissions (fetch latest notebook per participant)"
     workshop_ui_option 4 "Grade exam     (TODO)"
-    workshop_ui_option 5 "Create badge   (TODO)"
+    workshop_ui_option 5 "Create badge   (issue badges from a reviewed grading summary)"
     workshop_ui_option 0 "Back"
     workshop_ui_prompt
 
@@ -432,7 +456,7 @@ run_assessment_menu() {
       2) assessment_controller_publish_exam ;;
       3) assessment_controller_collect_submissions ;;
       4) printf 'Grade exam is not implemented yet (TODO).\n' ;;
-      5) printf 'Create badge is not implemented yet (TODO).\n' ;;
+      5) assessment_controller_create_badges ;;
       0) return 0 ;;
       *) printf 'Invalid selection: %s\n' "$choice" >&2 ;;
     esac
