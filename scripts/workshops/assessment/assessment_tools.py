@@ -402,6 +402,10 @@ class AssessmentSession:
         if participant_name and not state.get("participant"):
             state["participant"] = participant_name
             state["participant_slug"] = participant_slug(participant_name)
+        if (participant_name or state.get("participant")) and not state.get("participant_email"):
+            state["participant_email"] = input(
+                "Enter your email address for your personal assessment record: "
+            ).strip()
         if notebook_path or participant_name:
             _save_state(notebook_id, state)
 

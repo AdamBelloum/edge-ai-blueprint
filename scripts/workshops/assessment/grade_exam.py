@@ -238,11 +238,19 @@ def parse_exam(path, model):
 
 def safe_identity(state, fallback):
     if isinstance(state, dict):
-        for field in ("username", "participant_slug", "participant"):
+        for field in ("participant", "participant_slug"):
             value = state.get(field)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return fallback
+
+
+def safe_email(state):
+    if isinstance(state, dict):
+        value = state.get("participant_email")
+        if isinstance(value, str):
+            return value.strip()
+    return ""
 
 
 def stem_and_timestamp(path, state=None):
@@ -670,9 +678,13 @@ def unusable_report(candidate, model_warnings, reason):
     }
     return {
         "identity": candidate["identity"],
+        "participant_email": safe_email(candidate.get("state")),
         "stem": candidate["stem"],
         "notebook": candidate["notebook"].name if candidate["notebook"] else "(missing)",
         "state": "INCOMPLETE",
+        "outcome": "PENDING REVIEW",
+        "correct_questions": 0,
+        "gradable_questions": 0,
         "not_graded": True,
         "auto_score": 0,
         "auto_max": 0,
@@ -706,6 +718,14 @@ def grade_candidate(candidate, model, model_warnings):
     auto_score = sum(item["awarded"] for item in automatic)
     auto_max = sum(item["points"] for item in automatic)
     manual_items = [item for item in results if item["status"] == "MANUAL"]
+    correct_questions = sum(item["status"] == "CORRECT" for item in automatic)
+    gradable_questions = len(automatic)
+    if manual_items or gradable_questions == 0:
+        outcome = "PENDING REVIEW"
+    elif 2 * correct_questions >= gradable_questions:
+        outcome = "PASS"
+    else:
+        outcome = "NO PASS"
     warnings = list(model_warnings)
 
     if candidate["older_count"]:
@@ -732,9 +752,13 @@ def grade_candidate(candidate, model, model_warnings):
 
     return {
         "identity": candidate["identity"],
+        "participant_email": safe_email(candidate.get("state")),
         "stem": candidate["stem"],
         "notebook": candidate["notebook"].name if candidate["notebook"] else "(missing)",
         "state": "INCOMPLETE" if manual_items else "COMPLETE",
+        "outcome": outcome,
+        "correct_questions": correct_questions,
+        "gradable_questions": gradable_questions,
         "auto_score": auto_score,
         "auto_max": auto_max,
         "selected_max": selected_max,
@@ -769,6 +793,11 @@ def render_report(report):
         "# Organiser grading report",
         "",
         "Participant: " + safe_label(report["identity"]),
+        "Email: " + safe_label(report["participant_email"] or "(not provided)"),
+        "Outcome: **" + report["outcome"] + "**",
+        "Correct gradable questions: "
+        + str(report["correct_questions"]) + " / "
+        + str(report["gradable_questions"]),
         "Notebook: " + safe_label(report["notebook"]),
         "Assessment stem: " + safe_label(report["stem"]),
         "Status: **" + report["state"] + "**",
@@ -833,7 +862,8 @@ def prepare_output(path, harvest):
 def write_reports(reports, output_dir):
     buffer = io.StringIO(newline="")
     fields = [
-        "participant", "assessment_stem", "notebook", "status",
+        "participant", "participant_email", "assessment_stem", "notebook", "status",
+        "outcome", "correct_questions", "gradable_questions",
         "auto_score", "auto_max", "selected_max", "manual_count",
         "manual_items", "warnings",
     ]
@@ -846,9 +876,13 @@ def write_reports(reports, output_dir):
         )
         writer.writerow({
             "participant": report["identity"],
+            "participant_email": report["participant_email"],
             "assessment_stem": report["stem"],
             "notebook": report["notebook"],
             "status": report["state"],
+            "outcome": report["outcome"],
+            "correct_questions": report["correct_questions"],
+            "gradable_questions": report["gradable_questions"],
             "auto_score": report["auto_score"],
             "auto_max": report["auto_max"],
             "selected_max": report["selected_max"],
@@ -869,7 +903,7 @@ def main():
     parser.add_argument("--model", required=True, help="private answer-model file")
     parser.add_argument("--harvest", required=True, help="collected submissions directory")
     parser.add_argument("--out", required=True, help="new, private report directory outside --harvest")
-    parser.add_argument("--user", help="grade only the exact sidecar username/participant identifier")
+    parser.add_argument("--user", help="grade only the exact self-entered participant identifier")
     args = parser.parse_args()
 
     try:
