@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-ledger", action="store_true", help="disable the duplicate-issuance ledger")
     p.add_argument("--min-interval", type=float, default=0.3, help="seconds between API calls (default 0.3)")
     p.add_argument("-q", "--quiet", action="store_true", help="no progress on stderr")
+    p.add_argument("--send-from-report", metavar="REPORT",
+                   help="email recipients from a reviewed report CSV (status=issued, not yet emailed), then exit")
+    p.add_argument("--skip", action="append", metavar="EMAIL",
+                   help="exclude this email from --send-from-report (repeatable)")
+    p.add_argument("--yes", action="store_true",
+                   help="do not prompt before sending with --send-from-report")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -63,10 +69,45 @@ def list_badges(args) -> int:
     return 0
 
 
+def send_report_emails(args) -> int:
+    from .api import LiveNinjaBadgeClient, MockNinjaBadgeClient
+    from .notify import send_from_report
+    err = sys.stderr
+    try:
+        cfg = load_config(args.config)
+        client = MockNinjaBadgeClient() if args.dry_run else LiveNinjaBadgeClient(cfg.api_key, cfg.base_url)
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=err)
+        return 2
+
+    def confirm(n):
+        if args.yes:
+            return True
+        ans = input(f"Send {n} email(s) from {args.send_from_report}? Type 'yes' to continue: ")
+        return ans.strip().lower() == "yes"
+
+    def progress(i, total, row, outcome):
+        if not args.quiet:
+            print(f"[{i}/{total}] {outcome.upper():10} {row.get('email', '')}", file=err)
+
+    try:
+        s = send_from_report(args.send_from_report, client, skip=args.skip or [],
+                             dry_run=args.dry_run, min_interval_s=args.min_interval,
+                             confirm=confirm, on_progress=progress)
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=err)
+        return 2
+    print(json.dumps(s, indent=2), file=err)
+    return 0 if s["failed"] == 0 and s["unknown"] == 0 and not s["aborted"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     err = sys.stderr
+
+    if args.send_from_report:
+        return send_report_emails(args)
 
     if args.list_badges:
         return list_badges(args)
