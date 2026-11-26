@@ -11,7 +11,7 @@ Ninja Badges. Steps: confirm review, export the badge list, dry run, then
 typed confirmation before live issuance.
 
 Files are written next to the summary.csv (private report directory):
-  badge_list_<UTC>.csv, badge_dry_run_<UTC>.json, badge_issue_<UTC>.json
+  badge_list_<UTC>.csv, badge_dry_run_<UTC>.json, badge_issue_<UTC>.csv
 Config: secrets/ninja_badge.ini (override: NINJA_BADGE_CONFIG) or the
 environment variable NINJA_BADGE_API_KEY.
 Duplicate-issuance ledger: secrets/ninja_badge_ledger.json.
@@ -91,7 +91,7 @@ read -r -p 'Have you verified every grade? Type REVIEWED to continue: ' answer
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 badge_list="$out_dir/badge_list_${ts}.csv"
 dry_report="$out_dir/badge_dry_run_${ts}.json"
-live_report="$out_dir/badge_issue_${ts}.json"
+live_report="$out_dir/badge_issue_${ts}.csv"
 umask 077
 
 export_args=(--summary "$summary" --out "$badge_list" --confirm-reviewed)

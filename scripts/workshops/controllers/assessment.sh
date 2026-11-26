@@ -433,6 +433,30 @@ assessment_controller_create_badges() {
   return 0
 }
 
+# Send participant thank-you emails from the issued badge report. The wrapper is
+# interactive, offers preview, drafts, a test mail, or a confirmed send.
+assessment_controller_send_thanks() {
+  local script="${ASSESSMENT_CONTROLLER_DIR}/../assessment/send-thanks.sh"
+  local rc=0
+
+  if [[ ! -t 0 ]]; then
+    printf 'Sending thank-you emails requires an interactive terminal.\n' >&2
+    return 0
+  fi
+  if [[ ! -r "$script" ]]; then
+    printf 'Thank-you script not found or unreadable: %s\n' "$script" >&2
+    return 0
+  fi
+  bash "$script" || rc=$?
+  case "$rc" in
+    0) ;;
+    2) printf 'Thank-you step cancelled or prerequisites missing. No emails were sent.\n' ;;
+    *) printf 'Thank-you step did not complete (exit code %s). See messages above.\n' \
+         "$rc" >&2 ;;
+  esac
+  return 0
+}
+
 run_assessment_menu() {
   local choice
 
@@ -443,6 +467,7 @@ run_assessment_menu() {
     workshop_ui_option 3 "Collect submissions (fetch latest notebook per participant)"
     workshop_ui_option 4 "Grade exam     (TODO)"
     workshop_ui_option 5 "Create badge   (issue badges from a reviewed grading summary)"
+    workshop_ui_option 6 "Send thanks    (email participants their badge links)"
     workshop_ui_option 0 "Back"
     workshop_ui_prompt
 
@@ -457,6 +482,7 @@ run_assessment_menu() {
       3) assessment_controller_collect_submissions ;;
       4) printf 'Grade exam is not implemented yet (TODO).\n' ;;
       5) assessment_controller_create_badges ;;
+      6) assessment_controller_send_thanks ;;
       0) return 0 ;;
       *) printf 'Invalid selection: %s\n' "$choice" >&2 ;;
     esac
