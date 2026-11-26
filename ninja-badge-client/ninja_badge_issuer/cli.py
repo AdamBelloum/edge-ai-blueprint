@@ -52,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exclude this email from --send-from-report (repeatable)")
     p.add_argument("--yes", action="store_true",
                    help="do not prompt before sending with --send-from-report")
+    p.add_argument("--send-thanks", metavar="REPORT",
+                   help="send organiser thank-you emails with badge links from a reviewed report CSV")
+    p.add_argument("--thanks-template", metavar="FILE",
+                   help="thank-you text file; optional first line 'Subject: ...', then the body")
+    p.add_argument("--mail-config", metavar="FILE",
+                   help="SMTP/sender config (default: mail.ini, secrets/mail.ini, ~/.ninja_mail.ini)")
+    p.add_argument("--eml-dir", metavar="DIR",
+                   help="with --send-thanks: write one .eml draft per participant instead of sending")
+    p.add_argument("--test-to", metavar="ADDR",
+                   help="with --send-thanks: send one [TEST] message to ADDR; the report is not changed")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -101,10 +111,62 @@ def send_report_emails(args) -> int:
     return 0 if s["failed"] == 0 and s["unknown"] == 0 and not s["aborted"] else 1
 
 
+def send_thanks_cmd(args) -> int:
+    import configparser
+    from .thanks import DEFAULT_BODY, DEFAULT_SUBJECT, load_mail_config, send_thanks
+    err = sys.stderr
+    if args.send_from_report:
+        print("error: use either --send-thanks or --send-from-report, not both", file=err)
+        return 2
+    subject_tpl, body_tpl = DEFAULT_SUBJECT, DEFAULT_BODY
+    try:
+        if args.thanks_template:
+            text = Path(args.thanks_template).read_text(encoding="utf-8")
+            first, _, rest = text.partition("\n")
+            if first.lower().startswith("subject:"):
+                subject_tpl, body_tpl = first[len("subject:"):].strip(), rest.lstrip("\n")
+            else:
+                body_tpl = text
+        needs_smtp = not (args.dry_run or args.eml_dir)
+        cfg = load_mail_config(args.mail_config, need_smtp=needs_smtp)
+    except (OSError, ValueError, configparser.Error) as e:
+        print(f"error: {e}", file=err)
+        return 2
+
+    def confirm(n):
+        if args.yes:
+            return True
+        ans = input(f"Send {n} thank-you email(s) from {cfg.from_address}? Type 'yes' to continue: ")
+        return ans.strip().lower() == "yes"
+
+    def progress(i, total, row, outcome):
+        if not args.quiet:
+            print(f"[{i}/{total}] {outcome.upper():10} {row.get('email', '')}", file=err)
+
+    try:
+        s = send_thanks(args.send_thanks, cfg, subject_tpl=subject_tpl, body_tpl=body_tpl,
+                        skip=args.skip or [], dry_run=args.dry_run, eml_dir=args.eml_dir,
+                        test_to=args.test_to, min_interval_s=args.min_interval,
+                        confirm=confirm, on_progress=progress)
+    except (OSError, ValueError, Exception) as e:
+        print(f"error: {e}", file=err)
+        return 2
+    if args.dry_run and s.get("preview"):
+        print("--- preview of the first message ---", file=err)
+        print(s["preview"], file=err)
+    s.pop("preview", None)
+    print(json.dumps(s, indent=2), file=err)
+    ok = s["failed"] == 0 and s["unknown"] == 0 and not s["aborted"] and "error" not in s
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     err = sys.stderr
+
+    if args.send_thanks:
+        return send_thanks_cmd(args)
 
     if args.send_from_report:
         return send_report_emails(args)

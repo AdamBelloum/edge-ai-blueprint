@@ -1,0 +1,16 @@
+# Copy to mail.ini (or secrets/mail.ini, or ~/.ninja_mail.ini) and fill in.
+# Never commit the real file. Restrict it with: chmod 600 mail.ini
+# security: starttls | ssl | none   (none is refused when a username is set)
+# The password may instead be supplied via the NINJA_SMTP_PASSWORD environment variable.
+[smtp]
+host = smtp.example.org
+port = 587
+security = starttls
+username = your.login
+password =
+
+[message]
+from_name = DigitAfrica training team
+from_address = training@example.org
+reply_to =
+signature = DigitAfrica training team
