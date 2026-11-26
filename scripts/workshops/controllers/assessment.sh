@@ -10,7 +10,7 @@
 #   1) Create exam   - implemented via the manager (build_exam.py)
 #   2) Publish exam  - implemented (y/N confirmation, single-host ConfigMap publish)
 #   3) Collect submissions - implemented via collect-submissions.sh (read-only fetch)
-#   4) Grade exam    - TODO
+#   4) Grade exam    - implemented via grade-exam.sh (private reports)
 #   5) Create badge  - issue Ninja Badges from a reviewed summary.csv
 
 ASSESSMENT_CONTROLLER_DIR="$(
@@ -457,6 +457,27 @@ assessment_controller_send_thanks() {
   return 0
 }
 
+# Grade the collected submissions against the answer model. Interactive; writes
+# private reports outside the repository (see grade-exam.sh).
+assessment_controller_grade_exam() {
+  local script="${ASSESSMENT_CONTROLLER_DIR}/../assessment/grade-exam.sh"
+  local rc=0
+
+  if [[ ! -t 0 ]]; then
+    printf 'Grading requires an interactive terminal.\n' >&2
+    return 0
+  fi
+  if [[ ! -r "$script" ]]; then
+    printf 'Grade script not found or unreadable: %s\n' "$script" >&2
+    return 0
+  fi
+  bash "$script" || rc=$?
+  if (( rc != 0 )); then
+    printf 'Grade exam did not complete (exit code %s). See messages above.\n' "$rc" >&2
+  fi
+  return 0
+}
+
 run_assessment_menu() {
   local choice
 
@@ -465,7 +486,7 @@ run_assessment_menu() {
     workshop_ui_option 1 "Create exam    (build exam notebook from a question file)"
     workshop_ui_option 2 "Publish exam   (make a reviewed exam available to participants)"
     workshop_ui_option 3 "Collect submissions (fetch latest notebook per participant)"
-    workshop_ui_option 4 "Grade exam     (TODO)"
+    workshop_ui_option 4 "Grade exam     (grade collected submissions; private reports)"
     workshop_ui_option 5 "Create badge   (issue badges from a reviewed grading summary)"
     workshop_ui_option 6 "Send thanks    (email participants their badge links)"
     workshop_ui_option 0 "Back"
@@ -480,7 +501,7 @@ run_assessment_menu() {
       1) assessment_controller_invoke "Create exam" generate-menu ;;
       2) assessment_controller_publish_exam ;;
       3) assessment_controller_collect_submissions ;;
-      4) printf 'Grade exam is not implemented yet (TODO).\n' ;;
+      4) assessment_controller_grade_exam ;;
       5) assessment_controller_create_badges ;;
       6) assessment_controller_send_thanks ;;
       0) return 0 ;;
